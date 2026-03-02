@@ -1,6 +1,6 @@
 [project]
 name = "hive-vault"
-version = "0.1.0"
+version = "0.2.0"
 description = "Context infrastructure for AI-assisted development — on-demand Obsidian vault access via MCP"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -32,6 +32,7 @@ dev = [
 
 [project.scripts]
 hive-vault = "hive.vault_server:main"
+hive-worker = "hive.worker_server:main"
 
 [project.urls]
 Homepage = "https://github.com/mlorentedev/hive"

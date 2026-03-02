@@ -24,11 +24,28 @@ def _resolve_openrouter_key() -> str | None:
 
 def _resolve_openrouter_budget() -> float:
     """Monthly budget cap for OpenRouter in USD."""
-    return float(os.environ.get("HIVE_OPENROUTER_BUDGET", "10.0"))
+    return float(os.environ.get("HIVE_OPENROUTER_BUDGET", "5.0"))
 
 
+def _resolve_db_path() -> str:
+    """Resolve SQLite database path for worker budget tracking."""
+    env = os.environ.get("HIVE_DB_PATH")
+    if env:
+        return env
+    return str(Path.home() / ".local" / "share" / "hive" / "worker.db")
+
+
+# Vault config
 VAULT_PATH: Path = _resolve_vault_path()
+
+# Ollama config
 OLLAMA_ENDPOINT: str = _resolve_ollama_endpoint()
+OLLAMA_MODEL: str = os.environ.get("HIVE_OLLAMA_MODEL", "qwen2.5-coder:3b")
+
+# OpenRouter config
 OPENROUTER_API_KEY: str | None = _resolve_openrouter_key()
 OPENROUTER_BUDGET_USD: float = _resolve_openrouter_budget()
-OPENROUTER_MODEL: str = os.environ.get("HIVE_OPENROUTER_MODEL", "qwen/qwen-2.5-coder-32b-instruct")
+OPENROUTER_MODEL: str = os.environ.get("HIVE_OPENROUTER_MODEL", "qwen/qwen3-coder:free")
+
+# Worker config
+DB_PATH: str = _resolve_db_path()

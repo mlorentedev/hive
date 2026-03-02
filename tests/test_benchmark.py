@@ -62,8 +62,7 @@ def bench_vault(mock_vault: Path) -> Path:
 
     # Simulate a realistic 90-lessons.md (~50 lines)
     lessons_content = (
-        "---\nid: testproject-lessons\ntype: lesson\nstatus: active\n---\n\n"
-        "# Lessons\n\n"
+        "---\nid: testproject-lessons\ntype: lesson\nstatus: active\n---\n\n# Lessons\n\n"
     )
     for i in range(10):
         lessons_content += f"## Lesson {i}\n- Detail A\n- Detail B\n\n"
@@ -97,13 +96,13 @@ class TestContextBenchmark:
 
         savings_pct = (1 - ondemand_tokens / static_tokens) * 100
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("CONTEXT BENCHMARK")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"Static load (all sections):  {static_tokens:>6} tokens")
         print(f"On-demand (context only):    {ondemand_tokens:>6} tokens")
         print(f"Savings:                     {savings_pct:>5.1f}%")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         # We should save at least 40% by loading only context
         assert savings_pct > 40, f"Expected >40% savings, got {savings_pct:.1f}%"
@@ -117,20 +116,18 @@ class TestContextBenchmark:
         static_tokens = _count_file_tokens(static_file)
 
         # ON-DEMAND: search for a specific topic
-        result = await mcp.call_tool(
-            "vault_search", {"query": "Task item", "max_lines": 20}
-        )
+        result = await mcp.call_tool("vault_search", {"query": "Task item", "max_lines": 20})
         search_tokens = _tokens(_text(result))
 
         savings_pct = (1 - search_tokens / static_tokens) * 100
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("SEARCH BENCHMARK")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"Static load (all sections):  {static_tokens:>6} tokens")
         print(f"Search (targeted, 20 lines): {search_tokens:>6} tokens")
         print(f"Savings:                     {savings_pct:>5.1f}%")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         assert savings_pct > 60, f"Expected >60% savings, got {savings_pct:.1f}%"
 
@@ -149,30 +146,24 @@ class TestContextBenchmark:
         # ON-DEMAND: context + tasks + search
         total_ondemand = 0
 
-        r1 = await mcp.call_tool(
-            "vault_query", {"project": "testproject", "section": "context"}
-        )
+        r1 = await mcp.call_tool("vault_query", {"project": "testproject", "section": "context"})
         total_ondemand += _tokens(_text(r1))
 
-        r2 = await mcp.call_tool(
-            "vault_query", {"project": "testproject", "section": "tasks"}
-        )
+        r2 = await mcp.call_tool("vault_query", {"project": "testproject", "section": "tasks"})
         total_ondemand += _tokens(_text(r2))
 
-        r3 = await mcp.call_tool(
-            "vault_search", {"query": "Lesson", "max_lines": 10}
-        )
+        r3 = await mcp.call_tool("vault_search", {"query": "Lesson", "max_lines": 10})
         total_ondemand += _tokens(_text(r3))
 
         # On-demand loads MORE than one section but still less than everything
         # The key insight: you only load what you need, when you need it
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("TYPICAL SESSION BENCHMARK")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"Static load (everything):    {static_tokens:>6} tokens")
         print(f"On-demand (3 queries):       {total_ondemand:>6} tokens")
-        print(f"Ratio:                       {total_ondemand/static_tokens:>5.2f}x")
-        print(f"{'='*60}")
+        print(f"Ratio:                       {total_ondemand / static_tokens:>5.2f}x")
+        print(f"{'=' * 60}")
 
         # Even with 3 queries, we should use less than static
         assert total_ondemand < static_tokens

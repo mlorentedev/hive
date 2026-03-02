@@ -87,14 +87,11 @@ def create_server(vault_path: Path | None = None) -> FastMCP:
         for name in projects:
             project_dir = projects_dir / name
             sections = [
-                s
-                for s, filename in SECTION_SHORTCUTS.items()
-                if (project_dir / filename).exists()
+                s for s, filename in SECTION_SHORTCUTS.items() if (project_dir / filename).exists()
             ]
             md_count = len(list(project_dir.rglob("*.md")))
             lines.append(
-                f"- **{name}** — {md_count} files, "
-                f"shortcuts: {', '.join(sections) or 'none'}"
+                f"- **{name}** — {md_count} files, shortcuts: {', '.join(sections) or 'none'}"
             )
 
         return "\n".join(lines)
@@ -124,10 +121,7 @@ def create_server(vault_path: Path | None = None) -> FastMCP:
             filename = SECTION_SHORTCUTS.get(section)
             if filename is None:
                 available = ", ".join(SECTION_SHORTCUTS)
-                return (
-                    f"Section '{section}' not found. "
-                    f"Available shortcuts: {available}"
-                )
+                return f"Section '{section}' not found. Available shortcuts: {available}"
             filepath = project_dir / filename
 
         if not filepath.exists():
@@ -155,9 +149,7 @@ def create_server(vault_path: Path | None = None) -> FastMCP:
                 continue
 
             matching_lines = [
-                line.strip()
-                for line in content.splitlines()
-                if query_lower in line.lower()
+                line.strip() for line in content.splitlines() if query_lower in line.lower()
             ]
             if matching_lines:
                 rel = md_file.relative_to(resolved_path)
@@ -194,8 +186,7 @@ def create_server(vault_path: Path | None = None) -> FastMCP:
                     continue
 
             missing = [
-                s for s, fname in SECTION_SHORTCUTS.items()
-                if not (project_dir / fname).exists()
+                s for s, fname in SECTION_SHORTCUTS.items() if not (project_dir / fname).exists()
             ]
 
             lines.append(f"## {project_dir.name}")
@@ -285,7 +276,7 @@ def create_server(vault_path: Path | None = None) -> FastMCP:
             f"id: {stem}\n"
             f"type: {doc_type}\n"
             f"status: active\n"
-            f"created: \"{date.today().isoformat()}\"\n"
+            f'created: "{date.today().isoformat()}"\n'
             f"---\n\n"
         )
 
