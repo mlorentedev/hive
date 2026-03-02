@@ -19,14 +19,14 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      - name: Install dependencies
-        run: uv pip install -e ".[dev]" --system
+      - name: Create venv and install
+        run: uv venv && uv pip install -e ".[dev]"
 
       - name: Lint
-        run: ruff check src/ tests/
+        run: uv run ruff check src/ tests/
 
       - name: Type check
-        run: mypy src/
+        run: uv run mypy src/
 
       - name: Test
-        run: pytest tests/ -v --cov=hive --cov-report=term-missing
+        run: uv run pytest tests/ -v --cov=hive --cov-report=term-missing
