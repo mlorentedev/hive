@@ -6,14 +6,7 @@ from fastmcp import FastMCP
 
 from hive.budget import BudgetTracker
 from hive.clients import ClientResponse, OllamaClient, OpenRouterClient
-from hive.config import (
-    DB_PATH,
-    OLLAMA_ENDPOINT,
-    OLLAMA_MODEL,
-    OPENROUTER_API_KEY,
-    OPENROUTER_BUDGET_USD,
-    OPENROUTER_MODEL,
-)
+from hive.config import settings
 
 
 def _format_response(resp: ClientResponse) -> str:
@@ -32,13 +25,17 @@ def create_server(
     openrouter_client: OpenRouterClient | None = None,
 ) -> FastMCP:
     """Create and configure the Worker MCP server."""
-    budget = budget_tracker or BudgetTracker(db_path=DB_PATH)
-    ollama = ollama_client or OllamaClient(endpoint=OLLAMA_ENDPOINT, model=OLLAMA_MODEL)
+    budget = budget_tracker or BudgetTracker(db_path=settings.db_path)
+    ollama = ollama_client or OllamaClient(
+        endpoint=settings.ollama_endpoint, model=settings.ollama_model
+    )
     openrouter: OpenRouterClient | None = None
     if openrouter_client is not None:
         openrouter = openrouter_client
-    elif OPENROUTER_API_KEY:
-        openrouter = OpenRouterClient(api_key=OPENROUTER_API_KEY, default_model=OPENROUTER_MODEL)
+    elif settings.openrouter_api_key:
+        openrouter = OpenRouterClient(
+            api_key=settings.openrouter_api_key, default_model=settings.openrouter_model
+        )
 
     mcp = FastMCP("Hive Worker")
 
@@ -97,7 +94,7 @@ def create_server(
         if (
             max_cost_per_request > 0
             and openrouter is not None
-            and budget.can_spend(OPENROUTER_BUDGET_USD, max_cost_per_request)
+            and budget.can_spend(settings.openrouter_budget, max_cost_per_request)
         ):
             try:
                 resp = await openrouter.generate(
@@ -145,7 +142,7 @@ def create_server(
     @mcp.tool
     async def worker_status() -> str:
         """Show worker health: budget, connectivity, usage stats."""
-        stats = budget.month_stats(OPENROUTER_BUDGET_USD)
+        stats = budget.month_stats(settings.openrouter_budget)
         ollama_up = await ollama.is_available()
 
         lines = [
@@ -153,7 +150,7 @@ def create_server(
             "",
             "## Budget",
             f"- Spent this month: ${stats['spent']:.2f}",
-            f"- Remaining: ${stats['remaining']:.2f} / ${OPENROUTER_BUDGET_USD:.1f}",
+            f"- Remaining: ${stats['remaining']:.2f} / ${settings.openrouter_budget:.1f}",
             f"- Requests: {stats['request_count']}",
             "",
             "## Connectivity",
@@ -205,7 +202,7 @@ def create_server(
     ) -> str:
         if openrouter is None:
             return "OpenRouter not configured. Claude should handle this task directly."
-        if not budget.can_spend(OPENROUTER_BUDGET_USD, max_cost):
+        if not budget.can_spend(settings.openrouter_budget, max_cost):
             return "Monthly budget exhausted. Claude should handle this task directly."
         try:
             resp = await openrouter.generate(
