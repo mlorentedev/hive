@@ -33,7 +33,7 @@ class TestOllamaGenerate:
 
     @pytest.mark.asyncio
     async def test_generate_success(self) -> None:
-        client = OllamaClient(endpoint="http://localhost:11434", model="qwen2.5-coder:3b")
+        client = OllamaClient(endpoint="http://localhost:11434", model="qwen2.5-coder:7b")
         mock_resp = _mock_response(
             json_data={
                 "message": {"content": "def hello(): pass"},
@@ -46,7 +46,7 @@ class TestOllamaGenerate:
 
         assert isinstance(result, ClientResponse)
         assert result.text == "def hello(): pass"
-        assert result.model == "qwen2.5-coder:3b"
+        assert result.model == "qwen2.5-coder:7b"
         assert result.tokens == 42
         assert result.cost_usd == 0.0
         assert result.latency_ms == 1500

@@ -40,7 +40,7 @@ VAULT_PATH: Path = _resolve_vault_path()
 
 # Ollama config
 OLLAMA_ENDPOINT: str = _resolve_ollama_endpoint()
-OLLAMA_MODEL: str = os.environ.get("HIVE_OLLAMA_MODEL", "qwen2.5-coder:3b")
+OLLAMA_MODEL: str = os.environ.get("HIVE_OLLAMA_MODEL", "qwen2.5-coder:7b")
 
 # OpenRouter config
 OPENROUTER_API_KEY: str | None = _resolve_openrouter_key()

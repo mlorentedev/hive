@@ -28,7 +28,7 @@ def budget() -> BudgetTracker:
 
 @pytest.fixture
 def ollama() -> OllamaClient:
-    return OllamaClient(endpoint="http://localhost:11434", model="qwen2.5-coder:3b")
+    return OllamaClient(endpoint="http://localhost:11434", model="qwen2.5-coder:7b")
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ class TestDelegateTaskAutoRouting:
         ollama.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=ClientResponse(
                 text="hello world",
-                model="qwen2.5-coder:3b",
+                model="qwen2.5-coder:7b",
                 tokens=10,
                 cost_usd=0.0,
                 latency_ms=200,
@@ -61,7 +61,7 @@ class TestDelegateTaskAutoRouting:
         )
         result = _text(await worker.call_tool("delegate_task", {"prompt": "say hello"}))
         assert "hello world" in result
-        assert "qwen2.5-coder:3b" in result
+        assert "qwen2.5-coder:7b" in result
 
     @pytest.mark.asyncio
     async def test_fallback_to_openrouter_free_when_ollama_down(
@@ -193,7 +193,7 @@ class TestDelegateTaskExplicitModel:
         ollama.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=ClientResponse(
                 text="explicit ollama",
-                model="qwen2.5-coder:3b",
+                model="qwen2.5-coder:7b",
                 tokens=20,
                 cost_usd=0.0,
                 latency_ms=150,
@@ -236,7 +236,7 @@ class TestDelegateTaskRecording:
         ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
         ollama.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=ClientResponse(
-                text="ok", model="qwen2.5-coder:3b", tokens=10, cost_usd=0.0, latency_ms=100
+                text="ok", model="qwen2.5-coder:7b", tokens=10, cost_usd=0.0, latency_ms=100
             )
         )
         await worker.call_tool("delegate_task", {"prompt": "test"})
@@ -267,7 +267,7 @@ class TestListModels:
             ]
         )
         result = _text(await worker.call_tool("list_models", {}))
-        assert "qwen2.5-coder:3b" in result
+        assert "qwen2.5-coder:7b" in result
         assert "qwen/qwen3-coder:free" in result
 
     @pytest.mark.asyncio
