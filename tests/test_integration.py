@@ -25,9 +25,7 @@ class TestWorkflowListThenQuery:
         projects = _text(await mcp.call_tool("vault_list_projects", {}))
         assert "testproject" in projects
 
-        context = _text(
-            await mcp.call_tool("vault_query", {"project": "testproject"})
-        )
+        context = _text(await mcp.call_tool("vault_query", {"project": "testproject"}))
         assert "# Test Project" in context
 
 
@@ -76,9 +74,7 @@ class TestWorkflowUpdateThenSearch:
             },
         )
 
-        search_result = _text(
-            await mcp.call_tool("vault_search", {"query": "Unique Marker 7x9z"})
-        )
+        search_result = _text(await mcp.call_tool("vault_search", {"query": "Unique Marker 7x9z"}))
         assert "90-lessons.md" in search_result
         assert "Unique Marker 7x9z" in search_result
 
@@ -111,9 +107,7 @@ class TestWorkflowCrossProjectAccess:
     async def test_project_and_meta_in_one_session(self, mock_vault: Path) -> None:
         mcp = create_server(vault_path=mock_vault)
 
-        project_ctx = _text(
-            await mcp.call_tool("vault_query", {"project": "testproject"})
-        )
+        project_ctx = _text(await mcp.call_tool("vault_query", {"project": "testproject"}))
         assert "Test Project" in project_ctx
 
         meta_pattern = _text(

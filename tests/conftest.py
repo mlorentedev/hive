@@ -51,15 +51,21 @@ def git_vault(mock_vault: Path) -> Path:
     subprocess.run(["git", "init"], cwd=mock_vault, capture_output=True, check=True)
     subprocess.run(
         ["git", "config", "user.email", "test@test.com"],
-        cwd=mock_vault, capture_output=True, check=True,
+        cwd=mock_vault,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "config", "user.name", "Test"],
-        cwd=mock_vault, capture_output=True, check=True,
+        cwd=mock_vault,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(["git", "add", "."], cwd=mock_vault, capture_output=True, check=True)
     subprocess.run(
         ["git", "commit", "-m", "init"],
-        cwd=mock_vault, capture_output=True, check=True,
+        cwd=mock_vault,
+        capture_output=True,
+        check=True,
     )
     return mock_vault

@@ -66,9 +66,7 @@ class TestVaultQuery:
     # -- Shortcuts (backward compat) --
 
     async def test_shortcut_context(self, vault_mcp: FastMCP) -> None:
-        result = await vault_mcp.call_tool(
-            "vault_query", {"project": "testproject"}
-        )
+        result = await vault_mcp.call_tool("vault_query", {"project": "testproject"})
         assert "# Test Project" in _text(result)
 
     async def test_shortcut_tasks(self, vault_mcp: FastMCP) -> None:
@@ -154,9 +152,7 @@ class TestVaultQuery:
     # -- Error cases --
 
     async def test_missing_project(self, vault_mcp: FastMCP) -> None:
-        result = await vault_mcp.call_tool(
-            "vault_query", {"project": "nonexistent"}
-        )
+        result = await vault_mcp.call_tool("vault_query", {"project": "nonexistent"})
         assert "not found" in _text(result).lower()
 
     async def test_missing_section(self, vault_mcp: FastMCP) -> None:
@@ -171,43 +167,31 @@ class TestVaultQuery:
 
 class TestVaultSearch:
     async def test_finds_matching_content(self, vault_mcp: FastMCP) -> None:
-        result = await vault_mcp.call_tool(
-            "vault_search", {"query": "Task one"}
-        )
+        result = await vault_mcp.call_tool("vault_search", {"query": "Task one"})
         text = _text(result)
         assert "testproject" in text
         assert "11-tasks.md" in text
 
     async def test_case_insensitive(self, vault_mcp: FastMCP) -> None:
-        result = await vault_mcp.call_tool(
-            "vault_search", {"query": "task one"}
-        )
+        result = await vault_mcp.call_tool("vault_search", {"query": "task one"})
         assert "11-tasks.md" in _text(result)
 
     async def test_no_results(self, vault_mcp: FastMCP) -> None:
-        result = await vault_mcp.call_tool(
-            "vault_search", {"query": "xyznonexistent"}
-        )
+        result = await vault_mcp.call_tool("vault_search", {"query": "xyznonexistent"})
         assert "no matches" in _text(result).lower()
 
     async def test_searches_across_files(self, vault_mcp: FastMCP) -> None:
-        result = await vault_mcp.call_tool(
-            "vault_search", {"query": "active"}
-        )
+        result = await vault_mcp.call_tool("vault_search", {"query": "active"})
         text = _text(result)
         assert "00-context.md" in text
         assert "11-tasks.md" in text
 
     async def test_returns_matching_lines(self, vault_mcp: FastMCP) -> None:
-        result = await vault_mcp.call_tool(
-            "vault_search", {"query": "Some lesson"}
-        )
+        result = await vault_mcp.call_tool("vault_search", {"query": "Some lesson"})
         assert "Some lesson" in _text(result)
 
     async def test_max_lines_limits_output(self, vault_mcp: FastMCP) -> None:
-        result = await vault_mcp.call_tool(
-            "vault_search", {"query": "active", "max_lines": 5}
-        )
+        result = await vault_mcp.call_tool("vault_search", {"query": "active", "max_lines": 5})
         text = _text(result)
         assert "truncated" in text.lower()
         content_lines = text.split("[...")[0].strip().splitlines()
@@ -336,7 +320,10 @@ class TestVaultUpdate:
         )
         log = subprocess.run(
             ["git", "log", "--oneline", "-1"],
-            cwd=git_vault, capture_output=True, text=True, check=True,
+            cwd=git_vault,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         assert "testproject" in log.stdout.lower()
 
@@ -430,8 +417,7 @@ class TestVaultCreate:
             },
         )
         filepath = (
-            git_vault / "10_projects" / "testproject"
-            / "50-troubleshooting" / "error-timeout.md"
+            git_vault / "10_projects" / "testproject" / "50-troubleshooting" / "error-timeout.md"
         )
         content = filepath.read_text()
         assert content.startswith("---\n")
@@ -454,7 +440,10 @@ class TestVaultCreate:
         )
         log = subprocess.run(
             ["git", "log", "--oneline", "-1"],
-            cwd=git_vault, capture_output=True, text=True, check=True,
+            cwd=git_vault,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         assert "testproject" in log.stdout.lower()
 
