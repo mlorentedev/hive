@@ -319,5 +319,11 @@ def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
 
 server = create_server()
 
-if __name__ == "__main__":
+
+def main() -> None:
+    """Entry point for the hive-vault CLI command."""
     server.run()
+
+
+if __name__ == "__main__":
+    main()

@@ -19,6 +19,9 @@ dev = [
     "types-PyYAML>=6.0",
 ]
 
+[project.scripts]
+hive-vault = "hive.vault_server:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
