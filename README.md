@@ -1,5 +1,10 @@
 # hive-vault
 
+[![CI](https://github.com/mlorentedev/hive/actions/workflows/ci.yml/badge.svg)](https://github.com/mlorentedev/hive/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/hive-vault)](https://pypi.org/project/hive-vault/)
+[![codecov](https://codecov.io/gh/mlorentedev/hive/graph/badge.svg)](https://codecov.io/gh/mlorentedev/hive)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Context infrastructure for AI-assisted development — on-demand Obsidian vault access via MCP.
 
 ## The Problem
