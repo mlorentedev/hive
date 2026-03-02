@@ -3,6 +3,16 @@ name = "hive"
 version = "0.1.0"
 description = "Vault-native AI orchestration — MCP servers for Claude Code"
 requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "Manuel Lorente" }]
+keywords = ["mcp", "claude-code", "obsidian", "vault", "context-management"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = [
     "fastmcp>=2.0.0",
     "httpx>=0.27.0",
@@ -21,6 +31,11 @@ dev = [
 
 [project.scripts]
 hive-vault = "hive.vault_server:main"
+
+[project.urls]
+Homepage = "https://github.com/mlorentedev/hive"
+Repository = "https://github.com/mlorentedev/hive"
+Issues = "https://github.com/mlorentedev/hive/issues"
 
 [build-system]
 requires = ["hatchling"]
