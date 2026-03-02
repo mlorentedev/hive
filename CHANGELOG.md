@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/mlorentedev/hive/compare/v0.1.0...v0.2.0) (2026-03-02)
+
+
+### Features
+
+* Worker MCP Server — task delegation with budget tracking ([#4](https://github.com/mlorentedev/hive/issues/4)) ([33b7bc3](https://github.com/mlorentedev/hive/commit/33b7bc3349431239ecdccb751ecb87b6d642559c))
+
 ## 0.1.0 (2026-03-02)
 
 
