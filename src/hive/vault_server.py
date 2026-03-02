@@ -12,7 +12,7 @@ from fastmcp import FastMCP
 if TYPE_CHECKING:
     from pathlib import Path
 
-from hive.config import VAULT_PATH
+from hive.config import settings
 
 _VALID_OPERATIONS = {"append", "replace"}
 
@@ -69,7 +69,7 @@ def _validate_frontmatter(content: str) -> str | None:
 
 def create_server(vault_path: Path | None = None) -> FastMCP:
     """Create and configure the Vault MCP server."""
-    resolved_path = vault_path or VAULT_PATH
+    resolved_path = vault_path or settings.vault_path
     mcp = FastMCP("Hive Vault")
 
     @mcp.tool
