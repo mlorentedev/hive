@@ -38,11 +38,19 @@ See ADR: `~/Projects/knowledge/10_projects/hive/30-architecture/adr-001-orchestr
 - All vault writes MUST validate YAML frontmatter
 - Project vault entry: `~/Projects/knowledge/10_projects/hive/`
 
+## Key Modules
+
+| Module | Role |
+|---|---|
+| `src/hive/budget.py` | SQLite budget tracker ($5/mo cap, WAL mode) |
+| `src/hive/clients.py` | Async HTTP clients (Ollama + OpenRouter) |
+
 ## Worker Routing
 
-1. Ollama (homelab, configurable endpoint) → primary, free
-2. OpenRouter Qwen API → fallback, budget-capped
-3. Reject → return error, Claude handles it
+1. Ollama `qwen2.5-coder:7b` (homelab mini PC) → primary, free
+2. OpenRouter `qwen/qwen3-coder:free` → fallback, free tier
+3. OpenRouter paid (DeepSeek) → if `max_cost_per_request > 0` and budget allows
+4. Reject → return error, Claude handles it
 
 ## Verification Commands
 
