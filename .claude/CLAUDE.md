@@ -54,17 +54,17 @@ See ADR: `~/Projects/knowledge/10_projects/hive/30-architecture/adr-001-orchestr
 
 ## Verification Commands
 
+All commands go through the Makefile:
+
 ```bash
-# Lint
-ruff check src/ tests/
-mypy src/
-
-# Tests
-pytest tests/ -v --cov=hive
-
-# Run vault server locally
-python -m hive.vault_server
-
-# Run worker server locally
-python -m hive.worker_server
+make install    # Create venv + install deps
+make lint       # Ruff linter
+make typecheck  # mypy --strict
+make test       # Unit + integration tests (excludes smoke)
+make smoke      # E2E smoke tests (needs Ollama + OPENROUTER_API_KEY)
+make check      # lint + typecheck + test
+make build      # check + uv build
+make run-vault  # Run vault server locally
+make run-worker # Run worker server locally
+make clean      # Remove build artifacts
 ```

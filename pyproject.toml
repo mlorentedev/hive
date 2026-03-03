@@ -63,3 +63,5 @@ warn_unused_configs = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = ["smoke: end-to-end tests against real Ollama/OpenRouter (skip in CI)"]
+addopts = "-m 'not smoke'"
