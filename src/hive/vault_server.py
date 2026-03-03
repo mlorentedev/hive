@@ -3,20 +3,23 @@
 from __future__ import annotations
 
 import subprocess
-from datetime import date
+from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
-import yaml
 from fastmcp import FastMCP
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 from hive.config import settings
+from hive.frontmatter import (
+    _TERMINAL_STATUSES,
+    parse_date,
+    parse_frontmatter,
+    validate_frontmatter,
+)
 
 _VALID_OPERATIONS = {"append", "replace"}
-
-_REQUIRED_FRONTMATTER_FIELDS = {"id", "type", "status"}
 
 SECTION_SHORTCUTS: dict[str, str] = {
     "context": "00-context.md",
@@ -41,30 +44,6 @@ def _truncate(text: str, max_lines: int) -> str:
         return text
     remaining = len(lines) - max_lines
     return "\n".join(lines[:max_lines]) + f"\n\n[... truncated, {remaining} more lines]"
-
-
-def _validate_frontmatter(content: str) -> str | None:
-    """Validate YAML frontmatter. Returns error message or None if valid."""
-    if not content.startswith("---"):
-        return "Content must start with YAML frontmatter (---)."
-
-    parts = content.split("---", 2)
-    if len(parts) < 3:
-        return "Malformed frontmatter: missing closing '---'."
-
-    try:
-        fm = yaml.safe_load(parts[1])
-    except yaml.YAMLError as e:
-        return f"Invalid YAML in frontmatter: {e}"
-
-    if not isinstance(fm, dict):
-        return "Frontmatter must be a YAML mapping."
-
-    missing = _REQUIRED_FRONTMATTER_FIELDS - fm.keys()
-    if missing:
-        return f"Frontmatter missing required fields: {', '.join(sorted(missing))}"
-
-    return None
 
 
 def create_server(vault_path: Path | None = None) -> FastMCP:
@@ -102,6 +81,7 @@ def create_server(vault_path: Path | None = None) -> FastMCP:
         section: str = "context",
         path: str = "",
         max_lines: int = 0,
+        include_metadata: bool = False,
     ) -> str:
         """Read content from a vault project.
 
@@ -110,6 +90,7 @@ def create_server(vault_path: Path | None = None) -> FastMCP:
             section: Shortcut name (context, tasks, roadmap, lessons). Ignored if path is set.
             path: Relative path to a specific .md file within the project. Overrides section.
             max_lines: Maximum lines to return. 0 = unlimited.
+            include_metadata: Prepend a structured metadata line from YAML frontmatter.
         """
         project_dir = _resolve_project_dir(resolved_path, project)
         if project_dir is None:
@@ -129,18 +110,39 @@ def create_server(vault_path: Path | None = None) -> FastMCP:
             return f"'{target}' not found in project '{project}'."
 
         content = filepath.read_text(encoding="utf-8")
+
+        if include_metadata:
+            fm = parse_frontmatter(content)
+            if fm is not None:
+                tags = ", ".join(fm.tags) if fm.tags else "none"
+                meta_line = (
+                    f"**Metadata:** type={fm.type}, status={fm.status}, "
+                    f"tags=[{tags}], created={fm.created}\n\n"
+                )
+                content = meta_line + content
+
         return _truncate(content, max_lines)
 
     @mcp.tool
-    def vault_search(query: str, max_lines: int = 100) -> str:
+    def vault_search(
+        query: str,
+        max_lines: int = 100,
+        type_filter: str = "",
+        status_filter: str = "",
+        tag_filter: str = "",
+    ) -> str:
         """Full-text search across all markdown files in the vault.
 
         Args:
             query: Text to search for (case-insensitive).
             max_lines: Maximum output lines. Default 100.
+            type_filter: Only include files whose frontmatter type matches (e.g. 'adr').
+            status_filter: Only include files whose frontmatter status matches (e.g. 'active').
+            tag_filter: Only include files that have this tag in their frontmatter tags list.
         """
         results: list[str] = []
         query_lower = query.lower()
+        has_filters = bool(type_filter or status_filter or tag_filter)
 
         for md_file in sorted(resolved_path.rglob("*.md")):
             try:
@@ -148,12 +150,27 @@ def create_server(vault_path: Path | None = None) -> FastMCP:
             except (OSError, UnicodeDecodeError):
                 continue
 
+            fm = parse_frontmatter(content)
+
+            if has_filters:
+                if fm is None:
+                    continue
+                if type_filter and fm.type != type_filter:
+                    continue
+                if status_filter and fm.status != status_filter:
+                    continue
+                if tag_filter and tag_filter not in fm.tags:
+                    continue
+
             matching_lines = [
                 line.strip() for line in content.splitlines() if query_lower in line.lower()
             ]
             if matching_lines:
                 rel = md_file.relative_to(resolved_path)
-                results.append(f"### {rel}")
+                meta = ""
+                if fm is not None:
+                    meta = f" [type: {fm.type}, status: {fm.status}]"
+                results.append(f"### {rel}{meta}")
                 for line in matching_lines[:5]:
                     results.append(f"  - {line}")
 
@@ -174,16 +191,31 @@ def create_server(vault_path: Path | None = None) -> FastMCP:
         if not projects:
             return "No projects found in vault."
 
+        stale_threshold = date.today() - timedelta(days=180)
         lines = ["# Vault Health Report", ""]
 
         for project_dir in projects:
             md_files = list(project_dir.rglob("*.md"))
             total_lines = 0
+            stale_files: list[str] = []
+
             for f in md_files:
                 try:
-                    total_lines += len(f.read_text(encoding="utf-8").splitlines())
+                    content = f.read_text(encoding="utf-8")
                 except (OSError, UnicodeDecodeError):
                     continue
+                total_lines += len(content.splitlines())
+
+                fm = parse_frontmatter(content)
+                if fm is not None and fm.status in _TERMINAL_STATUSES:
+                    continue
+
+                created_date = parse_date(fm.created) if fm is not None else None
+                if created_date is None:
+                    created_date = date.fromtimestamp(f.stat().st_mtime)
+
+                if created_date < stale_threshold:
+                    stale_files.append(f.relative_to(project_dir).as_posix())
 
             missing = [
                 s for s, fname in SECTION_SHORTCUTS.items() if not (project_dir / fname).exists()
@@ -194,6 +226,8 @@ def create_server(vault_path: Path | None = None) -> FastMCP:
             lines.append(f"- Total lines: {total_lines}")
             if missing:
                 lines.append(f"- Missing sections: {', '.join(missing)}")
+            if stale_files:
+                lines.append(f"- Stale files (>180d): {', '.join(sorted(stale_files))}")
             lines.append("")
 
         return "\n".join(lines)
@@ -231,7 +265,7 @@ def create_server(vault_path: Path | None = None) -> FastMCP:
         filepath = project_dir / filename
 
         if operation == "replace":
-            error = _validate_frontmatter(content)
+            error = validate_frontmatter(content)
             if error:
                 return f"Frontmatter validation failed: {error}"
 

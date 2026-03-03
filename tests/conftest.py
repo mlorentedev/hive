@@ -42,6 +42,20 @@ def mock_vault(tmp_path: Path) -> Path:
         "# ADR-001: Test Decision\n\nWe decided to test everything.\n"
     )
 
+    # Troubleshooting file (for filter tests)
+    trouble = project / "50-troubleshooting"
+    trouble.mkdir()
+    (trouble / "timeout-fix.md").write_text(
+        "---\nid: timeout-fix\ntype: troubleshooting\nstatus: active\n"
+        "tags: [networking, timeout]\n---\n\n# Timeout Fix\n\nIncrease timeout to 30s.\n"
+    )
+
+    # Lesson with different tags
+    (project / "91-extra-lesson.md").write_text(
+        "---\nid: extra-lesson\ntype: lesson\nstatus: completed\n"
+        "tags: [python]\n---\n\n# Extra Lesson\n\nPython is great.\n"
+    )
+
     return tmp_path
 
 

@@ -161,6 +161,38 @@ class TestVaultQuery:
         )
         assert "not found" in _text(result).lower()
 
+    # -- include_metadata --
+
+    async def test_include_metadata_prepends_line(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_query",
+            {"project": "testproject", "include_metadata": True},
+        )
+        text = _text(result)
+        assert "**Metadata:**" in text
+        assert "type=project" in text
+        assert "status=active" in text
+
+    async def test_include_metadata_false_no_line(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_query",
+            {"project": "testproject", "include_metadata": False},
+        )
+        assert "**Metadata:**" not in _text(result)
+
+    async def test_include_metadata_no_frontmatter(self, mock_vault: Path) -> None:
+        """File without frontmatter should return content without metadata line."""
+        bare = mock_vault / "10_projects" / "testproject" / "bare.md"
+        bare.write_text("# No frontmatter\nJust text.\n")
+        mcp = create_server(vault_path=mock_vault)
+        result = await mcp.call_tool(
+            "vault_query",
+            {"project": "testproject", "path": "bare.md", "include_metadata": True},
+        )
+        text = _text(result)
+        assert "**Metadata:**" not in text
+        assert "No frontmatter" in text
+
 
 # ── vault_search ─────────────────────────────────────────────────────
 
@@ -197,6 +229,74 @@ class TestVaultSearch:
         content_lines = text.split("[...")[0].strip().splitlines()
         assert len(content_lines) == 5
 
+    # -- metadata display --
+
+    async def test_shows_metadata_per_file(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool("vault_search", {"query": "Test Project"})
+        text = _text(result)
+        assert "[type: project, status: active]" in text
+
+    # -- type_filter --
+
+    async def test_type_filter_includes_matching(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_search", {"query": "decided", "type_filter": "adr"}
+        )
+        text = _text(result)
+        assert "adr-001-test" in text
+
+    async def test_type_filter_excludes_non_matching(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_search", {"query": "Test", "type_filter": "adr"}
+        )
+        text = _text(result)
+        assert "00-context.md" not in text
+
+    # -- status_filter --
+
+    async def test_status_filter(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_search", {"query": "Lesson", "status_filter": "completed"}
+        )
+        text = _text(result)
+        assert "extra-lesson" in text
+        assert "90-lessons.md" not in text
+
+    # -- tag_filter --
+
+    async def test_tag_filter_includes_matching(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_search", {"query": "timeout", "tag_filter": "networking"}
+        )
+        text = _text(result)
+        assert "timeout-fix.md" in text
+
+    async def test_tag_filter_excludes_non_matching(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_search", {"query": "active", "tag_filter": "nonexistent-tag"}
+        )
+        assert "no matches" in _text(result).lower()
+
+    # -- combined filters --
+
+    async def test_combined_type_and_tag(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_search",
+            {"query": "Python", "type_filter": "lesson", "tag_filter": "python"},
+        )
+        text = _text(result)
+        assert "extra-lesson" in text
+
+    async def test_filter_skips_files_without_frontmatter(self, mock_vault: Path) -> None:
+        bare = mock_vault / "10_projects" / "testproject" / "bare.md"
+        bare.write_text("# No frontmatter\nSome active content.\n")
+        mcp = create_server(vault_path=mock_vault)
+        result = await mcp.call_tool(
+            "vault_search", {"query": "active", "type_filter": "project"}
+        )
+        text = _text(result)
+        assert "bare.md" not in text
+
 
 # ── vault_health ─────────────────────────────────────────────────────
 
@@ -208,8 +308,8 @@ class TestVaultHealth:
 
     async def test_reports_file_count(self, vault_mcp: FastMCP) -> None:
         result = await vault_mcp.call_tool("vault_health", {})
-        # testproject has 4 files now (context, tasks, lessons, adr-001)
-        assert "4" in _text(result)
+        # testproject has 6 files (context, tasks, lessons, adr-001, timeout-fix, extra-lesson)
+        assert "6" in _text(result)
 
     async def test_reports_total_lines(self, vault_mcp: FastMCP) -> None:
         result = await vault_mcp.call_tool("vault_health", {})
@@ -220,6 +320,57 @@ class TestVaultHealth:
         mcp = create_server(vault_path=tmp_path)
         result = await mcp.call_tool("vault_health", {})
         assert "no projects" in _text(result).lower()
+
+    # -- stale detection --
+
+    async def test_stale_file_detected(self, tmp_path: Path) -> None:
+        project = tmp_path / "10_projects" / "staleproj"
+        project.mkdir(parents=True)
+        (project / "old.md").write_text(
+            '---\nid: old\ntype: lesson\nstatus: active\ncreated: "2024-01-01"\n---\n\n# Old\n'
+        )
+        mcp = create_server(vault_path=tmp_path)
+        result = await mcp.call_tool("vault_health", {})
+        assert "stale files" in _text(result).lower()
+        assert "old.md" in _text(result)
+
+    async def test_terminal_status_not_stale(self, tmp_path: Path) -> None:
+        project = tmp_path / "10_projects" / "termproj"
+        project.mkdir(parents=True)
+        (project / "done.md").write_text(
+            '---\nid: done\ntype: adr\nstatus: completed\ncreated: "2020-01-01"\n---\n\n# Done\n'
+        )
+        mcp = create_server(vault_path=tmp_path)
+        result = await mcp.call_tool("vault_health", {})
+        assert "stale" not in _text(result).lower()
+
+    async def test_recent_file_not_stale(self, tmp_path: Path) -> None:
+        from datetime import date
+
+        project = tmp_path / "10_projects" / "freshproj"
+        project.mkdir(parents=True)
+        today = date.today().isoformat()
+        (project / "fresh.md").write_text(
+            f'---\nid: fresh\ntype: project\nstatus: active\ncreated: "{today}"\n---\n\n# Fresh\n'
+        )
+        mcp = create_server(vault_path=tmp_path)
+        result = await mcp.call_tool("vault_health", {})
+        assert "stale" not in _text(result).lower()
+
+    async def test_stale_fallback_to_mtime(self, tmp_path: Path) -> None:
+        import os
+
+        project = tmp_path / "10_projects" / "mtimeproj"
+        project.mkdir(parents=True)
+        f = project / "no-created.md"
+        f.write_text("---\nid: nc\ntype: lesson\nstatus: active\n---\n\n# No date\n")
+        # Set mtime to 1 year ago
+        old_time = os.path.getmtime(str(f)) - 365 * 86400
+        os.utime(str(f), (old_time, old_time))
+        mcp = create_server(vault_path=tmp_path)
+        result = await mcp.call_tool("vault_health", {})
+        assert "stale files" in _text(result).lower()
+        assert "no-created.md" in _text(result)
 
 
 # ── vault_update (with real YAML frontmatter validation) ─────────────
@@ -385,8 +536,8 @@ class TestVaultCreate:
             "vault_create",
             {
                 "project": "testproject",
-                "path": "91-extra-lesson.md",
-                "content": "# Extra Lesson\n\nLearned something.\n",
+                "path": "92-new-lesson.md",
+                "content": "# New Lesson\n\nLearned something.\n",
                 "doc_type": "lesson",
             },
         )
