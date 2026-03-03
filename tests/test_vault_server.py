@@ -308,8 +308,9 @@ class TestVaultHealth:
 
     async def test_reports_file_count(self, vault_mcp: FastMCP) -> None:
         result = await vault_mcp.call_tool("vault_health", {})
-        # testproject has 6 files (context, tasks, lessons, adr-001, timeout-fix, extra-lesson)
-        assert "6" in _text(result)
+        # testproject has 7 files (context, tasks, lessons, adr-001,
+        # timeout-fix, extra-lesson, large-doc)
+        assert "7" in _text(result)
 
     async def test_reports_total_lines(self, vault_mcp: FastMCP) -> None:
         result = await vault_mcp.call_tool("vault_health", {})
@@ -625,3 +626,207 @@ class TestVaultCreate:
             },
         )
         assert "not found" in _text(result).lower()
+
+
+# ── vault_summarize ──────────────────────────────────────────────────
+
+
+class TestVaultSummarize:
+    async def test_small_file_returns_content(self, vault_mcp: FastMCP) -> None:
+        """Files ≤50 lines return content directly, no delegation prompt."""
+        result = await vault_mcp.call_tool(
+            "vault_summarize", {"project": "testproject", "section": "context"}
+        )
+        text = _text(result)
+        assert "# Test Project" in text
+        assert "delegate_task" not in text
+
+    async def test_small_file_includes_metadata(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_summarize", {"project": "testproject", "section": "context"}
+        )
+        text = _text(result)
+        assert "**Metadata:**" in text
+        assert "type=project" in text
+
+    async def test_large_file_returns_delegation_prompt(self, vault_mcp: FastMCP) -> None:
+        """Files >50 lines return a structured delegation prompt."""
+        result = await vault_mcp.call_tool(
+            "vault_summarize",
+            {"project": "testproject", "path": "92-large-doc.md"},
+        )
+        text = _text(result)
+        assert "delegate_task" in text
+        assert "Summarization Request" in text
+        assert "Document body" in text
+
+    async def test_large_file_includes_metadata_in_prompt(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_summarize",
+            {"project": "testproject", "path": "92-large-doc.md"},
+        )
+        text = _text(result)
+        assert "type=lesson" in text
+        assert "status=active" in text
+
+    async def test_large_file_includes_body(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_summarize",
+            {"project": "testproject", "path": "92-large-doc.md"},
+        )
+        text = _text(result)
+        assert "Line 1:" in text
+        assert "Line 80:" in text
+
+    async def test_custom_max_summary_lines(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_summarize",
+            {"project": "testproject", "path": "92-large-doc.md", "max_summary_lines": 10},
+        )
+        text = _text(result)
+        assert "10 lines" in text
+
+    async def test_default_max_summary_lines(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_summarize",
+            {"project": "testproject", "path": "92-large-doc.md"},
+        )
+        assert "20 lines" in _text(result)
+
+    async def test_missing_project(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_summarize", {"project": "nonexistent"}
+        )
+        assert "not found" in _text(result).lower()
+
+    async def test_missing_file(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_summarize", {"project": "testproject", "path": "nope.md"}
+        )
+        assert "not found" in _text(result).lower()
+
+    async def test_path_overrides_section(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_summarize",
+            {"project": "testproject", "section": "tasks", "path": "92-large-doc.md"},
+        )
+        text = _text(result)
+        assert "Large Document" in text or "delegate_task" in text
+
+    async def test_file_without_frontmatter(self, mock_vault: Path) -> None:
+        bare = mock_vault / "10_projects" / "testproject" / "bare.md"
+        bare.write_text("# Bare\nJust text.\n")
+        mcp = create_server(vault_path=mock_vault)
+        result = await mcp.call_tool(
+            "vault_summarize", {"project": "testproject", "path": "bare.md"}
+        )
+        text = _text(result)
+        assert "# Bare" in text
+        assert "**Metadata:**" not in text
+
+
+# ── vault_smart_search ───────────────────────────────────────────────
+
+
+class TestVaultSmartSearch:
+    async def test_finds_matching_files(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_smart_search", {"query": "Task one"}
+        )
+        text = _text(result)
+        assert "11-tasks.md" in text
+        assert "score:" in text
+
+    async def test_no_results(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_smart_search", {"query": "xyznonexistent"}
+        )
+        assert "no matches" in _text(result).lower()
+
+    async def test_active_ranks_above_terminal(self, vault_mcp: FastMCP) -> None:
+        """Active files should score higher than completed/accepted files."""
+        result = await vault_mcp.call_tool(
+            "vault_smart_search", {"query": "Lesson"}
+        )
+        text = _text(result)
+        lines = text.splitlines()
+        score_lines = [ln for ln in lines if "score:" in ln]
+        # 90-lessons.md (active) should appear before 91-extra-lesson.md (completed)
+        assert len(score_lines) >= 2
+        lessons_idx = next(i for i, ln in enumerate(score_lines) if "90-lessons" in ln)
+        extra_idx = next(i for i, ln in enumerate(score_lines) if "extra-lesson" in ln)
+        assert lessons_idx < extra_idx
+
+    async def test_higher_match_density_ranks_first(self, mock_vault: Path) -> None:
+        """File with more matches should rank higher."""
+        many = mock_vault / "10_projects" / "testproject" / "many-matches.md"
+        many.write_text(
+            "---\nid: many\ntype: lesson\nstatus: active\n---\n\n"
+            "alpha alpha alpha\nalpha again\nalpha more\n"
+        )
+        few = mock_vault / "10_projects" / "testproject" / "few-matches.md"
+        few.write_text(
+            "---\nid: few\ntype: lesson\nstatus: active\n---\n\n"
+            "alpha once\n"
+        )
+        mcp = create_server(vault_path=mock_vault)
+        result = await mcp.call_tool("vault_smart_search", {"query": "alpha"})
+        text = _text(result)
+        score_lines = [ln for ln in text.splitlines() if "score:" in ln]
+        many_idx = next(i for i, ln in enumerate(score_lines) if "many-matches" in ln)
+        few_idx = next(i for i, ln in enumerate(score_lines) if "few-matches" in ln)
+        assert many_idx < few_idx
+
+    async def test_shows_metadata_per_result(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_smart_search", {"query": "Test Project"}
+        )
+        text = _text(result)
+        assert "type=project" in text
+        assert "status=active" in text
+
+    async def test_max_results_limits_output(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_smart_search", {"query": "active", "max_results": 2}
+        )
+        text = _text(result)
+        score_lines = [ln for ln in text.splitlines() if "score:" in ln]
+        assert len(score_lines) <= 2
+
+    async def test_max_lines_truncates(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_smart_search", {"query": "active", "max_lines": 5}
+        )
+        text = _text(result)
+        assert "truncated" in text.lower()
+
+    async def test_case_insensitive(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_smart_search", {"query": "task ONE"}
+        )
+        assert "11-tasks.md" in _text(result)
+
+    async def test_files_without_frontmatter_searchable(self, mock_vault: Path) -> None:
+        bare = mock_vault / "10_projects" / "testproject" / "bare.md"
+        bare.write_text("# Bare\nSearchable bare content.\n")
+        mcp = create_server(vault_path=mock_vault)
+        result = await mcp.call_tool(
+            "vault_smart_search", {"query": "Searchable bare"}
+        )
+        text = _text(result)
+        assert "bare.md" in text
+        assert "score:" in text
+
+    async def test_matching_lines_limited_to_five(self, mock_vault: Path) -> None:
+        lines = ["---\nid: verbose\ntype: lesson\nstatus: active\n---\n"]
+        for i in range(10):
+            lines.append(f"keyword line {i}")
+        (mock_vault / "10_projects" / "testproject" / "verbose.md").write_text(
+            "\n".join(lines) + "\n"
+        )
+        mcp = create_server(vault_path=mock_vault)
+        result = await mcp.call_tool("vault_smart_search", {"query": "keyword"})
+        text = _text(result)
+        # Should show at most 5 matching lines per file
+        match_lines = [ln for ln in text.splitlines() if ln.strip().startswith("- keyword")]
+        assert len(match_lines) <= 5

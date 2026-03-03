@@ -56,6 +56,23 @@ def mock_vault(tmp_path: Path) -> Path:
         "tags: [python]\n---\n\n# Extra Lesson\n\nPython is great.\n"
     )
 
+    # Large document for summarize threshold testing (90 lines)
+    large_lines = [
+        "---",
+        "id: large-doc",
+        "type: lesson",
+        "status: active",
+        'created: "2026-01-15"',
+        "tags: [python, architecture]",
+        "---",
+        "",
+        "# Large Document for Testing",
+        "",
+    ]
+    for i in range(1, 81):
+        large_lines.append(f"Line {i}: This is content line number {i} of the large document.")
+    (project / "92-large-doc.md").write_text("\n".join(large_lines) + "\n")
+
     return tmp_path
 
 
