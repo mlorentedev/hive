@@ -3,6 +3,14 @@ title: Getting Started
 description: Install and configure Hive in under a minute.
 ---
 
+## Prerequisites
+
+- [Claude Code](https://docs.anthropic.com/en/docs/build-with-claude/claude-code/overview) installed
+- An [Obsidian](https://obsidian.md/) vault (or any directory of Markdown files) — see [Vault Structure](/hive/guides/vault-structure/) for the expected layout
+- **Optional for worker delegation:**
+  - [Ollama](https://ollama.com/download) running locally — pull a model with `ollama pull qwen2.5-coder:7b`
+  - [OpenRouter](https://openrouter.ai/) account — create an API key at [openrouter.ai/keys](https://openrouter.ai/keys) (free tier available)
+
 ## Install
 
 Register Hive as an MCP server for Claude Code:
@@ -59,6 +67,7 @@ You should see project counts, file counts, and staleness metrics for each proje
 
 ## Next Steps
 
+- [Use Cases](/hive/guides/use-cases/) — real-world workflows with Hive
 - [Configuration](/hive/configuration/) — full environment variable reference
 - [Vault Tools](/hive/tools/vault/) — all 11 vault tools
 - [Worker Tools](/hive/tools/worker/) — task delegation and routing

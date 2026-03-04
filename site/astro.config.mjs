@@ -23,6 +23,7 @@ export default defineConfig({
 				{
 					label: 'Guides',
 					items: [
+						{ label: 'Use Cases', slug: 'guides/use-cases' },
 						{ label: 'Vault Structure', slug: 'guides/vault-structure' },
 						{ label: 'Worker Routing', slug: 'guides/worker-routing' },
 						{ label: 'Prompts', slug: 'guides/prompts' },

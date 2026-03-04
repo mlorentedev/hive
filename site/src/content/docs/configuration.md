@@ -47,3 +47,27 @@ claude mcp add hive -e VAULT_PATH=$HOME/my-vault -- uvx hive-vault
 ```
 
 Worker tools will still be available but will return "no providers available" when called.
+
+## Setting Up Ollama
+
+[Ollama](https://ollama.com/download) lets you run LLMs locally for free. After installing:
+
+```bash
+# Pull the default model
+ollama pull qwen2.5-coder:7b
+
+# Verify it's running
+curl http://localhost:11434/api/tags
+```
+
+If Ollama runs on a different machine (e.g., a homelab), set `HIVE_OLLAMA_ENDPOINT` to its address.
+
+## Setting Up OpenRouter
+
+[OpenRouter](https://openrouter.ai/) provides access to many models through a single API. Free tier models are available.
+
+1. Create an account at [openrouter.ai](https://openrouter.ai/)
+2. Generate an API key at [openrouter.ai/keys](https://openrouter.ai/keys)
+3. Pass it as `OPENROUTER_API_KEY` when registering the MCP server
+
+The default model (`qwen/qwen3-coder:free`) is free. Paid models are only used when you explicitly set `max_cost_per_request > 0` on `delegate_task` calls, and are capped by `HIVE_OPENROUTER_BUDGET`.
