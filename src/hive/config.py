@@ -16,6 +16,9 @@ class HiveSettings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("HIVE_OPENROUTER_API_KEY", "OPENROUTER_API_KEY"),
     )
+    vault_scopes: dict[str, str] = Field(
+        default={"projects": "10_projects", "meta": "00_meta"},
+    )
     openrouter_budget: float = 5.0
     openrouter_model: str = "qwen/qwen3-coder:free"
     db_path: str = str(Path.home() / ".local" / "share" / "hive" / "worker.db")

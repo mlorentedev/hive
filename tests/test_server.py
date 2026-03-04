@@ -1393,3 +1393,135 @@ class TestWorkerStatus:
         ollama.is_available = AsyncMock(return_value=False)  # type: ignore[method-assign]
         result = _text(await worker.call_tool("worker_status", {}))
         assert "offline" in result.lower() or "unavailable" in result.lower()
+
+
+# ── Multi-scope vault tests ─────────────────────────────────────────
+
+MULTI_SCOPES = {"projects": "10_projects", "meta": "00_meta", "work": "50_work"}
+
+
+class TestMultiScopeListProjects:
+    async def test_lists_from_all_scopes(self, multi_scope_vault: Path) -> None:
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool("vault_list_projects", {}))
+        assert "projects/testproject" in result
+        assert "work/my-company" in result
+
+    async def test_missing_scope_silently_skipped(self, mock_vault: Path) -> None:
+        scopes = {**MULTI_SCOPES, "extra": "99_nonexistent"}
+        mcp = create_server(vault_path=mock_vault, vault_scopes=scopes)
+        result = _text(await mcp.call_tool("vault_list_projects", {}))
+        assert "projects/testproject" in result
+        assert "99_nonexistent" not in result
+
+    async def test_backward_compat(self, mock_vault: Path) -> None:
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool("vault_list_projects", {}))
+        assert "testproject" in result
+
+
+class TestMultiScopeQuery:
+    async def test_auto_scan_finds_work_project(self, multi_scope_vault: Path) -> None:
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool(
+            "vault_query", {"project": "my-company", "section": "context"},
+        ))
+        assert "My Company" in result
+
+    async def test_explicit_scope(self, multi_scope_vault: Path) -> None:
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool(
+            "vault_query", {"project": "work:my-company", "section": "context"},
+        ))
+        assert "My Company" in result
+
+    async def test_explicit_wrong_scope(self, multi_scope_vault: Path) -> None:
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool(
+            "vault_query", {"project": "projects:my-company", "section": "context"},
+        ))
+        assert "not found" in result.lower()
+
+    async def test_first_match_wins(self, multi_scope_vault: Path) -> None:
+        # Create a duplicate project name in the work scope
+        dup = multi_scope_vault / "50_work" / "testproject"
+        dup.mkdir(parents=True)
+        (dup / "00-context.md").write_text(
+            "---\nid: testproject-work\ntype: project\nstatus: active\n---\n\n"
+            "# Work Copy\n"
+        )
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool(
+            "vault_query", {"project": "testproject", "section": "context"},
+        ))
+        # projects scope comes first → should find the original, not "Work Copy"
+        assert "Test Project" in result
+
+    async def test_meta_still_works(self, multi_scope_vault: Path) -> None:
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool(
+            "vault_query", {"project": "_meta", "path": "patterns/pattern-tdd.md"},
+        ))
+        assert "Test-Driven Development" in result
+
+
+class TestMultiScopeHealth:
+    async def test_reports_across_scopes(self, multi_scope_vault: Path) -> None:
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool("vault_health", {}))
+        assert "testproject" in result
+        assert "my-company" in result
+
+
+class TestMultiScopeUpdate:
+    async def test_update_work_project(self, git_multi_scope_vault: Path) -> None:
+        mcp = create_server(
+            vault_path=git_multi_scope_vault, vault_scopes=MULTI_SCOPES,
+        )
+        result = _text(await mcp.call_tool("vault_update", {
+            "project": "my-company",
+            "section": "lessons",
+            "operation": "append",
+            "content": "\n## New Lesson\nAlways test.\n",
+        }))
+        assert "Updated" in result
+        content = (
+            git_multi_scope_vault / "50_work" / "my-company" / "90-lessons.md"
+        ).read_text()
+        assert "Always test" in content
+
+
+class TestMultiScopeRecent:
+    async def test_project_filter_in_work_scope(
+        self, git_multi_scope_vault: Path,
+    ) -> None:
+        mcp = create_server(
+            vault_path=git_multi_scope_vault, vault_scopes=MULTI_SCOPES,
+        )
+        result = _text(await mcp.call_tool(
+            "vault_recent", {"project": "my-company", "since_days": 30},
+        ))
+        # Should find files in 50_work/my-company, not return "No changes"
+        assert "my-company" in result or "50_work" in result
+
+
+class TestSectionFallback:
+    async def test_bare_name_takes_priority(self, mock_vault: Path) -> None:
+        # Create a bare context.md alongside the legacy 00-context.md
+        project = mock_vault / "10_projects" / "testproject"
+        (project / "context.md").write_text(
+            "---\nid: bare-context\ntype: project\nstatus: active\n---\n\n"
+            "# Bare Context\n"
+        )
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool(
+            "vault_query", {"project": "testproject", "section": "context"},
+        ))
+        assert "Bare Context" in result
+
+    async def test_legacy_fallback(self, mock_vault: Path) -> None:
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool(
+            "vault_query", {"project": "testproject", "section": "context"},
+        ))
+        assert "Test Project" in result

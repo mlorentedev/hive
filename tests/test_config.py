@@ -54,6 +54,24 @@ class TestEnvOverride:
         assert HiveSettings().vault_path == Path("/tmp/vault")
 
 
+class TestVaultScopes:
+    def test_default_scopes(self) -> None:
+        s = HiveSettings()
+        assert s.vault_scopes == {"projects": "10_projects", "meta": "00_meta"}
+
+    def test_scopes_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(
+            "HIVE_VAULT_SCOPES",
+            '{"projects": "10_projects", "meta": "00_meta", "work": "50_work"}',
+        )
+        s = HiveSettings()
+        assert s.vault_scopes == {
+            "projects": "10_projects",
+            "meta": "00_meta",
+            "work": "50_work",
+        }
+
+
 class TestValidation:
     def test_invalid_budget_type_raises(self) -> None:
         with pytest.raises(ValidationError):

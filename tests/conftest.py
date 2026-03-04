@@ -80,6 +80,54 @@ def mock_vault(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def multi_scope_vault(mock_vault: Path) -> Path:
+    """Extend mock_vault with a 50_work scope containing a company project."""
+    company = mock_vault / "50_work" / "my-company"
+    company.mkdir(parents=True)
+
+    (company / "00-context.md").write_text(
+        "---\nid: my-company\ntype: project\nstatus: active\n---\n\n"
+        "# My Company\n\nProfessional project.\n"
+    )
+    (company / "11-tasks.md").write_text(
+        "---\nid: my-company-tasks\ntype: project-tasks\nstatus: active\n---\n\n"
+        "# My Company: Tasks\n\n- [ ] Ship feature\n"
+    )
+    (company / "90-lessons.md").write_text(
+        "---\nid: my-company-lessons\ntype: lesson\nstatus: active\n---\n\n"
+        "# My Company: Lessons\n\n## Entry 1\nDeploy on Fridays.\n"
+    )
+
+    return mock_vault
+
+
+@pytest.fixture
+def git_multi_scope_vault(multi_scope_vault: Path) -> Path:
+    """Multi-scope vault that is also a git repo (for write operations)."""
+    subprocess.run(["git", "init"], cwd=multi_scope_vault, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=multi_scope_vault,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=multi_scope_vault,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(["git", "add", "."], cwd=multi_scope_vault, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=multi_scope_vault,
+        capture_output=True,
+        check=True,
+    )
+    return multi_scope_vault
+
+
+@pytest.fixture
 def git_vault(mock_vault: Path) -> Path:
     """Create a mock vault that is also a git repo (for write operations)."""
     subprocess.run(["git", "init"], cwd=mock_vault, capture_output=True, check=True)

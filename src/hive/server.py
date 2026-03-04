@@ -34,10 +34,55 @@ SECTION_SHORTCUTS: dict[str, str] = {
 }
 
 
-def _resolve_project_dir(vault: Path, project: str) -> Path | None:
-    """Resolve a project slug to its directory. '_meta' maps to 00_meta/."""
-    d = vault / "00_meta" if project == "_meta" else vault / "10_projects" / project
-    return d if d.is_dir() else None
+_DEFAULT_SCOPES: dict[str, str] = {"projects": "10_projects", "meta": "00_meta"}
+
+
+def _parse_project_ref(project: str) -> tuple[str | None, str]:
+    """Split 'scope:project' into (scope, project). Plain 'project' → (None, project)."""
+    if ":" in project:
+        scope, _, slug = project.partition(":")
+        return scope, slug
+    return None, project
+
+
+def _resolve_project_dir(
+    vault: Path, project: str, scopes: dict[str, str] | None = None,
+) -> tuple[Path, str] | None:
+    """Resolve a project slug to (directory, scope_name).
+
+    - ``_meta`` maps to the meta scope root (backward compat).
+    - ``scope:project`` targets a specific scope.
+    - Plain ``project`` auto-scans all scopes, first match wins.
+    """
+    scopes = scopes or _DEFAULT_SCOPES
+
+    # _meta special case → meta scope root
+    if project == "_meta":
+        meta_dir_name = scopes.get("meta", "00_meta")
+        d = vault / meta_dir_name
+        return (d, "meta") if d.is_dir() else None
+
+    explicit_scope, slug = _parse_project_ref(project)
+
+    if explicit_scope is not None:
+        dir_name = scopes.get(explicit_scope)
+        if dir_name is None:
+            return None
+        d = vault / dir_name / slug
+        return (d, explicit_scope) if d.is_dir() else None
+
+    # Auto-scan: iterate scopes, first match wins, skip missing dirs
+    for scope_name, dir_name in scopes.items():
+        if scope_name == "meta":
+            continue  # meta is not a project container
+        scope_dir = vault / dir_name
+        if not scope_dir.is_dir():
+            continue
+        d = scope_dir / slug
+        if d.is_dir():
+            return (d, scope_name)
+
+    return None
 
 
 def _truncate(text: str, max_lines: int) -> str:
@@ -52,12 +97,17 @@ def _truncate(text: str, max_lines: int) -> str:
 
 
 def _resolve_file(
-    vault: Path, project: str, section: str, path: str
+    vault: Path,
+    project: str,
+    section: str,
+    path: str,
+    scopes: dict[str, str] | None = None,
 ) -> Path | str:
     """Resolve a vault file from project + section/path. Returns Path or error string."""
-    project_dir = _resolve_project_dir(vault, project)
-    if project_dir is None:
+    result = _resolve_project_dir(vault, project, scopes)
+    if result is None:
         return f"Project '{project}' not found in vault."
+    project_dir, _ = result
 
     if path:
         filepath = project_dir / path
@@ -66,7 +116,9 @@ def _resolve_file(
         if filename is None:
             available = ", ".join(SECTION_SHORTCUTS)
             return f"Section '{section}' not found. Available shortcuts: {available}"
-        filepath = project_dir / filename
+        # Convention-first: try bare name (e.g. context.md) before legacy (00-context.md)
+        bare = project_dir / f"{section}.md"
+        filepath = bare if bare.exists() else project_dir / filename
 
     if not filepath.exists():
         target = path or section
@@ -147,9 +199,11 @@ def create_server(
     budget_tracker: BudgetTracker | None = None,
     ollama_client: OllamaClient | None = None,
     openrouter_client: OpenRouterClient | None = None,
+    vault_scopes: dict[str, str] | None = None,
 ) -> FastMCP:
     """Create and configure the Hive MCP server."""
     resolved_path = vault_path or settings.vault_path
+    scopes = vault_scopes or settings.vault_scopes
     tracker = usage_tracker or UsageTracker()
     budget = budget_tracker or BudgetTracker(db_path=settings.db_path)
     ollama = ollama_client or OllamaClient(
@@ -174,88 +228,93 @@ def create_server(
     @mcp.resource("hive://projects")
     def projects_resource() -> str:
         """List all vault projects with file counts and available shortcuts."""
-        projects_dir = resolved_path / "10_projects"
-        if not projects_dir.is_dir():
-            return "No projects found — 10_projects/ directory does not exist."
-
-        projects = sorted(d.name for d in projects_dir.iterdir() if d.is_dir())
-        if not projects:
-            return "No projects found in 10_projects/."
-
         lines = ["# Vault Projects", ""]
-        for name in projects:
-            project_dir = projects_dir / name
-            sections = [
-                s for s, filename in SECTION_SHORTCUTS.items()
-                if (project_dir / filename).exists()
-            ]
-            md_count = len(list(project_dir.rglob("*.md")))
-            lines.append(
-                f"- **{name}** — {md_count} files, shortcuts: "
-                f"{', '.join(sections) or 'none'}"
-            )
+        found_any = False
+        for scope_name, dir_name in scopes.items():
+            if scope_name == "meta":
+                continue
+            scope_dir = resolved_path / dir_name
+            if not scope_dir.is_dir():
+                continue
+            projects = sorted(d for d in scope_dir.iterdir() if d.is_dir())
+            for project_dir in projects:
+                found_any = True
+                sections = [
+                    s for s, filename in SECTION_SHORTCUTS.items()
+                    if (project_dir / filename).exists()
+                ]
+                md_count = len(list(project_dir.rglob("*.md")))
+                lines.append(
+                    f"- **{scope_name}/{project_dir.name}** — {md_count} files, "
+                    f"shortcuts: {', '.join(sections) or 'none'}"
+                )
 
+        if not found_any:
+            return "No projects found in vault."
         return "\n".join(lines)
 
     @mcp.resource("hive://health")
     def health_resource() -> str:
         """Vault health metrics for all projects."""
-        projects_dir = resolved_path / "10_projects"
-        if not projects_dir.is_dir():
-            return "No projects found — 10_projects/ does not exist."
-
-        projects = sorted(d for d in projects_dir.iterdir() if d.is_dir())
-        if not projects:
-            return "No projects found in vault."
-
         stale_threshold = date.today() - timedelta(days=180)
         lines = ["# Vault Health Report", ""]
+        found_any = False
 
-        for project_dir in projects:
-            md_files = list(project_dir.rglob("*.md"))
-            total_lines = 0
-            stale_files: list[str] = []
+        for scope_name, dir_name in scopes.items():
+            if scope_name == "meta":
+                continue
+            scope_dir = resolved_path / dir_name
+            if not scope_dir.is_dir():
+                continue
+            projects = sorted(d for d in scope_dir.iterdir() if d.is_dir())
+            for project_dir in projects:
+                found_any = True
+                md_files = list(project_dir.rglob("*.md"))
+                total_lines = 0
+                stale_files: list[str] = []
 
-            for f in md_files:
-                try:
-                    content = f.read_text(encoding="utf-8")
-                except (OSError, UnicodeDecodeError):
-                    continue
-                total_lines += len(content.splitlines())
+                for f in md_files:
+                    try:
+                        content = f.read_text(encoding="utf-8")
+                    except (OSError, UnicodeDecodeError):
+                        continue
+                    total_lines += len(content.splitlines())
 
-                fm = parse_frontmatter(content)
-                if fm is not None and fm.status in _TERMINAL_STATUSES:
-                    continue
+                    fm = parse_frontmatter(content)
+                    if fm is not None and fm.status in _TERMINAL_STATUSES:
+                        continue
 
-                created_date = parse_date(fm.created) if fm is not None else None
-                if created_date is None:
-                    created_date = date.fromtimestamp(f.stat().st_mtime)
+                    created_date = parse_date(fm.created) if fm is not None else None
+                    if created_date is None:
+                        created_date = date.fromtimestamp(f.stat().st_mtime)
 
-                if created_date < stale_threshold:
-                    stale_files.append(f.relative_to(project_dir).as_posix())
+                    if created_date < stale_threshold:
+                        stale_files.append(f.relative_to(project_dir).as_posix())
 
-            missing = [
-                s for s, fname in SECTION_SHORTCUTS.items()
-                if not (project_dir / fname).exists()
-            ]
+                missing = [
+                    s for s, fname in SECTION_SHORTCUTS.items()
+                    if not (project_dir / fname).exists()
+                ]
 
-            lines.append(f"## {project_dir.name}")
-            lines.append(f"- Files: {len(md_files)}")
-            lines.append(f"- Total lines: {total_lines}")
-            if missing:
-                lines.append(f"- Missing sections: {', '.join(missing)}")
-            if stale_files:
-                lines.append(
-                    f"- Stale files (>180d): {', '.join(sorted(stale_files))}"
-                )
-            lines.append("")
+                lines.append(f"## {scope_name}/{project_dir.name}")
+                lines.append(f"- Files: {len(md_files)}")
+                lines.append(f"- Total lines: {total_lines}")
+                if missing:
+                    lines.append(f"- Missing sections: {', '.join(missing)}")
+                if stale_files:
+                    lines.append(
+                        f"- Stale files (>180d): {', '.join(sorted(stale_files))}"
+                    )
+                lines.append("")
 
+        if not found_any:
+            return "No projects found in vault."
         return "\n".join(lines)
 
     @mcp.resource("hive://projects/{project}/context")
     def context_resource(project: str) -> str:
         """Project context document (00-context.md)."""
-        result = _resolve_file(resolved_path, project, "context", "")
+        result = _resolve_file(resolved_path, project, "context", "", scopes)
         if isinstance(result, str):
             return result
         return _truncate(result.read_text(encoding="utf-8"), 200)
@@ -263,7 +322,7 @@ def create_server(
     @mcp.resource("hive://projects/{project}/tasks")
     def tasks_resource(project: str) -> str:
         """Project task backlog (11-tasks.md)."""
-        result = _resolve_file(resolved_path, project, "tasks", "")
+        result = _resolve_file(resolved_path, project, "tasks", "", scopes)
         if isinstance(result, str):
             return result
         return _truncate(result.read_text(encoding="utf-8"), 200)
@@ -271,7 +330,7 @@ def create_server(
     @mcp.resource("hive://projects/{project}/lessons")
     def lessons_resource(project: str) -> str:
         """Project lessons learned (90-lessons.md)."""
-        result = _resolve_file(resolved_path, project, "lessons", "")
+        result = _resolve_file(resolved_path, project, "lessons", "", scopes)
         if isinstance(result, str):
             return result
         return _truncate(result.read_text(encoding="utf-8"), 200)
@@ -496,27 +555,29 @@ Total estimated savings: ~C tokens
     @mcp.tool
     def vault_list_projects() -> str:
         """List all projects available in the Obsidian vault."""
-        projects_dir = resolved_path / "10_projects"
-        if not projects_dir.is_dir():
-            return _track("vault_list_projects",
-                          "No projects found — 10_projects/ directory does not exist.")
-
-        projects = sorted(d.name for d in projects_dir.iterdir() if d.is_dir())
-        if not projects:
-            return _track("vault_list_projects",
-                          "No projects found in 10_projects/.")
-
         lines = ["# Vault Projects", ""]
-        for name in projects:
-            project_dir = projects_dir / name
-            sections = [
-                s for s, filename in SECTION_SHORTCUTS.items() if (project_dir / filename).exists()
-            ]
-            md_count = len(list(project_dir.rglob("*.md")))
-            lines.append(
-                f"- **{name}** — {md_count} files, shortcuts: {', '.join(sections) or 'none'}"
-            )
+        found_any = False
+        for scope_name, dir_name in scopes.items():
+            if scope_name == "meta":
+                continue
+            scope_dir = resolved_path / dir_name
+            if not scope_dir.is_dir():
+                continue
+            projects = sorted(d for d in scope_dir.iterdir() if d.is_dir())
+            for project_dir in projects:
+                found_any = True
+                sections = [
+                    s for s, filename in SECTION_SHORTCUTS.items()
+                    if (project_dir / filename).exists()
+                ]
+                md_count = len(list(project_dir.rglob("*.md")))
+                lines.append(
+                    f"- **{scope_name}/{project_dir.name}** — {md_count} files, "
+                    f"shortcuts: {', '.join(sections) or 'none'}"
+                )
 
+        if not found_any:
+            return _track("vault_list_projects", "No projects found in vault.")
         return _track("vault_list_projects", "\n".join(lines))
 
     @mcp.tool
@@ -536,7 +597,7 @@ Total estimated savings: ~C tokens
             max_lines: Maximum lines to return. 0 = unlimited.
             include_metadata: Prepend a structured metadata line from YAML frontmatter.
         """
-        result = _resolve_file(resolved_path, project, section, path)
+        result = _resolve_file(resolved_path, project, section, path, scopes)
         if isinstance(result, str):
             return _track("vault_query", result, project)
         filepath = result
@@ -615,54 +676,59 @@ Total estimated savings: ~C tokens
     @mcp.tool
     def vault_health() -> str:
         """Return health metrics for all vault projects."""
-        projects_dir = resolved_path / "10_projects"
-        if not projects_dir.is_dir():
-            return _track("vault_health",
-                          "No projects found — 10_projects/ does not exist.")
-
-        projects = sorted(d for d in projects_dir.iterdir() if d.is_dir())
-        if not projects:
-            return _track("vault_health", "No projects found in vault.")
-
         stale_threshold = date.today() - timedelta(days=180)
         lines = ["# Vault Health Report", ""]
+        found_any = False
 
-        for project_dir in projects:
-            md_files = list(project_dir.rglob("*.md"))
-            total_lines = 0
-            stale_files: list[str] = []
+        for scope_name, dir_name in scopes.items():
+            if scope_name == "meta":
+                continue
+            scope_dir = resolved_path / dir_name
+            if not scope_dir.is_dir():
+                continue
+            projects = sorted(d for d in scope_dir.iterdir() if d.is_dir())
+            for project_dir in projects:
+                found_any = True
+                md_files = list(project_dir.rglob("*.md"))
+                total_lines = 0
+                stale_files: list[str] = []
 
-            for f in md_files:
-                try:
-                    content = f.read_text(encoding="utf-8")
-                except (OSError, UnicodeDecodeError):
-                    continue
-                total_lines += len(content.splitlines())
+                for f in md_files:
+                    try:
+                        content = f.read_text(encoding="utf-8")
+                    except (OSError, UnicodeDecodeError):
+                        continue
+                    total_lines += len(content.splitlines())
 
-                fm = parse_frontmatter(content)
-                if fm is not None and fm.status in _TERMINAL_STATUSES:
-                    continue
+                    fm = parse_frontmatter(content)
+                    if fm is not None and fm.status in _TERMINAL_STATUSES:
+                        continue
 
-                created_date = parse_date(fm.created) if fm is not None else None
-                if created_date is None:
-                    created_date = date.fromtimestamp(f.stat().st_mtime)
+                    created_date = parse_date(fm.created) if fm is not None else None
+                    if created_date is None:
+                        created_date = date.fromtimestamp(f.stat().st_mtime)
 
-                if created_date < stale_threshold:
-                    stale_files.append(f.relative_to(project_dir).as_posix())
+                    if created_date < stale_threshold:
+                        stale_files.append(f.relative_to(project_dir).as_posix())
 
-            missing = [
-                s for s, fname in SECTION_SHORTCUTS.items() if not (project_dir / fname).exists()
-            ]
+                missing = [
+                    s for s, fname in SECTION_SHORTCUTS.items()
+                    if not (project_dir / fname).exists()
+                ]
 
-            lines.append(f"## {project_dir.name}")
-            lines.append(f"- Files: {len(md_files)}")
-            lines.append(f"- Total lines: {total_lines}")
-            if missing:
-                lines.append(f"- Missing sections: {', '.join(missing)}")
-            if stale_files:
-                lines.append(f"- Stale files (>180d): {', '.join(sorted(stale_files))}")
-            lines.append("")
+                lines.append(f"## {scope_name}/{project_dir.name}")
+                lines.append(f"- Files: {len(md_files)}")
+                lines.append(f"- Total lines: {total_lines}")
+                if missing:
+                    lines.append(f"- Missing sections: {', '.join(missing)}")
+                if stale_files:
+                    lines.append(
+                        f"- Stale files (>180d): {', '.join(sorted(stale_files))}"
+                    )
+                lines.append("")
 
+        if not found_any:
+            return _track("vault_health", "No projects found in vault.")
         return _track("vault_health", "\n".join(lines))
 
     @mcp.tool
@@ -686,10 +752,11 @@ Total estimated savings: ~C tokens
                 f"Valid operations: {', '.join(sorted(_VALID_OPERATIONS))}"
             ), project)
 
-        project_dir = resolved_path / "10_projects" / project
-        if not project_dir.is_dir():
+        resolved = _resolve_project_dir(resolved_path, project, scopes)
+        if resolved is None:
             return _track("vault_update",
                           f"Project '{project}' not found in vault.", project)
+        project_dir, _ = resolved
 
         filename = SECTION_SHORTCUTS.get(section)
         if filename is None:
@@ -732,10 +799,11 @@ Total estimated savings: ~C tokens
             content: Markdown body (frontmatter will be auto-generated).
             doc_type: Document type for frontmatter (adr, lesson, pattern, troubleshooting, etc.).
         """
-        project_dir = _resolve_project_dir(resolved_path, project)
-        if project_dir is None:
+        resolved = _resolve_project_dir(resolved_path, project, scopes)
+        if resolved is None:
             return _track("vault_create",
                           f"Project '{project}' not found in vault.", project)
+        project_dir, _ = resolved
 
         filepath = project_dir / path
         if filepath.exists():
@@ -782,7 +850,7 @@ Total estimated savings: ~C tokens
             path: Relative path to a .md file. Overrides section.
             max_summary_lines: Target summary length for delegation prompt.
         """
-        result = _resolve_file(resolved_path, project, section, path)
+        result = _resolve_file(resolved_path, project, section, path, scopes)
         if isinstance(result, str):
             return _track("vault_summarize", result, project)
         filepath = result
@@ -863,16 +931,17 @@ Total estimated savings: ~C tokens
         Args:
             project: Project slug (directory under 10_projects/).
         """
-        project_dir = _resolve_project_dir(resolved_path, project)
-        if project_dir is None:
+        resolved = _resolve_project_dir(resolved_path, project, scopes)
+        if resolved is None:
             return _track("session_briefing",
                           f"Project '{project}' not found.", project)
+        project_dir, _ = resolved
 
         parts: list[str] = [f"# Session Briefing — {project}", ""]
 
         # Active Tasks
         parts.append("## Active Tasks")
-        task_result = _resolve_file(resolved_path, project, "tasks", "")
+        task_result = _resolve_file(resolved_path, project, "tasks", "", scopes)
         if isinstance(task_result, str):
             parts.append("(not available)")
         else:
@@ -881,7 +950,7 @@ Total estimated savings: ~C tokens
 
         # Recent Lessons (last 30 lines)
         parts.append("## Recent Lessons")
-        lessons_result = _resolve_file(resolved_path, project, "lessons", "")
+        lessons_result = _resolve_file(resolved_path, project, "lessons", "", scopes)
         if isinstance(lessons_result, str):
             parts.append("(not available)")
         else:
@@ -949,8 +1018,12 @@ Total estimated savings: ~C tokens
 
         # Filter to project if specified
         if project:
-            prefix = f"10_projects/{project}/"
-            git_paths = {p for p in git_paths if p.startswith(prefix)}
+            resolved = _resolve_project_dir(resolved_path, project, scopes)
+            if resolved is not None:
+                prefix = resolved[0].relative_to(resolved_path).as_posix() + "/"
+                git_paths = {p for p in git_paths if p.startswith(prefix)}
+            else:
+                git_paths = set()
 
         if not git_paths:
             return _track("vault_recent",
