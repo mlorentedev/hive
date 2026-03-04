@@ -19,7 +19,9 @@ class TestDefaults:
     def test_ollama_model_default(self) -> None:
         assert HiveSettings().ollama_model == "qwen2.5-coder:7b"
 
-    def test_openrouter_api_key_default_none(self) -> None:
+    def test_openrouter_api_key_default_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.delenv("HIVE_OPENROUTER_API_KEY", raising=False)
         assert HiveSettings().openrouter_api_key is None
 
     def test_openrouter_budget_default(self) -> None:
