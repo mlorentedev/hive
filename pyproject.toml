@@ -1,6 +1,6 @@
 [project]
 name = "hive-vault"
-version = "0.2.0"
+version = "0.3.0"
 description = "Context infrastructure for AI-assisted development — on-demand Obsidian vault access via MCP"
 readme = "README.md"
 requires-python = ">=3.12"

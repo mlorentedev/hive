@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.0](https://github.com/mlorentedev/hive/compare/v0.2.0...v0.3.0) (2026-03-04)
+
+
+### Features
+
+* add end-to-end smoke tests for worker MCP server ([aa91264](https://github.com/mlorentedev/hive/commit/aa9126427ca42879c956a2b0850bc8e48fa435e2))
+* Phase 3.0 — frontmatter parsing, metadata filters, stale detection ([efca6bc](https://github.com/mlorentedev/hive/commit/efca6bc875a61a16843b2f41ddb58452df9e38bf))
+* Phase 3.1 — vault_summarize and vault_smart_search tools ([36381a2](https://github.com/mlorentedev/hive/commit/36381a2ce8158b20cd8d8d3e80814d6be1315fcc))
+* Phase 3.2 — usage tracking, vault_usage tool, ADR-003 ([22f41ac](https://github.com/mlorentedev/hive/commit/22f41acffb5419db99f20f001c25a2d431821549))
+* Phase 5 — MCP resources, session_briefing, vault_recent ([00d80a6](https://github.com/mlorentedev/hive/commit/00d80a65effc4695ce8b38fe4fd6d845ea58939a))
+
+
+### Bug Fixes
+
+* isolate openrouter_api_key test from environment ([b26ede4](https://github.com/mlorentedev/hive/commit/b26ede4df69b046273c84d62efb098eabe518505))
+* move Path import to TYPE_CHECKING block in smoke tests ([5daf42e](https://github.com/mlorentedev/hive/commit/5daf42e824a752ac528bc7f669ae17e3ee5a0bcc))
+
 ## [0.2.0](https://github.com/mlorentedev/hive/compare/v0.1.0...v0.2.0) (2026-03-02)
 
 
