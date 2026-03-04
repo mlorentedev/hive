@@ -20,6 +20,7 @@ from hive.frontmatter import (
     parse_frontmatter,
     validate_frontmatter,
 )
+from hive.usage import UsageTracker
 
 _VALID_OPERATIONS = {"append", "replace"}
 
@@ -128,10 +129,19 @@ def _score_file(match_count: int, fm: Frontmatter | None, today: date) -> float:
     return match_count * status_weight + recency_bonus
 
 
-def create_server(vault_path: Path | None = None) -> FastMCP:
+def create_server(
+    vault_path: Path | None = None,
+    usage_tracker: UsageTracker | None = None,
+) -> FastMCP:
     """Create and configure the Vault MCP server."""
     resolved_path = vault_path or settings.vault_path
+    tracker = usage_tracker or UsageTracker()
     mcp = FastMCP("Hive Vault")
+
+    def _track(tool: str, result: str, project: str = "") -> str:
+        """Log a tool call and return the result unchanged."""
+        tracker.log_call(tool, project, len(result.splitlines()))
+        return result
 
     # ── Resources ────────────────────────────────────────────────────────
 
@@ -462,11 +472,13 @@ Total estimated savings: ~C tokens
         """List all projects available in the Obsidian vault."""
         projects_dir = resolved_path / "10_projects"
         if not projects_dir.is_dir():
-            return "No projects found — 10_projects/ directory does not exist."
+            return _track("vault_list_projects",
+                          "No projects found — 10_projects/ directory does not exist.")
 
         projects = sorted(d.name for d in projects_dir.iterdir() if d.is_dir())
         if not projects:
-            return "No projects found in 10_projects/."
+            return _track("vault_list_projects",
+                          "No projects found in 10_projects/.")
 
         lines = ["# Vault Projects", ""]
         for name in projects:
@@ -479,7 +491,7 @@ Total estimated savings: ~C tokens
                 f"- **{name}** — {md_count} files, shortcuts: {', '.join(sections) or 'none'}"
             )
 
-        return "\n".join(lines)
+        return _track("vault_list_projects", "\n".join(lines))
 
     @mcp.tool
     def vault_query(
@@ -500,7 +512,7 @@ Total estimated savings: ~C tokens
         """
         result = _resolve_file(resolved_path, project, section, path)
         if isinstance(result, str):
-            return result
+            return _track("vault_query", result, project)
         filepath = result
 
         content = filepath.read_text(encoding="utf-8")
@@ -515,7 +527,7 @@ Total estimated savings: ~C tokens
                 )
                 content = meta_line + content
 
-        return _truncate(content, max_lines)
+        return _track("vault_query", _truncate(content, max_lines), project)
 
     @mcp.tool
     def vault_search(
@@ -569,21 +581,22 @@ Total estimated savings: ~C tokens
                     results.append(f"  - {line}")
 
         if not results:
-            return f"No matches found for '{query}'."
+            return _track("vault_search", f"No matches found for '{query}'.")
 
         output = f"# Search: '{query}'\n\n" + "\n".join(results)
-        return _truncate(output, max_lines)
+        return _track("vault_search", _truncate(output, max_lines))
 
     @mcp.tool
     def vault_health() -> str:
         """Return health metrics for all vault projects."""
         projects_dir = resolved_path / "10_projects"
         if not projects_dir.is_dir():
-            return "No projects found — 10_projects/ does not exist."
+            return _track("vault_health",
+                          "No projects found — 10_projects/ does not exist.")
 
         projects = sorted(d for d in projects_dir.iterdir() if d.is_dir())
         if not projects:
-            return "No projects found in vault."
+            return _track("vault_health", "No projects found in vault.")
 
         stale_threshold = date.today() - timedelta(days=180)
         lines = ["# Vault Health Report", ""]
@@ -624,7 +637,7 @@ Total estimated savings: ~C tokens
                 lines.append(f"- Stale files (>180d): {', '.join(sorted(stale_files))}")
             lines.append("")
 
-        return "\n".join(lines)
+        return _track("vault_health", "\n".join(lines))
 
     @mcp.tool
     def vault_update(
@@ -642,26 +655,29 @@ Total estimated savings: ~C tokens
             content: The markdown content to write.
         """
         if operation not in _VALID_OPERATIONS:
-            return (
+            return _track("vault_update", (
                 f"Invalid operation '{operation}'. "
                 f"Valid operations: {', '.join(sorted(_VALID_OPERATIONS))}"
-            )
+            ), project)
 
         project_dir = resolved_path / "10_projects" / project
         if not project_dir.is_dir():
-            return f"Project '{project}' not found in vault."
+            return _track("vault_update",
+                          f"Project '{project}' not found in vault.", project)
 
         filename = SECTION_SHORTCUTS.get(section)
         if filename is None:
             available = ", ".join(SECTION_SHORTCUTS)
-            return f"Section '{section}' not found. Available: {available}"
+            return _track("vault_update",
+                          f"Section '{section}' not found. Available: {available}", project)
 
         filepath = project_dir / filename
 
         if operation == "replace":
             error = validate_frontmatter(content)
             if error:
-                return f"Frontmatter validation failed: {error}"
+                return _track("vault_update",
+                              f"Frontmatter validation failed: {error}", project)
 
         if operation == "append":
             existing = filepath.read_text(encoding="utf-8") if filepath.exists() else ""
@@ -672,7 +688,8 @@ Total estimated savings: ~C tokens
         rel = filepath.relative_to(resolved_path)
         _git_commit(resolved_path, rel, f"vault: update {project}/{section}")
 
-        return f"Updated {project}/{section} ({operation})."
+        return _track("vault_update",
+                       f"Updated {project}/{section} ({operation}).", project)
 
     @mcp.tool
     def vault_create(
@@ -691,11 +708,14 @@ Total estimated savings: ~C tokens
         """
         project_dir = _resolve_project_dir(resolved_path, project)
         if project_dir is None:
-            return f"Project '{project}' not found in vault."
+            return _track("vault_create",
+                          f"Project '{project}' not found in vault.", project)
 
         filepath = project_dir / path
         if filepath.exists():
-            return f"File already exists: {path}. Use vault_update to modify it."
+            return _track("vault_create",
+                          f"File already exists: {path}. Use vault_update to modify it.",
+                          project)
 
         # Auto-generate frontmatter
         stem = filepath.stem
@@ -715,7 +735,8 @@ Total estimated savings: ~C tokens
         display_project = "00_meta" if project == "_meta" else project
         _git_commit(resolved_path, rel, f"vault: create {display_project}/{path}")
 
-        return f"Created {project}/{path} (type: {doc_type})."
+        return _track("vault_create",
+                       f"Created {project}/{path} (type: {doc_type}).", project)
 
     @mcp.tool
     def vault_summarize(
@@ -737,7 +758,7 @@ Total estimated savings: ~C tokens
         """
         result = _resolve_file(resolved_path, project, section, path)
         if isinstance(result, str):
-            return result
+            return _track("vault_summarize", result, project)
         filepath = result
 
         content = filepath.read_text(encoding="utf-8")
@@ -748,9 +769,11 @@ Total estimated savings: ~C tokens
 
         if line_count <= _SUMMARIZE_THRESHOLD:
             header = f"**Metadata:** {meta}\n\n" if meta else ""
-            return f"{header}{content}"
+            return _track("vault_summarize", f"{header}{content}", project)
 
-        return _build_delegation_prompt(meta, body, line_count, max_summary_lines)
+        return _track("vault_summarize",
+                       _build_delegation_prompt(meta, body, line_count, max_summary_lines),
+                       project)
 
     @mcp.tool
     def vault_smart_search(
@@ -789,7 +812,7 @@ Total estimated savings: ~C tokens
             scored.append((score, rel, meta, matching))
 
         if not scored:
-            return f"No matches found for '{query}'."
+            return _track("vault_smart_search", f"No matches found for '{query}'.")
 
         scored.sort(key=lambda x: x[0], reverse=True)
         scored = scored[:max_results]
@@ -802,7 +825,7 @@ Total estimated savings: ~C tokens
                 results.append(f"  - {line}")
 
         output = "\n".join(results)
-        return _truncate(output, max_lines)
+        return _track("vault_smart_search", _truncate(output, max_lines))
 
     @mcp.tool
     def session_briefing(project: str) -> str:
@@ -816,7 +839,8 @@ Total estimated savings: ~C tokens
         """
         project_dir = _resolve_project_dir(resolved_path, project)
         if project_dir is None:
-            return f"Project '{project}' not found."
+            return _track("session_briefing",
+                          f"Project '{project}' not found.", project)
 
         parts: list[str] = [f"# Session Briefing — {project}", ""]
 
@@ -868,7 +892,7 @@ Total estimated savings: ~C tokens
         if stale_count:
             parts.append(f"- Stale: {stale_count}")
 
-        return "\n".join(parts)
+        return _track("session_briefing", "\n".join(parts), project)
 
     @mcp.tool
     def vault_recent(since_days: int = 7, project: str = "") -> str:
@@ -903,7 +927,8 @@ Total estimated savings: ~C tokens
             git_paths = {p for p in git_paths if p.startswith(prefix)}
 
         if not git_paths:
-            return f"No changes found in the last {since_days} days."
+            return _track("vault_recent",
+                          f"No changes found in the last {since_days} days.", project)
 
         lines: list[str] = [f"# Recent Changes (last {since_days} days)", ""]
         for rel_path in sorted(git_paths):
@@ -924,7 +949,44 @@ Total estimated savings: ~C tokens
                 lines.append(f"- {rel_path}")
 
         output = "\n".join(lines)
-        return _truncate(output, 100)
+        return _track("vault_recent", _truncate(output, 100), project)
+
+    @mcp.tool
+    def vault_usage(since_days: int = 30) -> str:
+        """Show vault tool usage analytics.
+
+        Reports call frequency, popular tools, popular projects, and total
+        response lines served — useful for session profiling and benchmarking.
+
+        Args:
+            since_days: Look back window in days. Default 30.
+        """
+        stats = tracker.stats(since_days)
+        if stats["total_calls"] == 0:
+            return f"No vault tool calls recorded in the last {since_days} days."
+
+        parts: list[str] = [f"# Vault Usage (last {since_days} days)", ""]
+        parts.append(f"- Total calls: {stats['total_calls']}")
+        parts.append(f"- Total response lines: {stats['total_response_lines']}")
+        parts.append(
+            f"- Estimated tokens served: ~{stats['total_response_lines'] * 10}"
+        )
+        parts.append("")
+
+        if stats["by_tool"]:
+            parts.append("## By Tool")
+            for tool_name, count in stats["by_tool"].items():
+                parts.append(f"- {tool_name}: {count} calls")
+            parts.append("")
+
+        if stats["by_project"]:
+            parts.append("## By Project")
+            for proj, count in stats["by_project"].items():
+                parts.append(f"- {proj}: {count} calls")
+
+        return "\n".join(parts)
+
+    mcp._usage_tracker = tracker  # type: ignore[attr-defined]
 
     return mcp
 

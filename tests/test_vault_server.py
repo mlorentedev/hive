@@ -1068,3 +1068,34 @@ class TestVaultRecent:
         mcp = create_server(vault_path=git_vault)
         result = await mcp.call_tool("vault_recent", {"since_days": 1})
         assert "truncated" in _text(result).lower()
+
+
+# ── vault_usage ──────────────────────────────────────────────────────
+
+
+class TestVaultUsage:
+    async def test_tracks_tool_calls(self, vault_mcp: FastMCP) -> None:
+        """Tool calls should be recorded in the usage tracker."""
+        await vault_mcp.call_tool("vault_list_projects", {})
+        await vault_mcp.call_tool("vault_query", {"project": "testproject"})
+        result = await vault_mcp.call_tool("vault_usage", {"since_days": 1})
+        text = _text(result)
+        assert "vault_list_projects" in text
+        assert "vault_query" in text
+        # vault_usage itself is also tracked
+        assert "Total calls:" in text
+
+    async def test_tracks_project(self, vault_mcp: FastMCP) -> None:
+        await vault_mcp.call_tool("vault_query", {"project": "testproject"})
+        result = await vault_mcp.call_tool("vault_usage", {"since_days": 1})
+        assert "testproject" in _text(result)
+
+    async def test_empty_usage(self, tmp_path: Path) -> None:
+        mcp = create_server(vault_path=tmp_path)
+        result = await mcp.call_tool("vault_usage", {"since_days": 1})
+        assert "no vault tool calls" in _text(result).lower()
+
+    async def test_estimates_tokens(self, vault_mcp: FastMCP) -> None:
+        await vault_mcp.call_tool("vault_query", {"project": "testproject"})
+        result = await vault_mcp.call_tool("vault_usage", {"since_days": 1})
+        assert "tokens served" in _text(result).lower()
