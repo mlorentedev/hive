@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.0.0](https://github.com/mlorentedev/hive/compare/v0.2.0...v1.0.0) (2026-03-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* hive-vault and hive-worker CLI commands replaced by single hive command. hive-vault still works as an alias.
+
+### Features
+
+* add Astro Starlight landing page + GitHub Pages deployment ([bbf2b9a](https://github.com/mlorentedev/hive/commit/bbf2b9a06e6e73eeb79bcf13ea65ab4a79f3fd48))
+* add end-to-end smoke tests for worker MCP server ([aa91264](https://github.com/mlorentedev/hive/commit/aa9126427ca42879c956a2b0850bc8e48fa435e2))
+* Phase 3.0 — frontmatter parsing, metadata filters, stale detection ([efca6bc](https://github.com/mlorentedev/hive/commit/efca6bc875a61a16843b2f41ddb58452df9e38bf))
+* Phase 3.1 — vault_summarize and vault_smart_search tools ([36381a2](https://github.com/mlorentedev/hive/commit/36381a2ce8158b20cd8d8d3e80814d6be1315fcc))
+* Phase 3.2 — usage tracking, vault_usage tool, ADR-003 ([22f41ac](https://github.com/mlorentedev/hive/commit/22f41acffb5419db99f20f001c25a2d431821549))
+* Phase 5 — MCP resources, session_briefing, vault_recent ([00d80a6](https://github.com/mlorentedev/hive/commit/00d80a65effc4695ce8b38fe4fd6d845ea58939a))
+* unify vault + worker into single MCP server ([c8f561c](https://github.com/mlorentedev/hive/commit/c8f561c280d68a66c9bf2244cee6cf48068f23a1))
+
+
+### Bug Fixes
+
+* isolate openrouter_api_key test from environment ([b26ede4](https://github.com/mlorentedev/hive/commit/b26ede4df69b046273c84d62efb098eabe518505))
+* move Path import to TYPE_CHECKING block in smoke tests ([5daf42e](https://github.com/mlorentedev/hive/commit/5daf42e824a752ac528bc7f669ae17e3ee5a0bcc))
+
+
+### Documentation
+
+* rewrite README with full API surface + add GitHub templates ([0851474](https://github.com/mlorentedev/hive/commit/0851474bbc610ee3b1953fbbc6df3c5eca8854e1))
+
 ## [0.2.0](https://github.com/mlorentedev/hive/compare/v0.1.0...v0.2.0) (2026-03-02)
 
 
