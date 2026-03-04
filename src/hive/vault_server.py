@@ -133,6 +133,330 @@ def create_server(vault_path: Path | None = None) -> FastMCP:
     resolved_path = vault_path or settings.vault_path
     mcp = FastMCP("Hive Vault")
 
+    # ── Resources ────────────────────────────────────────────────────────
+
+    @mcp.resource("hive://projects")
+    def projects_resource() -> str:
+        """List all vault projects with file counts and available shortcuts."""
+        projects_dir = resolved_path / "10_projects"
+        if not projects_dir.is_dir():
+            return "No projects found — 10_projects/ directory does not exist."
+
+        projects = sorted(d.name for d in projects_dir.iterdir() if d.is_dir())
+        if not projects:
+            return "No projects found in 10_projects/."
+
+        lines = ["# Vault Projects", ""]
+        for name in projects:
+            project_dir = projects_dir / name
+            sections = [
+                s for s, filename in SECTION_SHORTCUTS.items()
+                if (project_dir / filename).exists()
+            ]
+            md_count = len(list(project_dir.rglob("*.md")))
+            lines.append(
+                f"- **{name}** — {md_count} files, shortcuts: "
+                f"{', '.join(sections) or 'none'}"
+            )
+
+        return "\n".join(lines)
+
+    @mcp.resource("hive://health")
+    def health_resource() -> str:
+        """Vault health metrics for all projects."""
+        projects_dir = resolved_path / "10_projects"
+        if not projects_dir.is_dir():
+            return "No projects found — 10_projects/ does not exist."
+
+        projects = sorted(d for d in projects_dir.iterdir() if d.is_dir())
+        if not projects:
+            return "No projects found in vault."
+
+        stale_threshold = date.today() - timedelta(days=180)
+        lines = ["# Vault Health Report", ""]
+
+        for project_dir in projects:
+            md_files = list(project_dir.rglob("*.md"))
+            total_lines = 0
+            stale_files: list[str] = []
+
+            for f in md_files:
+                try:
+                    content = f.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+                total_lines += len(content.splitlines())
+
+                fm = parse_frontmatter(content)
+                if fm is not None and fm.status in _TERMINAL_STATUSES:
+                    continue
+
+                created_date = parse_date(fm.created) if fm is not None else None
+                if created_date is None:
+                    created_date = date.fromtimestamp(f.stat().st_mtime)
+
+                if created_date < stale_threshold:
+                    stale_files.append(f.relative_to(project_dir).as_posix())
+
+            missing = [
+                s for s, fname in SECTION_SHORTCUTS.items()
+                if not (project_dir / fname).exists()
+            ]
+
+            lines.append(f"## {project_dir.name}")
+            lines.append(f"- Files: {len(md_files)}")
+            lines.append(f"- Total lines: {total_lines}")
+            if missing:
+                lines.append(f"- Missing sections: {', '.join(missing)}")
+            if stale_files:
+                lines.append(
+                    f"- Stale files (>180d): {', '.join(sorted(stale_files))}"
+                )
+            lines.append("")
+
+        return "\n".join(lines)
+
+    @mcp.resource("hive://projects/{project}/context")
+    def context_resource(project: str) -> str:
+        """Project context document (00-context.md)."""
+        result = _resolve_file(resolved_path, project, "context", "")
+        if isinstance(result, str):
+            return result
+        return _truncate(result.read_text(encoding="utf-8"), 200)
+
+    @mcp.resource("hive://projects/{project}/tasks")
+    def tasks_resource(project: str) -> str:
+        """Project task backlog (11-tasks.md)."""
+        result = _resolve_file(resolved_path, project, "tasks", "")
+        if isinstance(result, str):
+            return result
+        return _truncate(result.read_text(encoding="utf-8"), 200)
+
+    @mcp.resource("hive://projects/{project}/lessons")
+    def lessons_resource(project: str) -> str:
+        """Project lessons learned (90-lessons.md)."""
+        result = _resolve_file(resolved_path, project, "lessons", "")
+        if isinstance(result, str):
+            return result
+        return _truncate(result.read_text(encoding="utf-8"), 200)
+
+    # ── Prompts ─────────────────────────────────────────────────────────
+
+    @mcp.prompt
+    def retrospective(project: str) -> str:
+        """Quick end-of-session review that extracts lessons and appends them to the vault."""
+        return f"""\
+# Session Retrospective — {project}
+
+## Protocol
+
+### Step 1 — Summarize Session
+- Review the conversation history for this session
+- Identify: bugs fixed, decisions made, patterns discovered, surprises encountered
+- If nothing notable happened, report "Nothing to capture" and stop
+
+### Step 2 — Read Current Lessons
+- `vault_query(project="{project}", section="lessons")` to load `90-lessons.md`
+- Note existing lessons to avoid duplicates
+
+### Step 3 — Draft Lessons
+- Write 1-5 lessons using this exact template:
+
+```markdown
+### [YYYY-MM-DD] <Title>
+**Context:** <what you were doing when you hit this>
+**Problem:** <what went wrong or what decision was needed>
+**Solution:** <what fixed it or what was decided>
+**Why:** <root cause or rationale>
+**Tags:** `#tag1` `#tag2`
+```
+
+- Show drafts to the user for approval before writing
+
+### Step 4 — Append to Vault
+- `vault_update(project="{project}", section="lessons", operation="append", content=<lessons>)`
+- Never modify or rewrite existing lessons — append only
+
+### Step 5 — Report
+```
+Retrospective complete:
+  - X lessons appended to 90-lessons.md
+  - Topics: <comma-separated titles>
+```
+
+## Rules
+
+- Max 5 lessons per session — be selective
+- Never modify existing vault content
+- Skip entirely if nothing notable happened
+- Source: conversation history only
+- All content in English"""
+
+    @mcp.prompt
+    def delegate(task: str) -> str:
+        """Structured protocol for delegating tasks to cheaper models via hive-worker."""
+        return f"""\
+# Worker Delegation — {task}
+
+## Protocol
+
+### Step 1 — Suitability Check
+Evaluate the task against this matrix:
+
+| Delegatable | NOT Delegatable |
+|---|---|
+| Summarization | Architecture decisions |
+| Boilerplate generation | Multi-file refactoring |
+| Format conversion | Security-sensitive logic |
+| Documentation drafts | Complex debugging |
+| Data transformation | Code that handles secrets |
+| Regex/pattern writing | Ambiguous requirements |
+
+If the task is NOT delegatable, say so and handle it directly. Stop here.
+
+### Step 2 — Budget Check
+- `worker_status()` to check remaining budget and model availability
+- If budget exhausted or no models available, report and stop
+
+### Step 3 — Context Compression
+- `vault_summarize(paths=<relevant files>)` if the task needs vault context
+- Strip the task to its essential instruction — remove conversational context
+- Keep prompt under 2000 tokens
+
+### Step 4 — Delegate
+- `list_models()` to see available models and pick the appropriate tier
+- `delegate_task(prompt=<compressed task>, task_type=<type>)`
+- One task per call — never batch
+
+### Step 5 — Evaluate Result
+- Review the worker's output for correctness
+- If acceptable: present to user with source attribution ("Generated by <model>")
+- If poor quality: report failure, handle the task directly
+
+## Rules
+
+- Always check budget before delegating
+- Never delegate tasks involving secrets, credentials, or auth logic
+- One task per `delegate_task` call
+- State which model handled the task in your response
+- If the worker fails or returns poor quality, handle it yourself — don't retry"""
+
+    @mcp.prompt
+    def vault_sync(project: str) -> str:
+        """Post-sprint vault synchronization — reconcile docs with shipped code."""
+        return f"""\
+# Vault Sync — {project}
+
+## Protocol
+
+### Step 1 — Gather Code State
+- Run `git log --oneline -20` to see recent commits
+- Run `git tag --sort=-creatordate | head -5` for recent releases
+- Note: features added, bugs fixed, phases completed
+
+### Step 2 — Gather Vault State
+- `vault_health()` for overall vault status and stale documents
+- `vault_query(project="{project}", section="context")` for project context doc
+- `vault_query(project="{project}", section="tasks")` for task backlog
+
+### Step 3 — Identify Drift
+Compare code state vs vault state. Look for:
+- Tasks marked TODO in vault that are already shipped in code
+- Context doc describing old architecture that has changed
+- Missing entries for new features/phases
+- Stale status fields (e.g., "in progress" when already merged)
+
+### Step 4 — Present Diff Plan
+Show the user a summary:
+```
+Vault Sync Plan:
+  context.md:
+    - UPDATE: Phase X status "in progress" -> "shipped"
+    - ADD: New tool vault_foo description
+  tasks.md:
+    - DONE: [x] Task A (commit abc123)
+    - DONE: [x] Task B (commit def456)
+  lessons.md:
+    - APPEND: Sprint N retrospective (if any)
+```
+
+**Wait for explicit user approval before proceeding.**
+
+### Step 5 — Apply Updates
+- Context/tasks: `vault_update(operation="replace", ...)` for factual updates
+- Lessons: `vault_update(operation="append", ...)` for new entries only
+- Never delete vault content without explicit user request
+
+### Step 6 — Verify
+- `vault_query` the updated sections to confirm changes applied correctly
+- Report what was updated
+
+## Rules
+
+- Always confirm before writing — show the plan first
+- Use `replace` for context and tasks (factual state)
+- Use `append` for lessons (never modify existing)
+- All content in English
+- One vault_update call per section to minimize git commits"""
+
+    @mcp.prompt
+    def benchmark() -> str:
+        """Estimate token savings from hive MCP tools in the current session."""
+        return """\
+# Session Token Savings Benchmark
+
+## Protocol
+
+### Step 1 — Inventory Tool Usage
+Scan this conversation for all hive MCP tool calls:
+- `vault_query` / `vault_search` / `vault_smart_search` / `vault_summarize` calls
+- `delegate_task` / `worker_status` / `list_models` calls
+- Count each occurrence and note what was queried
+
+### Step 2 — Estimate On-Demand Cost
+For each vault tool call:
+- Estimate response size in lines from the conversation
+- Apply heuristic: **10 tokens per line**
+- Sum total: this is the actual tokens consumed via on-demand loading
+
+### Step 3 — Estimate Static Alternative
+Without hive, the same information would require static CLAUDE.md sections:
+- Each vault section queried = full section loaded every turn
+- Estimate full section sizes (context ~200 lines, tasks ~150 lines, lessons ~100 lines)
+- Multiply by number of conversation turns where that context was relevant
+- This is the hypothetical static cost
+
+### Step 4 — Worker Savings
+- `worker_status()` to get delegation stats (tasks completed, tokens used)
+- Each delegated task = tokens that Claude didn't need to generate
+- Estimate saved Claude tokens from delegation
+
+### Step 5 — Report
+```
+=== Hive Session Benchmark ===
+
+Vault queries: N calls
+  On-demand tokens consumed: ~X
+  Static alternative would cost: ~Y
+  Vault savings: ~Z tokens (N% reduction)
+
+Worker delegations: M tasks
+  Worker tokens used: ~A
+  Claude tokens saved: ~B
+
+Total estimated savings: ~C tokens
+```
+
+## Rules
+
+- All numbers are estimates — state this clearly in the report
+- Heuristic: 10 tokens per line of markdown
+- Skip if no hive tools were used this session
+- Source: conversation history only — no external instrumentation
+- Do not count tool calls that returned errors"""
+
+    # ── Tools ───────────────────────────────────────────────────────────
+
     @mcp.tool
     def vault_list_projects() -> str:
         """List all projects available in the Obsidian vault."""
@@ -480,6 +804,128 @@ def create_server(vault_path: Path | None = None) -> FastMCP:
         output = "\n".join(results)
         return _truncate(output, max_lines)
 
+    @mcp.tool
+    def session_briefing(project: str) -> str:
+        """One-call context briefing to start a new session.
+
+        Assembles active tasks, recent lessons, git activity, and project
+        health into a single response — replaces 3-4 manual tool calls.
+
+        Args:
+            project: Project slug (directory under 10_projects/).
+        """
+        project_dir = _resolve_project_dir(resolved_path, project)
+        if project_dir is None:
+            return f"Project '{project}' not found."
+
+        parts: list[str] = [f"# Session Briefing — {project}", ""]
+
+        # Active Tasks
+        parts.append("## Active Tasks")
+        task_result = _resolve_file(resolved_path, project, "tasks", "")
+        if isinstance(task_result, str):
+            parts.append("(not available)")
+        else:
+            parts.append(_truncate(task_result.read_text(encoding="utf-8"), 50))
+        parts.append("")
+
+        # Recent Lessons (last 30 lines)
+        parts.append("## Recent Lessons")
+        lessons_result = _resolve_file(resolved_path, project, "lessons", "")
+        if isinstance(lessons_result, str):
+            parts.append("(not available)")
+        else:
+            lines = lessons_result.read_text(encoding="utf-8").splitlines()
+            tail = lines[-30:] if len(lines) > 30 else lines
+            parts.append("\n".join(tail))
+        parts.append("")
+
+        # Recent Vault Activity
+        parts.append("## Recent Vault Activity")
+        git_log = _git_log(resolved_path, 5)
+        parts.append(git_log or "(no git history available)")
+        parts.append("")
+
+        # Project Health
+        parts.append("## Project Health")
+        md_files = list(project_dir.rglob("*.md"))
+        stale_threshold = date.today() - timedelta(days=180)
+        stale_count = 0
+        for f in md_files:
+            try:
+                content = f.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            fm = parse_frontmatter(content)
+            if fm is not None and fm.status in _TERMINAL_STATUSES:
+                continue
+            created_date = parse_date(fm.created) if fm is not None else None
+            if created_date is None:
+                created_date = date.fromtimestamp(f.stat().st_mtime)
+            if created_date < stale_threshold:
+                stale_count += 1
+        parts.append(f"- Files: {len(md_files)}")
+        if stale_count:
+            parts.append(f"- Stale: {stale_count}")
+
+        return "\n".join(parts)
+
+    @mcp.tool
+    def vault_recent(since_days: int = 7, project: str = "") -> str:
+        """Show files changed in the vault in the last N days.
+
+        Combines git history with frontmatter created dates for completeness.
+
+        Args:
+            since_days: Look back window in days. Default 7.
+            project: Filter to this project only. Empty = all projects.
+        """
+        # Source 1: git-tracked changes
+        git_paths = set(_git_recent(resolved_path, since_days))
+
+        # Source 2: frontmatter created dates within window
+        cutoff = date.today() - timedelta(days=since_days)
+        for md_file in resolved_path.rglob("*.md"):
+            try:
+                content = md_file.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            fm = parse_frontmatter(content)
+            if fm is None:
+                continue
+            created = parse_date(fm.created)
+            if created is not None and created >= cutoff:
+                git_paths.add(md_file.relative_to(resolved_path).as_posix())
+
+        # Filter to project if specified
+        if project:
+            prefix = f"10_projects/{project}/"
+            git_paths = {p for p in git_paths if p.startswith(prefix)}
+
+        if not git_paths:
+            return f"No changes found in the last {since_days} days."
+
+        lines: list[str] = [f"# Recent Changes (last {since_days} days)", ""]
+        for rel_path in sorted(git_paths):
+            full = resolved_path / rel_path
+            if not full.exists():
+                lines.append(f"- {rel_path} (deleted)")
+                continue
+            try:
+                content = full.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                lines.append(f"- {rel_path}")
+                continue
+            fm = parse_frontmatter(content)
+            meta = _format_metadata(fm)
+            if meta:
+                lines.append(f"- {rel_path} [{meta}]")
+            else:
+                lines.append(f"- {rel_path}")
+
+        output = "\n".join(lines)
+        return _truncate(output, 100)
+
     return mcp
 
 
@@ -497,6 +943,34 @@ def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
         capture_output=True,
         check=True,
     )
+
+
+def _git_log(vault_path: Path, n: int) -> str:
+    """Return last n git log entries, or empty string on failure."""
+    result = subprocess.run(
+        ["git", "log", "--oneline", f"-{n}"],
+        cwd=vault_path,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _git_recent(vault_path: Path, since_days: int) -> list[str]:
+    """Return vault-relative .md paths changed in the last N days via git."""
+    result = subprocess.run(
+        ["git", "log", f"--since={since_days} days ago",
+         "--name-only", "--pretty=format:"],
+        cwd=vault_path,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return []
+    return sorted({
+        line.strip() for line in result.stdout.splitlines()
+        if line.strip().endswith(".md")
+    })
 
 
 server = create_server()

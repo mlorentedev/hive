@@ -12,12 +12,18 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from fastmcp import FastMCP
+    from fastmcp.resources.resource import ResourceResult
     from fastmcp.tools import ToolResult
 
 
 def _text(result: ToolResult) -> str:
     """Extract text from a ToolResult."""
     return result.content[0].text  # type: ignore[union-attr]
+
+
+def _resource_text(result: ResourceResult) -> str:
+    """Extract text from a ResourceResult."""
+    return str(result.contents[0].content)
 
 
 @pytest.fixture
@@ -830,3 +836,235 @@ class TestVaultSmartSearch:
         # Should show at most 5 matching lines per file
         match_lines = [ln for ln in text.splitlines() if ln.strip().startswith("- keyword")]
         assert len(match_lines) <= 5
+
+
+# ── Prompts ─────────────────────────────────────────────────────────
+
+
+class TestPrompts:
+    """Tests for MCP prompts registered via @mcp.prompt."""
+
+    @staticmethod
+    def _prompt_text(result: object) -> str:
+        """Extract text from a PromptResult, handling TextContent wrapper."""
+        content = result.messages[0].content  # type: ignore[attr-defined]
+        return content.text if hasattr(content, "text") else str(content)
+
+    async def test_all_prompts_registered(self, vault_mcp: FastMCP) -> None:
+        prompts = await vault_mcp.list_prompts()
+        names = {p.name for p in prompts}
+        assert names == {"retrospective", "delegate", "vault_sync", "benchmark"}
+
+    # -- retrospective --
+
+    async def test_retrospective_contains_protocol(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.render_prompt("retrospective", {"project": "hive"})
+        text = self._prompt_text(result)
+        assert "vault_query" in text
+        assert "vault_update" in text
+        assert "**Context:**" in text
+
+    async def test_retrospective_interpolates_project(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.render_prompt("retrospective", {"project": "myproject"})
+        text = self._prompt_text(result)
+        assert "myproject" in text
+        assert "<repo>" not in text
+
+    # -- delegate --
+
+    async def test_delegate_contains_suitability_matrix(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.render_prompt("delegate", {"task": "summarize docs"})
+        text = self._prompt_text(result)
+        assert "Delegatable" in text
+        assert "NOT Delegatable" in text
+
+    async def test_delegate_contains_tools(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.render_prompt("delegate", {"task": "summarize docs"})
+        text = self._prompt_text(result)
+        assert "delegate_task" in text
+        assert "worker_status" in text
+
+    async def test_delegate_interpolates_task(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.render_prompt("delegate", {"task": "generate boilerplate"})
+        text = self._prompt_text(result)
+        assert "generate boilerplate" in text
+
+    # -- vault_sync --
+
+    async def test_vault_sync_contains_protocol(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.render_prompt("vault_sync", {"project": "hive"})
+        text = self._prompt_text(result)
+        assert "vault_health" in text
+        assert "vault_update" in text
+
+    async def test_vault_sync_interpolates_project(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.render_prompt("vault_sync", {"project": "testproj"})
+        text = self._prompt_text(result)
+        assert "testproj" in text
+
+    # -- benchmark --
+
+    async def test_benchmark_contains_protocol(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.render_prompt("benchmark", {})
+        text = self._prompt_text(result)
+        assert "worker_status" in text
+        assert "10 tokens per line" in text
+
+    async def test_benchmark_has_no_required_args(self, vault_mcp: FastMCP) -> None:
+        prompts = await vault_mcp.list_prompts()
+        bench = next(p for p in prompts if p.name == "benchmark")
+        required = [a for a in (bench.arguments or []) if a.required]
+        assert len(required) == 0
+
+
+# ── Resources ────────────────────────────────────────────────────────
+
+
+class TestResources:
+    async def test_static_resources_registered(self, vault_mcp: FastMCP) -> None:
+        resources = await vault_mcp.list_resources()
+        uris = {str(r.uri) for r in resources}
+        assert "hive://projects" in uris or "hive://projects/" in uris
+        assert "hive://health" in uris or "hive://health/" in uris
+
+    async def test_templates_registered(self, vault_mcp: FastMCP) -> None:
+        templates = await vault_mcp.list_resource_templates()
+        patterns = {t.uri_template for t in templates}
+        assert any("context" in p for p in patterns)
+        assert any("tasks" in p for p in patterns)
+        assert any("lessons" in p for p in patterns)
+
+    async def test_projects_resource(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.read_resource("hive://projects")
+        assert "testproject" in _resource_text(result)
+
+    async def test_health_resource(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.read_resource("hive://health")
+        assert "testproject" in _resource_text(result)
+
+    async def test_context_template(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.read_resource("hive://projects/testproject/context")
+        assert "# Test Project" in _resource_text(result)
+
+    async def test_tasks_template(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.read_resource("hive://projects/testproject/tasks")
+        assert "Task one" in _resource_text(result)
+
+    async def test_lessons_template(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.read_resource("hive://projects/testproject/lessons")
+        assert "Some lesson" in _resource_text(result)
+
+    async def test_nonexistent_project(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.read_resource("hive://projects/nonexistent/context")
+        assert "not found" in _resource_text(result).lower()
+
+
+# ── session_briefing ─────────────────────────────────────────────────
+
+
+class TestSessionBriefing:
+    async def test_returns_tasks(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool("session_briefing", {"project": "testproject"})
+        assert "Task one" in _text(result)
+
+    async def test_returns_lessons(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool("session_briefing", {"project": "testproject"})
+        assert "Some lesson" in _text(result)
+
+    async def test_returns_git_log_section(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool("session_briefing", {"project": "testproject"})
+        text = _text(result)
+        assert "## Recent Vault Activity" in text
+
+    async def test_returns_health(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool("session_briefing", {"project": "testproject"})
+        assert "Files:" in _text(result)
+
+    async def test_missing_project(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool("session_briefing", {"project": "nonexistent"})
+        assert "not found" in _text(result).lower()
+
+
+# ── vault_recent ─────────────────────────────────────────────────────
+
+
+class TestVaultRecent:
+    async def test_recent_git_change_appears(self, git_vault: Path) -> None:
+        import subprocess
+
+        new_file = git_vault / "10_projects" / "testproject" / "new-note.md"
+        new_file.write_text(
+            "---\nid: new-note\ntype: lesson\nstatus: active\n---\n\n# New\n"
+        )
+        subprocess.run(["git", "add", "."], cwd=git_vault, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "add note"],
+            cwd=git_vault, capture_output=True, check=True,
+        )
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool("vault_recent", {"since_days": 1})
+        assert "new-note.md" in _text(result)
+
+    async def test_project_filter(self, git_vault: Path) -> None:
+        import subprocess
+
+        # Add files in two projects
+        second = git_vault / "10_projects" / "other"
+        second.mkdir(parents=True)
+        (second / "note.md").write_text(
+            "---\nid: other-note\ntype: lesson\nstatus: active\n---\n\n# Other\n"
+        )
+        subprocess.run(["git", "add", "."], cwd=git_vault, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "add other"],
+            cwd=git_vault, capture_output=True, check=True,
+        )
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_recent", {"since_days": 1, "project": "testproject"}
+        )
+        text = _text(result)
+        assert "other" not in text.lower() or "testproject" in text
+
+    async def test_frontmatter_created_today(self, mock_vault: Path) -> None:
+        from datetime import date
+
+        today = date.today().isoformat()
+        (mock_vault / "10_projects" / "testproject" / "today-note.md").write_text(
+            f'---\nid: today-note\ntype: lesson\nstatus: active\ncreated: "{today}"\n'
+            f"---\n\n# Today\n"
+        )
+        mcp = create_server(vault_path=mock_vault)
+        result = await mcp.call_tool("vault_recent", {"since_days": 1})
+        assert "today-note.md" in _text(result)
+
+    async def test_no_changes_returns_message(self, tmp_path: Path) -> None:
+        """Empty vault with no git and no recent frontmatter dates."""
+        project = tmp_path / "10_projects" / "emptyproj"
+        project.mkdir(parents=True)
+        mcp = create_server(vault_path=tmp_path)
+        result = await mcp.call_tool("vault_recent", {"since_days": 1})
+        assert "no changes" in _text(result).lower()
+
+    async def test_output_truncated(self, git_vault: Path) -> None:
+        import subprocess
+
+        # Create many files to exceed 100 lines
+        project = git_vault / "10_projects" / "testproject"
+        for i in range(120):
+            (project / f"bulk-{i:03d}.md").write_text(
+                f"---\nid: bulk-{i}\ntype: lesson\nstatus: active\n---\n\n# Bulk {i}\n"
+            )
+        subprocess.run(["git", "add", "."], cwd=git_vault, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "bulk add"],
+            cwd=git_vault, capture_output=True, check=True,
+        )
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool("vault_recent", {"since_days": 1})
+        assert "truncated" in _text(result).lower()
