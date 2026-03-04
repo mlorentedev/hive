@@ -1,4 +1,4 @@
-.PHONY: help install lint typecheck test smoke check build clean run
+.PHONY: help install lint typecheck test smoke check build clean run site site-dev site-preview
 .DEFAULT_GOAL := help
 
 help: ## Show this help
@@ -27,5 +27,14 @@ build: check ## Check + build package
 run: ## Run Hive MCP server locally
 	uv run python -m hive.server
 
+site: ## Build landing page (requires Node.js)
+	cd site && npm ci && npm run build
+
+site-dev: ## Start landing page dev server
+	cd site && npm run dev
+
+site-preview: ## Preview landing page production build
+	cd site && npm run preview
+
 clean: ## Remove build artifacts
-	rm -rf dist/ .venv/ *.egg-info/ .ruff_cache/ .mypy_cache/ .pytest_cache/ htmlcov/ .coverage
+	rm -rf dist/ .venv/ *.egg-info/ .ruff_cache/ .mypy_cache/ .pytest_cache/ htmlcov/ .coverage site/dist/ site/node_modules/

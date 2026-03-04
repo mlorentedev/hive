@@ -1,0 +1,48 @@
+---
+title: Hive
+description: Unified MCP server for AI-assisted development — on-demand Obsidian vault access + worker delegation.
+template: splash
+hero:
+  tagline: On-demand Obsidian vault access + worker delegation for Claude Code via MCP.
+  actions:
+    - text: Get Started
+      link: /hive/getting-started/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/mlorentedev/hive
+      variant: minimal
+      icon: external
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Why Hive?
+
+AI coding assistants load context statically. A typical `CLAUDE.md` grows to 800+ lines. Most is irrelevant to the current task. Every session pays the full token cost.
+
+Hive replaces static context with **on-demand vault queries** via the [Model Context Protocol](https://modelcontextprotocol.io/). **67–82% token reduction** on targeted queries.
+
+## Features
+
+<CardGrid>
+  <Card title="14 Tools" icon="puzzle">
+    Query, search, update, create vault content. Delegate tasks to cheaper models. Track usage and budget.
+  </Card>
+  <Card title="5 Resources" icon="document">
+    MCP resources for projects, health metrics, context, tasks, and lessons — directly consumable by AI clients.
+  </Card>
+  <Card title="4 Prompts" icon="pencil">
+    Built-in protocols for retrospectives, delegation, vault sync, and benchmarking.
+  </Card>
+  <Card title="Worker Routing" icon="rocket">
+    Automatic tier selection: local Ollama, OpenRouter free, OpenRouter paid, or reject. $5/mo budget cap.
+  </Card>
+</CardGrid>
+
+## Quick Install
+
+```bash
+claude mcp add hive -- uvx hive-vault
+```
+
+That's it. No cloning, no venv, no setup. [Learn more →](/hive/getting-started/)
