@@ -10,3 +10,8 @@ dist/
 coverage.xml
 htmlcov/
 
+# Landing page (Astro)
+site/node_modules/
+site/dist/
+site/.astro/
+

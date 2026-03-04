@@ -13,8 +13,17 @@ make install
 ```bash
 make check    # lint + typecheck + test (run before every PR)
 make lint     # ruff only
+make typecheck # mypy --strict only
 make test     # pytest only
+make smoke    # e2e smoke tests (needs Ollama + OPENROUTER_API_KEY)
 make build    # full build (runs check first)
+make run      # run hive MCP server locally
+```
+
+### Local MCP registration (for development)
+
+```bash
+claude mcp add hive --transport stdio --scope user -- uv run --directory /path/to/hive python -m hive.server
 ```
 
 ## Pull Requests
