@@ -1,12 +1,12 @@
 [project]
 name = "hive-vault"
 version = "0.2.0"
-description = "Context infrastructure for AI-assisted development — on-demand Obsidian vault access via MCP"
+description = "Unified MCP server for AI-assisted development — on-demand Obsidian vault access + worker delegation"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "Manuel Lorente" }]
-keywords = ["mcp", "claude-code", "obsidian", "vault", "context-management"]
+keywords = ["mcp", "claude-code", "obsidian", "vault", "context-management", "ai-orchestration", "worker-delegation"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -32,11 +32,12 @@ dev = [
 ]
 
 [project.scripts]
-hive-vault = "hive.vault_server:main"
-hive-worker = "hive.worker_server:main"
+hive = "hive.server:main"
+hive-vault = "hive.server:main"
 
 [project.urls]
 Homepage = "https://github.com/mlorentedev/hive"
+Documentation = "https://mlorentedev.github.io/hive/"
 Repository = "https://github.com/mlorentedev/hive"
 Issues = "https://github.com/mlorentedev/hive/issues"
 

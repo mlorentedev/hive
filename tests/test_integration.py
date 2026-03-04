@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from hive.vault_server import create_server
+from hive.server import create_server
 
 if TYPE_CHECKING:
     from pathlib import Path

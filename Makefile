@@ -1,30 +1,31 @@
-.PHONY: install lint typecheck test smoke check build clean run-vault run-worker
+.PHONY: help install lint typecheck test smoke check build clean run
+.DEFAULT_GOAL := help
 
-install:
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
+
+install: ## Create venv and install deps
 	uv venv && uv pip install -e ".[dev]"
 
-lint:
+lint: ## Run ruff linter
 	uv run ruff check src/ tests/
 
-typecheck:
+typecheck: ## Run mypy --strict
 	uv run mypy src/
 
-test:
+test: ## Run unit + integration tests
 	uv run pytest tests/ -v --cov=hive --cov-report=term-missing
 
-smoke:
+smoke: ## Run e2e smoke tests (needs Ollama + API key)
 	uv run pytest -m smoke -v
 
-check: lint typecheck test
+check: lint typecheck test ## Lint + typecheck + test
 
-build: check
+build: check ## Check + build package
 	uv build
 
-run-vault:
-	uv run python -m hive.vault_server
+run: ## Run Hive MCP server locally
+	uv run python -m hive.server
 
-run-worker:
-	uv run python -m hive.worker_server
-
-clean:
+clean: ## Remove build artifacts
 	rm -rf dist/ .venv/ *.egg-info/ .ruff_cache/ .mypy_cache/ .pytest_cache/ htmlcov/ .coverage

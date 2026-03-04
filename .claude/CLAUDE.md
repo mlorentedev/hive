@@ -1,11 +1,10 @@
 # Hive Project
 
-> Vault-native AI orchestration: two MCP servers extending Claude Code.
+> Vault-native AI orchestration: unified MCP server extending Claude Code.
 
 ## Architecture
 
-- **Vault MCP Server** (`src/hive/vault_server.py`): On-demand Obsidian vault access
-- **Worker MCP Server** (`src/hive/worker_server.py`): Task delegation to Ollama/Qwen
+- **Hive MCP Server** (`src/hive/server.py`): On-demand Obsidian vault access + worker delegation to Ollama/Qwen
 
 See ADR: `~/Projects/knowledge/10_projects/hive/30-architecture/adr-001-orchestration-model.md`
 
@@ -25,8 +24,7 @@ See ADR: `~/Projects/knowledge/10_projects/hive/30-architecture/adr-001-orchestr
 
 | Path | Role |
 |---|---|
-| `src/hive/vault_server.py` | Vault MCP server |
-| `src/hive/worker_server.py` | Worker MCP server |
+| `src/hive/server.py` | Unified Hive MCP server (vault + worker) |
 | `src/hive/config.py` | Configuration (vault path, Ollama endpoint, OpenRouter key) |
 | `tests/` | pytest suite |
 | `~/Projects/knowledge/` | Obsidian vault (source of truth) |
@@ -64,7 +62,6 @@ make test       # Unit + integration tests (excludes smoke)
 make smoke      # E2E smoke tests (needs Ollama + OPENROUTER_API_KEY)
 make check      # lint + typecheck + test
 make build      # check + uv build
-make run-vault  # Run vault server locally
-make run-worker # Run worker server locally
+make run        # Run Hive MCP server locally
 make clean      # Remove build artifacts
 ```

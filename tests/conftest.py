@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from hive.budget import BudgetTracker
+from hive.clients import OllamaClient, OpenRouterClient
+
 
 @pytest.fixture
 def mock_vault(tmp_path: Path) -> Path:
@@ -100,3 +103,21 @@ def git_vault(mock_vault: Path) -> Path:
         check=True,
     )
     return mock_vault
+
+
+@pytest.fixture
+def budget() -> BudgetTracker:
+    """In-memory budget tracker for worker tests."""
+    return BudgetTracker(db_path=":memory:")
+
+
+@pytest.fixture
+def ollama() -> OllamaClient:
+    """Ollama client for worker tests (methods are mocked per-test)."""
+    return OllamaClient(endpoint="http://localhost:11434", model="qwen2.5-coder:7b")
+
+
+@pytest.fixture
+def openrouter() -> OpenRouterClient:
+    """OpenRouter client for worker tests (methods are mocked per-test)."""
+    return OpenRouterClient(api_key="sk-test", default_model="qwen/qwen3-coder:free")
