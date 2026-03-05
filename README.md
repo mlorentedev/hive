@@ -37,6 +37,11 @@ To configure the vault path (defaults to `~/Projects/knowledge`):
 claude mcp add hive -e VAULT_PATH=/path/to/your/vault -- uvx hive-vault
 ```
 
+**Updating:**
+```bash
+uvx --upgrade hive-vault
+```
+
 ## Tools
 
 ### Vault Tools (11)
