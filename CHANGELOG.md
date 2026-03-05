@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.0](https://github.com/mlorentedev/hive/compare/v1.0.0...v1.1.0) (2026-03-05)
+
+
+### Features
+
+* adaptive session_briefing with relevance-based section ordering ([2b09947](https://github.com/mlorentedev/hive/commit/2b09947f5bd41c60716aec7d6fa9c210267ea3ff))
+* add RelevanceTracker with EMA scoring, decay, and exploration ([42a053c](https://github.com/mlorentedev/hive/commit/42a053c2a3fdddb3cb26f098983f2f0da4bf687f))
+* configurable vault scopes with auto-scan resolution ([e90365a](https://github.com/mlorentedev/hive/commit/e90365a31068ae66d85fbf5bc8ec7d9093822af7))
+
+
+### Documentation
+
+* add MCP activation guide and CLAUDE.md configuration best practices ([c80f4c8](https://github.com/mlorentedev/hive/commit/c80f4c8dbf2dec23fd7dd1e3d359d56a83aa7bc3))
+* add prerequisites, use cases, and provider setup guides ([a5deaca](https://github.com/mlorentedev/hive/commit/a5deacae68a49ddaa8789f1f03a54989e00d9a16))
+
 ## [1.0.0](https://github.com/mlorentedev/hive/compare/v0.2.0...v1.0.0) (2026-03-04)
 
 
