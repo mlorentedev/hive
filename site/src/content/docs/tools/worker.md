@@ -23,7 +23,7 @@ When no explicit model is specified, tasks are routed through tiers in order:
 1. **Ollama** (local) — Free. Best for trivial tasks. Falls through if unavailable.
 2. **OpenRouter free** — Free tier models (e.g., Qwen3 Coder 480B). Real code work.
 3. **OpenRouter paid** — Only when `max_cost_per_request > 0` and monthly budget allows.
-4. **Reject** — Returns error so Claude handles the task directly.
+4. **Reject** — Returns error so the host handles the task directly.
 
 ### Explicit Model Selection
 

@@ -3,7 +3,7 @@ title: Worker Routing
 description: How Hive routes tasks to the cheapest capable model.
 ---
 
-Hive's worker system delegates tasks to cheaper models, reserving Claude for high-value reasoning.
+Hive's worker system delegates tasks to cheaper models, reserving your primary model for high-value reasoning.
 
 ## Routing Flow
 
@@ -20,7 +20,7 @@ delegate_task(prompt, context, max_cost_per_request)
         │
         ├─ 3. max_cost > 0 AND budget allows? ── Yes ──→ Paid model
         │
-        └─ 4. Reject ──→ Error returned, Claude handles it
+        └─ 4. Reject ──→ Error returned, host handles it
 ```
 
 ## Cost Table
@@ -48,7 +48,7 @@ Good candidates for delegation:
 - Documentation drafting
 - Simple Q&A about well-known topics
 
-Keep on Claude:
+Keep on your primary model:
 
 - Complex architecture decisions
 - Multi-file refactoring with dependencies

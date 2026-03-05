@@ -3,7 +3,7 @@ title: Prompts
 description: Built-in MCP prompts for structured workflows.
 ---
 
-Hive includes 4 MCP prompts — structured protocols that Claude can invoke to follow multi-step workflows.
+Hive includes 4 MCP prompts — structured protocols that any MCP client can invoke to follow multi-step workflows.
 
 ## retrospective
 
@@ -17,7 +17,7 @@ End-of-session review that extracts lessons and appends them to the vault.
 3. Format as structured lessons
 4. Use `vault_update` to append to the project's `90-lessons.md`
 
-**Usage**: Ask Claude to "run a retrospective for my-project" at the end of a work session.
+**Usage**: Ask your assistant to "run a retrospective for my-project" at the end of a work session.
 
 ## delegate
 
@@ -32,7 +32,7 @@ Structured protocol for delegating tasks to cheaper models via hive-worker.
 4. Call `delegate_task` with the prepared prompt
 5. Validate the response before using it
 
-**Usage**: Ask Claude to "delegate this task: explain this regex"
+**Usage**: Ask your assistant to "delegate this task: explain this regex"
 
 ## vault_sync
 
@@ -46,7 +46,7 @@ Post-sprint vault synchronization — reconcile documentation with shipped code.
 3. Identify stale docs, completed tasks, missing documentation
 4. Update vault files to match current state
 
-**Usage**: Ask Claude to "sync the vault for my-project after this sprint"
+**Usage**: Ask your assistant to "sync the vault for my-project after this sprint"
 
 ## benchmark
 
@@ -60,4 +60,4 @@ Estimate token savings from hive MCP tools in the current session.
 3. Calculate savings percentage
 4. Report results
 
-**Usage**: Ask Claude to "benchmark the token savings from hive"
+**Usage**: Ask your assistant to "benchmark the token savings from hive"

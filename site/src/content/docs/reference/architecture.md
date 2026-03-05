@@ -7,8 +7,8 @@ description: System architecture and module map.
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                  Claude Code                     │
-│              (orchestrator, LLM)                 │
+│              MCP Host (any client)                │
+│         Claude Code, Codex CLI, Cursor, ...      │
 └──────────────────────┬──────────────────────────┘
                        │ MCP (stdio)
 ┌──────────────────────▼──────────────────────────┐

@@ -9,7 +9,7 @@ Load all the context you need with a single call:
 
 > "Run a session briefing for my-project"
 
-Claude calls `session_briefing(project="my-project")` and gets back: active tasks, recent lessons, git history, and health metrics — everything needed to pick up where you left off.
+Your AI assistant calls `session_briefing(project="my-project")` and gets back: active tasks, recent lessons, git history, and health metrics — everything needed to pick up where you left off.
 
 ## Querying Project Knowledge
 
@@ -83,7 +83,7 @@ Hive auto-generates YAML frontmatter and commits to git.
 
 ## Delegating Trivial Tasks
 
-Save Claude tokens by routing simple tasks to cheaper models:
+Save tokens by routing simple tasks to cheaper models:
 
 > "Delegate: explain this regex ^(?:[a-z0-9]+\.)*[a-z0-9]+$"
 
@@ -102,7 +102,7 @@ Before ending a work session, capture what you learned:
 
 > "Run a retrospective for my-project"
 
-The `retrospective` prompt guides Claude through:
+The `retrospective` prompt guides your assistant through:
 1. Reviewing completed work
 2. Identifying patterns and insights
 3. Formatting structured lessons

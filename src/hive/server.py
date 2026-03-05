@@ -523,8 +523,8 @@ Without hive, the same information would require static CLAUDE.md sections:
 
 ### Step 4 — Worker Savings
 - `worker_status()` to get delegation stats (tasks completed, tokens used)
-- Each delegated task = tokens that Claude didn't need to generate
-- Estimate saved Claude tokens from delegation
+- Each delegated task = tokens that the host didn't need to generate
+- Estimate saved host tokens from delegation
 
 ### Step 5 — Report
 ```
@@ -537,7 +537,7 @@ Vault queries: N calls
 
 Worker delegations: M tasks
   Worker tokens used: ~A
-  Claude tokens saved: ~B
+  Host tokens saved: ~B
 
 Total estimated savings: ~C tokens
 ```
@@ -1103,25 +1103,25 @@ Total estimated savings: ~C tokens
             _record(resp)
             return _format_response(resp)
         except (ConnectionError, RuntimeError) as exc:
-            return f"Ollama error: {exc}. Claude should handle this task directly."
+            return f"Ollama error: {exc}. The host should handle this task directly."
 
     async def _try_openrouter_free(prompt: str, context: str, max_tokens: int) -> str:
         if openrouter is None:
-            return "OpenRouter not configured. Claude should handle this task directly."
+            return "OpenRouter not configured. The host should handle this task directly."
         try:
             resp = await openrouter.generate(prompt, context=context, max_tokens=max_tokens)
             _record(resp)
             return _format_response(resp)
         except (ConnectionError, RuntimeError) as exc:
-            return f"OpenRouter error: {exc}. Claude should handle this task directly."
+            return f"OpenRouter error: {exc}. The host should handle this task directly."
 
     async def _try_openrouter_paid(
         prompt: str, context: str, max_tokens: int, max_cost: float
     ) -> str:
         if openrouter is None:
-            return "OpenRouter not configured. Claude should handle this task directly."
+            return "OpenRouter not configured. The host should handle this task directly."
         if not budget.can_spend(settings.openrouter_budget, max_cost):
-            return "Monthly budget exhausted. Claude should handle this task directly."
+            return "Monthly budget exhausted. The host should handle this task directly."
         try:
             resp = await openrouter.generate(
                 prompt,
@@ -1132,13 +1132,13 @@ Total estimated savings: ~C tokens
             _record(resp)
             return _format_response(resp)
         except (ConnectionError, RuntimeError) as exc:
-            return f"OpenRouter paid error: {exc}. Claude should handle this task directly."
+            return f"OpenRouter paid error: {exc}. The host should handle this task directly."
 
     async def _try_openrouter_specific(
         prompt: str, context: str, max_tokens: int, model_id: str
     ) -> str:
         if openrouter is None:
-            return "OpenRouter not configured. Claude should handle this task directly."
+            return "OpenRouter not configured. The host should handle this task directly."
         try:
             resp = await openrouter.generate(
                 prompt, context=context, model=model_id, max_tokens=max_tokens
@@ -1146,7 +1146,8 @@ Total estimated savings: ~C tokens
             _record(resp)
             return _format_response(resp)
         except (ConnectionError, RuntimeError) as exc:
-            return f"OpenRouter error ({model_id}): {exc}. Claude should handle this task directly."
+            msg = f"OpenRouter error ({model_id}): {exc}"
+            return f"{msg}. The host should handle this task directly."
 
     @mcp.tool
     async def delegate_task(
@@ -1219,7 +1220,7 @@ Total estimated savings: ~C tokens
 
         # All tiers exhausted
         reasons = "; ".join(errors)
-        return f"All workers unavailable. [{reasons}]. Claude should handle this task directly."
+        return f"All workers unavailable. [{reasons}]. The host should handle this task directly."
 
     @mcp.tool
     async def list_models() -> str:

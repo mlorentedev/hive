@@ -26,7 +26,7 @@ The OpenRouter API key supports two names for convenience:
 
 If both are set, the `HIVE_` prefixed version takes precedence.
 
-## Example: Full Configuration
+## Example: Full Configuration (Claude Code)
 
 ```bash
 claude mcp add hive \
@@ -43,8 +43,11 @@ claude mcp add hive \
 If you only need vault access and don't want worker delegation:
 
 ```bash
+# Claude Code
 claude mcp add hive -e VAULT_PATH=$HOME/my-vault -- uvx hive-vault
 ```
+
+For other MCP clients, pass the same environment variables through your client's MCP server configuration.
 
 Worker tools will still be available but will return "no providers available" when called.
 

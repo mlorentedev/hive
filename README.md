@@ -13,23 +13,27 @@ AI coding assistants load context statically. A typical `CLAUDE.md` grows to 800
 
 ## The Solution
 
-Hive replaces static context with **on-demand vault queries** via the [Model Context Protocol](https://modelcontextprotocol.io/). Your knowledge stays in an Obsidian vault. Claude Code loads only what it needs, when it needs it.
+Hive replaces static context with **on-demand vault queries** via the [Model Context Protocol](https://modelcontextprotocol.io/). Your knowledge stays in an Obsidian vault. Your AI assistant loads only what it needs, when it needs it.
 
-For tasks that don't need Claude's full reasoning, Hive **delegates to cheaper models** (local Ollama or cloud OpenRouter) with automatic routing and budget controls.
+For tasks that don't need your primary model's full reasoning, Hive **delegates to cheaper models** (local Ollama or cloud OpenRouter) with automatic routing and budget controls.
+
+**Works with any MCP client:** Claude Code, Codex CLI, Gemini CLI, Cursor, Windsurf, and others.
 
 **Measured result:** 67–82% token reduction on targeted queries vs static context loading.
 
 ## Quick Start
 
+**Claude Code:**
 ```bash
 claude mcp add hive -- uvx hive-vault
 ```
 
-That's it. No cloning, no venv, no setup. `uvx` handles everything.
+**Other MCP clients:** point your client's MCP config at `uvx hive-vault` via stdio transport. See your client's docs for the exact syntax.
 
 To configure the vault path (defaults to `~/Projects/knowledge`):
 
 ```bash
+# Claude Code example
 claude mcp add hive -e VAULT_PATH=/path/to/your/vault -- uvx hive-vault
 ```
 
@@ -93,7 +97,7 @@ claude mcp add hive -e VAULT_PATH=/path/to/your/vault -- uvx hive-vault
 ## Architecture
 
 ```
-Claude Code (orchestrator)
+MCP Host (Claude Code, Codex CLI, Cursor, ...)
     └── hive (MCP server, stdio)
             ├── Vault Tools ──── Obsidian vault (~/Projects/knowledge/)
             │     query, search, update, create, summarize,
@@ -103,7 +107,7 @@ Claude Code (orchestrator)
                   list_models        1. Ollama (local, free)
                   worker_status      2. OpenRouter free tier
                                      3. OpenRouter paid ($5/mo cap)
-                                     4. Reject → Claude handles it
+                                     4. Reject → host handles it
 ```
 
 ## Worker Routing
@@ -113,7 +117,7 @@ Tasks are routed through a tiered system that minimizes cost:
 1. **Ollama** (local) — Free. Runs on homelab hardware. Best for trivial tasks.
 2. **OpenRouter free** — Free tier models (Qwen3 Coder 480B). Real code work.
 3. **OpenRouter paid** — DeepSeek V3.2 at $0.28/1M tokens. Only when `max_cost_per_request > 0` and monthly budget allows.
-4. **Reject** — Returns error so Claude handles the task directly.
+4. **Reject** — Returns error so the host handles the task directly.
 
 ## Vault Structure
 

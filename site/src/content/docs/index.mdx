@@ -3,7 +3,7 @@ title: Hive
 description: Unified MCP server for AI-assisted development — on-demand Obsidian vault access + worker delegation.
 template: splash
 hero:
-  tagline: On-demand Obsidian vault access + worker delegation for Claude Code via MCP.
+  tagline: On-demand Obsidian vault access + worker delegation for any MCP client.
   actions:
     - text: Get Started
       link: /hive/getting-started/
@@ -41,8 +41,11 @@ Hive replaces static context with **on-demand vault queries** via the [Model Con
 
 ## Quick Install
 
+**Claude Code:**
 ```bash
 claude mcp add hive -- uvx hive-vault
 ```
 
-That's it. No cloning, no venv, no setup. [Learn more →](/hive/getting-started/)
+**Other clients:** point your MCP config at `uvx hive-vault` via stdio transport.
+
+No cloning, no venv, no setup. [Learn more →](/hive/getting-started/)

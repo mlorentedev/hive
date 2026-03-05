@@ -5,7 +5,7 @@ description: Install and configure Hive in under a minute.
 
 ## Prerequisites
 
-- [Claude Code](https://docs.anthropic.com/en/docs/build-with-claude/claude-code/overview) installed
+- An MCP-compatible client — [Claude Code](https://docs.anthropic.com/en/docs/build-with-claude/claude-code/overview), [Codex CLI](https://github.com/openai/codex), [Cursor](https://cursor.com/), [Windsurf](https://windsurf.com/), or any other MCP host
 - An [Obsidian](https://obsidian.md/) vault (or any directory of Markdown files) — see [Vault Structure](/hive/guides/vault-structure/) for the expected layout
 - **Optional for worker delegation:**
   - [Ollama](https://ollama.com/download) running locally — pull a model with `ollama pull qwen2.5-coder:7b`
@@ -13,7 +13,7 @@ description: Install and configure Hive in under a minute.
 
 ## Install
 
-Register Hive as an MCP server for Claude Code:
+Register Hive as an MCP server. Example with Claude Code:
 
 ```bash
 claude mcp add hive -- uvx hive-vault
@@ -23,11 +23,11 @@ claude mcp add hive -- uvx hive-vault
 
 ## First Query
 
-Once registered, Claude Code can use Hive tools. Try asking Claude:
+Once registered, your AI assistant can use Hive tools. Try asking:
 
 > "Use vault_query to load context for my-project"
 
-Claude will call:
+The assistant will call:
 
 ```python
 vault_query(project="my-project", section="context")
@@ -59,7 +59,7 @@ See [Configuration](/hive/configuration/) for all environment variables.
 
 ## Verify
 
-Ask Claude to run a health check:
+Run a health check:
 
 > "Use vault_health to check my vault"
 

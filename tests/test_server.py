@@ -1191,7 +1191,7 @@ class TestDelegateTaskAutoRouting:
         ollama.is_available = AsyncMock(return_value=False)  # type: ignore[method-assign]
         openrouter.generate = AsyncMock(side_effect=ConnectionError("down"))  # type: ignore[method-assign]
         result = _text(await worker.call_tool("delegate_task", {"prompt": "test"}))
-        assert "Claude should handle this task directly" in result
+        assert "The host should handle this task directly" in result
 
 
 # ── delegate_task: budget enforcement ───────────────────────────────
@@ -1210,7 +1210,7 @@ class TestDelegateTaskBudget:
         result = _text(
             await worker.call_tool("delegate_task", {"prompt": "test", "max_cost_per_request": 0.0})
         )
-        assert "Claude should handle this task directly" in result
+        assert "The host should handle this task directly" in result
 
     @pytest.mark.asyncio
     async def test_max_cost_allows_paid_fallback(
@@ -1265,7 +1265,7 @@ class TestDelegateTaskBudget:
                 "delegate_task", {"prompt": "test", "max_cost_per_request": 0.10}
             )
         )
-        assert "Claude should handle this task directly" in result
+        assert "The host should handle this task directly" in result
 
 
 # ── delegate_task: explicit model ───────────────────────────────────
