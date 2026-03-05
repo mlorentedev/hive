@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.2.0](https://github.com/mlorentedev/hive/compare/v1.1.0...v1.2.0) (2026-03-05)
+
+
+### Features
+
+* add capture_lesson tool for inline lesson extraction (P2) ([100c712](https://github.com/mlorentedev/hive/commit/100c712e48137bbe29ee4c8075239dae2eca1c61))
+* benchmarking suite + lower default budget to $1/mo ([6754c16](https://github.com/mlorentedev/hive/commit/6754c1640c18b7989e4a1799dd570f4587781a06))
+* configurable paid model + auto-upgrade MCP registration ([6b5e06d](https://github.com/mlorentedev/hive/commit/6b5e06d0eada7ff3f627304c8e4bc1cf9c48d720))
+* increase vault_search/smart_search max_lines default to 500 ([73726a3](https://github.com/mlorentedev/hive/commit/73726a3b17194512ea30df99da8268b1dafec1dc))
+
+
+### Documentation
+
+* add benchmark characterization guide to site ([a1b47f6](https://github.com/mlorentedev/hive/commit/a1b47f684f38b4056d5208128e3da790a3aee412))
+* add upgrade instructions for uvx users ([164b818](https://github.com/mlorentedev/hive/commit/164b8186f777527d8d0a816e60c5313ce4e5f77a))
+* update site with paid model, budget, and benchmarks ([e69198b](https://github.com/mlorentedev/hive/commit/e69198bfc845581a6fc95f8377712cfb236d5294))
+
 ## [1.1.0](https://github.com/mlorentedev/hive/compare/v1.0.0...v1.1.0) (2026-03-05)
 
 
