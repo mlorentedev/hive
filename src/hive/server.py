@@ -631,7 +631,7 @@ Total estimated savings: ~C tokens
     @mcp.tool
     def vault_search(
         query: str,
-        max_lines: int = 100,
+        max_lines: int = 500,
         type_filter: str = "",
         status_filter: str = "",
         tag_filter: str = "",
@@ -887,7 +887,7 @@ Total estimated savings: ~C tokens
     def vault_smart_search(
         query: str,
         max_results: int = 10,
-        max_lines: int = 100,
+        max_lines: int = 500,
     ) -> str:
         """Ranked full-text search across the vault with frontmatter-aware scoring.
 
