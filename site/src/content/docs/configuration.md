@@ -16,6 +16,7 @@ All configuration is done through environment variables, passed when registering
 | `HIVE_OPENROUTER_MODEL` | `qwen/qwen3-coder:free` | Default OpenRouter model |
 | `HIVE_OPENROUTER_BUDGET` | `5.0` | Monthly budget cap in USD |
 | `HIVE_DB_PATH` | `~/.local/share/hive/worker.db` | SQLite database for budget/usage tracking |
+| `HIVE_RELEVANCE_DB_PATH` | `~/.local/share/hive/relevance.db` | SQLite database for adaptive context scoring |
 
 ## API Key Resolution
 
@@ -74,3 +75,34 @@ If Ollama runs on a different machine (e.g., a homelab), set `HIVE_OLLAMA_ENDPOI
 3. Pass it as `OPENROUTER_API_KEY` when registering the MCP server
 
 The default model (`qwen/qwen3-coder:free`) is free. Paid models are only used when you explicitly set `max_cost_per_request > 0` on `delegate_task` calls, and are capped by `HIVE_OPENROUTER_BUDGET`.
+
+## Activating Hive in Your Workflow
+
+Installing and registering Hive makes the tools *available*, but your AI assistant needs guidance on **when** to use them. The `CLAUDE.md` file (or equivalent instructions in your MCP client) is the key.
+
+Without explicit instructions, your assistant *might* use Hive tools, but inconsistently. With clear instructions, it uses them **predictably** for every relevant query.
+
+### Recommended CLAUDE.md Snippet
+
+Add this to your project's `CLAUDE.md` (or global `~/.claude/CLAUDE.md`):
+
+```markdown
+## Vault & Knowledge (Hive MCP)
+
+When hive-vault MCP is available, use it for on-demand context:
+- `vault_query(project="myproject", section="context")` — project overview
+- `vault_query(project="myproject", section="tasks")` — active backlog
+- `vault_search(query="...")` — cross-vault search
+- `session_briefing(project="myproject")` — full context in one call
+
+When writing to the vault: lessons → `90-lessons.md`, decisions → `30-architecture/`.
+```
+
+Replace `myproject` with your actual project slug (the directory name under `10_projects/`).
+
+### How MCP Tool Selection Works
+
+1. **Registration** — MCP servers are loaded at session start. Your client sees all tools from all servers.
+2. **Discovery** — The assistant reads tool names and descriptions to understand capabilities.
+3. **Routing** — Your `CLAUDE.md` instructions tell the assistant which tools to prefer for which situations. Multiple MCP servers coexist without conflict — each serves its domain.
+4. **Adaptation** — Hive's `session_briefing` learns from your usage patterns. Sections you query often get prioritized automatically in future briefings.

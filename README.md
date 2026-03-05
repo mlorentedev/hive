@@ -93,6 +93,7 @@ claude mcp add hive -e VAULT_PATH=/path/to/your/vault -- uvx hive-vault
 | `HIVE_OPENROUTER_MODEL` | `qwen/qwen3-coder:free` | Default OpenRouter model |
 | `HIVE_OPENROUTER_BUDGET` | `5.0` | Monthly budget cap in USD |
 | `HIVE_DB_PATH` | `~/.local/share/hive/worker.db` | SQLite database for budget tracking |
+| `HIVE_RELEVANCE_DB_PATH` | `~/.local/share/hive/relevance.db` | SQLite database for adaptive context scoring |
 
 ## Architecture
 
@@ -109,6 +110,28 @@ MCP Host (Claude Code, Codex CLI, Cursor, ...)
                                      3. OpenRouter paid ($5/mo cap)
                                      4. Reject → host handles it
 ```
+
+## Maximizing Hive with CLAUDE.md
+
+MCP servers don't activate themselves — your AI assistant needs guidance on **when** and **how** to use each tool. The `CLAUDE.md` file (or equivalent in your MCP client) is the key lever.
+
+Add instructions like these to your project's `CLAUDE.md`:
+
+```markdown
+## Vault & Knowledge (Hive MCP)
+
+When hive-vault MCP is available, use it for on-demand context:
+- `vault_query(project="myproject", section="context")` — project overview
+- `vault_query(project="myproject", section="tasks")` — active backlog
+- `vault_search(query="...")` — cross-vault search
+- `session_briefing(project="myproject")` — full context in one call
+
+When writing to the vault: lessons → `90-lessons.md`, decisions → `30-architecture/`.
+```
+
+Without these instructions, your assistant *might* use Hive, but inconsistently. With them, it uses Hive **predictably** for every relevant query.
+
+**How it works:** Your MCP client loads all available tools at session start. The assistant sees tool names and descriptions, but `CLAUDE.md` instructions tell it which tools to prefer for which situations. Multiple MCP servers coexist — they don't compete. Each serves its domain, and your instructions guide the routing.
 
 ## Worker Routing
 
