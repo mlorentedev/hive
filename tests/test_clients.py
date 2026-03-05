@@ -130,17 +130,17 @@ class TestOpenRouterGenerate:
             json_data={
                 "choices": [{"message": {"content": "ok"}}],
                 "usage": {"total_tokens": 10},
-                "model": "deepseek/deepseek-chat-v3-0324:free",
+                "model": "deepseek/deepseek-v3.2",
             }
         )
         with patch.object(
             client._http, "post", new_callable=AsyncMock, return_value=mock_resp
         ) as mock_post:
-            await client.generate("test", model="deepseek/deepseek-chat-v3-0324:free")
+            await client.generate("test", model="deepseek/deepseek-v3.2")
 
         # Verify the explicit model was sent in the request body
         call_kwargs = mock_post.call_args
-        assert call_kwargs[1]["json"]["model"] == "deepseek/deepseek-chat-v3-0324:free"
+        assert call_kwargs[1]["json"]["model"] == "deepseek/deepseek-v3.2"
 
     @pytest.mark.asyncio
     async def test_generate_rate_limit(self) -> None:

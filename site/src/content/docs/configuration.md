@@ -13,7 +13,8 @@ All configuration is done through environment variables, passed when registering
 | `HIVE_OLLAMA_ENDPOINT` | `http://localhost:11434` | Ollama API endpoint |
 | `HIVE_OLLAMA_MODEL` | `qwen2.5-coder:7b` | Default Ollama model |
 | `HIVE_OPENROUTER_API_KEY` | — | OpenRouter API key |
-| `HIVE_OPENROUTER_MODEL` | `qwen/qwen3-coder:free` | Default OpenRouter model |
+| `HIVE_OPENROUTER_MODEL` | `qwen/qwen3-coder:free` | Default OpenRouter model (free tier) |
+| `HIVE_OPENROUTER_PAID_MODEL` | `qwen/qwen3-coder` | Paid tier model for delegate_task |
 | `HIVE_OPENROUTER_BUDGET` | `5.0` | Monthly budget cap in USD |
 | `HIVE_DB_PATH` | `~/.local/share/hive/worker.db` | SQLite database for budget/usage tracking |
 | `HIVE_RELEVANCE_DB_PATH` | `~/.local/share/hive/relevance.db` | SQLite database for adaptive context scoring |
@@ -36,8 +37,10 @@ claude mcp add hive \
   -e HIVE_OLLAMA_MODEL=qwen2.5-coder:7b \
   -e OPENROUTER_API_KEY=sk-or-v1-abc123 \
   -e HIVE_OPENROUTER_BUDGET=10.0 \
-  -- uvx hive-vault
+  -- uvx --upgrade hive-vault
 ```
+
+The `--upgrade` flag ensures you always get the latest version from PyPI on each session start.
 
 ## Example: Vault Only (No Worker)
 
@@ -45,7 +48,7 @@ If you only need vault access and don't want worker delegation:
 
 ```bash
 # Claude Code
-claude mcp add hive -e VAULT_PATH=$HOME/my-vault -- uvx hive-vault
+claude mcp add hive -e VAULT_PATH=$HOME/my-vault -- uvx --upgrade hive-vault
 ```
 
 For other MCP clients, pass the same environment variables through your client's MCP server configuration.

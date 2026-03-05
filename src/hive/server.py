@@ -1158,7 +1158,7 @@ Total estimated savings: ~C tokens
             resp = await openrouter.generate(
                 prompt,
                 context=context,
-                model="deepseek/deepseek-chat-v3-0324:free",
+                model=settings.openrouter_paid_model,
                 max_tokens=max_tokens,
             )
             _record(resp)
@@ -1242,7 +1242,7 @@ Total estimated savings: ~C tokens
                 resp = await openrouter.generate(
                     prompt,
                     context=context,
-                    model="deepseek/deepseek-chat-v3-0324:free",
+                    model=settings.openrouter_paid_model,
                     max_tokens=max_tokens,
                 )
                 _record(resp)

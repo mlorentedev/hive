@@ -43,9 +43,9 @@ Hive replaces static context with **on-demand vault queries** via the [Model Con
 
 **Claude Code:**
 ```bash
-claude mcp add hive -- uvx hive-vault
+claude mcp add hive -- uvx --upgrade hive-vault
 ```
 
-**Other clients:** point your MCP config at `uvx hive-vault` via stdio transport.
+**Other clients:** point your MCP config at `uvx --upgrade hive-vault` via stdio transport.
 
 No cloning, no venv, no setup. [Learn more →](/hive/getting-started/)

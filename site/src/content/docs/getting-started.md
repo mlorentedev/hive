@@ -16,10 +16,10 @@ description: Install and configure Hive in under a minute.
 Register Hive as an MCP server. Example with Claude Code:
 
 ```bash
-claude mcp add hive -- uvx hive-vault
+claude mcp add hive -- uvx --upgrade hive-vault
 ```
 
-`uvx` handles the Python environment automatically. No cloning, no venv.
+The `--upgrade` flag ensures you always get the latest version from PyPI on each session start. `uvx` handles the Python environment automatically — no cloning, no venv.
 
 ## First Query
 
@@ -40,7 +40,7 @@ And get back the contents of `~/Projects/knowledge/10_projects/my-project/00-con
 By default, Hive looks for your vault at `~/Projects/knowledge`. To change it:
 
 ```bash
-claude mcp add hive -e VAULT_PATH=/path/to/your/vault -- uvx hive-vault
+claude mcp add hive -e VAULT_PATH=/path/to/your/vault -- uvx --upgrade hive-vault
 ```
 
 ## Configure Worker (Optional)
@@ -52,7 +52,7 @@ claude mcp add hive \
   -e VAULT_PATH=/path/to/your/vault \
   -e HIVE_OLLAMA_ENDPOINT=http://your-ollama:11434 \
   -e OPENROUTER_API_KEY=sk-or-... \
-  -- uvx hive-vault
+  -- uvx --upgrade hive-vault
 ```
 
 See [Configuration](/hive/configuration/) for all environment variables.

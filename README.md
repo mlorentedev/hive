@@ -25,21 +25,23 @@ For tasks that don't need your primary model's full reasoning, Hive **delegates 
 
 **Claude Code:**
 ```bash
-claude mcp add hive -- uvx hive-vault
+claude mcp add hive -- uvx --upgrade hive-vault
 ```
 
-**Other MCP clients:** point your client's MCP config at `uvx hive-vault` via stdio transport. See your client's docs for the exact syntax.
+The `--upgrade` flag ensures you always get the latest version from PyPI on each session start.
+
+**Other MCP clients:** point your client's MCP config at `uvx --upgrade hive-vault` via stdio transport. See your client's docs for the exact syntax.
 
 To configure the vault path (defaults to `~/Projects/knowledge`):
 
 ```bash
 # Claude Code example
-claude mcp add hive -e VAULT_PATH=/path/to/your/vault -- uvx hive-vault
+claude mcp add hive -e VAULT_PATH=/path/to/your/vault -- uvx --upgrade hive-vault
 ```
 
-**Updating:**
+**Manual update** (if you prefer not to auto-upgrade on every launch):
 ```bash
-uvx --upgrade hive-vault
+uv tool upgrade hive-vault
 ```
 
 ## Tools
@@ -95,7 +97,8 @@ uvx --upgrade hive-vault
 | `HIVE_OLLAMA_ENDPOINT` | `http://localhost:11434` | Ollama API endpoint |
 | `HIVE_OLLAMA_MODEL` | `qwen2.5-coder:7b` | Default Ollama model |
 | `HIVE_OPENROUTER_API_KEY` | — | OpenRouter API key (also reads `OPENROUTER_API_KEY`) |
-| `HIVE_OPENROUTER_MODEL` | `qwen/qwen3-coder:free` | Default OpenRouter model |
+| `HIVE_OPENROUTER_MODEL` | `qwen/qwen3-coder:free` | Default OpenRouter model (free tier) |
+| `HIVE_OPENROUTER_PAID_MODEL` | `qwen/qwen3-coder` | Paid tier model for delegate_task |
 | `HIVE_OPENROUTER_BUDGET` | `5.0` | Monthly budget cap in USD |
 | `HIVE_DB_PATH` | `~/.local/share/hive/worker.db` | SQLite database for budget tracking |
 | `HIVE_RELEVANCE_DB_PATH` | `~/.local/share/hive/relevance.db` | SQLite database for adaptive context scoring |
@@ -144,7 +147,7 @@ Tasks are routed through a tiered system that minimizes cost:
 
 1. **Ollama** (local) — Free. Runs on homelab hardware. Best for trivial tasks.
 2. **OpenRouter free** — Free tier models (Qwen3 Coder 480B). Real code work.
-3. **OpenRouter paid** — DeepSeek V3.2 at $0.28/1M tokens. Only when `max_cost_per_request > 0` and monthly budget allows.
+3. **OpenRouter paid** — Qwen3 Coder ($0.22/M input, $1.00/M output). Only when `max_cost_per_request > 0` and monthly budget allows.
 4. **Reject** — Returns error so the host handles the task directly.
 
 ## Vault Structure

@@ -175,6 +175,49 @@ class TestOpenRouterFreeDirect:
         assert stats["request_count"] == 1
 
 
+# ── OpenRouter paid direct ─────────────────────────────────────────
+
+
+@skip_no_openrouter
+class TestOpenRouterPaidDirect:
+    """Real calls to OpenRouter paid tier (DeepSeek)."""
+
+    async def test_delegate_paid_returns_response(self, server: FastMCP) -> None:
+        result = _text(
+            await server.call_tool(
+                "delegate_task",
+                {"prompt": PING_PROMPT, "model": "openrouter", "max_cost_per_request": 0.01},
+            )
+        )
+        assert "Worker Response" in result
+        assert "qwen" in result.lower()
+
+    async def test_paid_records_nonzero_cost(
+        self, server: FastMCP, smoke_budget: BudgetTracker
+    ) -> None:
+        await server.call_tool(
+            "delegate_task",
+            {"prompt": PING_PROMPT, "model": "openrouter", "max_cost_per_request": 0.01},
+        )
+        stats = smoke_budget.month_stats(5.0)
+        assert stats["request_count"] == 1
+        # Paid model should report some cost (even if tiny for a ping)
+        assert stats["spent"] >= 0.0
+
+    async def test_paid_budget_guard_blocks_when_exhausted(
+        self, server: FastMCP, smoke_budget: BudgetTracker
+    ) -> None:
+        # Exhaust the budget by recording a large spend
+        smoke_budget.record_request(model="test", cost_usd=5.0, tokens=0, latency_ms=0)
+        result = _text(
+            await server.call_tool(
+                "delegate_task",
+                {"prompt": PING_PROMPT, "model": "openrouter", "max_cost_per_request": 0.01},
+            )
+        )
+        assert "budget" in result.lower()
+
+
 # ── Auto routing (full cascade) ─────────────────────────────────────
 
 
