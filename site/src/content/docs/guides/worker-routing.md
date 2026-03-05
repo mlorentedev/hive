@@ -29,13 +29,14 @@ delegate_task(prompt, context, max_cost_per_request)
 |---|---|---|---|
 | 1 | Ollama (local) | qwen2.5-coder:7b | Free |
 | 2 | OpenRouter | qwen/qwen3-coder:free | Free |
-| 3 | OpenRouter | deepseek/deepseek-chat | ~$0.28/1M tokens |
+| 3 | OpenRouter | qwen/qwen3-coder | $0.22/1M input, $1.00/1M output |
 | 4 | Reject | — | — |
 
 ## Budget Controls
 
-- **Monthly cap**: `HIVE_OPENROUTER_BUDGET` (default: $5.00)
+- **Monthly cap**: `HIVE_OPENROUTER_BUDGET` (default: $1.00)
 - **Per-request cap**: `max_cost_per_request` parameter on `delegate_task`
+- **Paid model**: `HIVE_OPENROUTER_PAID_MODEL` (default: `qwen/qwen3-coder`)
 - Budget tracking uses SQLite with WAL mode for concurrent access
 
 ## When to Delegate

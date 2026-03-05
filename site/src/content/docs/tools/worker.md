@@ -22,7 +22,7 @@ When no explicit model is specified, tasks are routed through tiers in order:
 
 1. **Ollama** (local) — Free. Best for trivial tasks. Falls through if unavailable.
 2. **OpenRouter free** — Free tier models (e.g., Qwen3 Coder 480B). Real code work.
-3. **OpenRouter paid** — Only when `max_cost_per_request > 0` and monthly budget allows.
+3. **OpenRouter paid** — Only when `max_cost_per_request > 0` and monthly budget allows. Model configurable via `HIVE_OPENROUTER_PAID_MODEL`.
 4. **Reject** — Returns error so the host handles the task directly.
 
 ### Explicit Model Selection
@@ -37,7 +37,7 @@ delegate_task(prompt="...", model="ollama:qwen2.5-coder:7b")
 delegate_task(prompt="...", model="openrouter:qwen/qwen3-coder:free")
 
 # Force OpenRouter paid
-delegate_task(prompt="...", model="openrouter:deepseek/deepseek-chat-v3-0324:free", max_cost_per_request=0.01)
+delegate_task(prompt="...", model="openrouter:qwen/qwen3-coder", max_cost_per_request=0.01)
 ```
 
 ### Response Format
