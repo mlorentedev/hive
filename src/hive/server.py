@@ -209,18 +209,24 @@ def create_server(
     tracker = usage_tracker or UsageTracker()
     budget = budget_tracker or BudgetTracker(db_path=settings.db_path)
     ollama = ollama_client or OllamaClient(
-        endpoint=settings.ollama_endpoint, model=settings.ollama_model
+        endpoint=settings.ollama_endpoint, model=settings.ollama_model,
+        timeout=settings.http_timeout,
     )
     openrouter: OpenRouterClient | None = None
     if openrouter_client is not None:
         openrouter = openrouter_client
     elif settings.openrouter_api_key:
         openrouter = OpenRouterClient(
-            api_key=settings.openrouter_api_key, default_model=settings.openrouter_model
+            api_key=settings.openrouter_api_key, default_model=settings.openrouter_model,
+            timeout=settings.http_timeout,
         )
     relevance = relevance_tracker or RelevanceTracker(
         db_path=settings.relevance_db_path,
+        alpha=settings.relevance_alpha,
+        decay_factor=settings.relevance_decay,
+        epsilon=settings.relevance_epsilon,
     )
+    stale_days = settings.stale_threshold_days
     mcp = FastMCP("Hive")
 
     def _track(
@@ -266,7 +272,7 @@ def create_server(
     @mcp.resource("hive://health")
     def health_resource() -> str:
         """Vault health metrics for all projects."""
-        stale_threshold = date.today() - timedelta(days=180)
+        stale_threshold = date.today() - timedelta(days=stale_days)
         lines = ["# Vault Health Report", ""]
         found_any = False
 
@@ -313,7 +319,7 @@ def create_server(
                     lines.append(f"- Missing sections: {', '.join(missing)}")
                 if stale_files:
                     lines.append(
-                        f"- Stale files (>180d): {', '.join(sorted(stale_files))}"
+                        f"- Stale files (>{stale_days}d): {', '.join(sorted(stale_files))}"
                     )
                 lines.append("")
 
@@ -688,7 +694,7 @@ Total estimated savings: ~C tokens
     @mcp.tool
     def vault_health() -> str:
         """Return health metrics for all vault projects."""
-        stale_threshold = date.today() - timedelta(days=180)
+        stale_threshold = date.today() - timedelta(days=stale_days)
         lines = ["# Vault Health Report", ""]
         found_any = False
 
@@ -735,7 +741,7 @@ Total estimated savings: ~C tokens
                     lines.append(f"- Missing sections: {', '.join(missing)}")
                 if stale_files:
                     lines.append(
-                        f"- Stale files (>180d): {', '.join(sorted(stale_files))}"
+                        f"- Stale files (>{stale_days}d): {', '.join(sorted(stale_files))}"
                     )
                 lines.append("")
 
@@ -1059,7 +1065,7 @@ Total estimated savings: ~C tokens
 
         # Health (always shown, not ranked)
         md_files = list(project_dir.rglob("*.md"))
-        stale_threshold = date.today() - timedelta(days=180)
+        stale_threshold = date.today() - timedelta(days=stale_days)
         stale_count = 0
         for f in md_files:
             try:

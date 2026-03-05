@@ -34,10 +34,10 @@ class ModelInfo:
 class OllamaClient:
     """Async client for Ollama's /api/chat endpoint."""
 
-    def __init__(self, endpoint: str, model: str) -> None:
+    def __init__(self, endpoint: str, model: str, timeout: float = 120.0) -> None:
         self._endpoint = endpoint.rstrip("/")
         self._model = model
-        self._http = httpx.AsyncClient(base_url=self._endpoint, timeout=120.0)
+        self._http = httpx.AsyncClient(base_url=self._endpoint, timeout=timeout)
 
     async def generate(
         self, prompt: str, context: str = "", max_tokens: int = 2000
@@ -91,12 +91,12 @@ class OpenRouterClient:
 
     _BASE_URL = "https://openrouter.ai"
 
-    def __init__(self, api_key: str, default_model: str) -> None:
+    def __init__(self, api_key: str, default_model: str, timeout: float = 120.0) -> None:
         self._api_key = api_key
         self._default_model = default_model
         self._http = httpx.AsyncClient(
             base_url=self._BASE_URL,
-            timeout=120.0,
+            timeout=timeout,
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "X-OpenRouter-Title": "hive-worker",

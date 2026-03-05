@@ -27,7 +27,13 @@ _DEFAULT_EPSILON = 0.15
 class RelevanceTracker:
     """Track per-section relevance using Exponential Moving Average."""
 
-    def __init__(self, db_path: str = ":memory:", alpha: float = _DEFAULT_ALPHA) -> None:
+    def __init__(
+        self,
+        db_path: str = ":memory:",
+        alpha: float = _DEFAULT_ALPHA,
+        decay_factor: float = _DECAY_FACTOR,
+        epsilon: float = _DEFAULT_EPSILON,
+    ) -> None:
         if db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -35,6 +41,8 @@ class RelevanceTracker:
             self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
         self._alpha = alpha
+        self._decay_factor = decay_factor
+        self._epsilon = epsilon
 
     def record_access(
         self, project: str, section: str, *, is_write: bool = False,
@@ -67,7 +75,7 @@ class RelevanceTracker:
     def apply_decay(self) -> None:
         """Apply decay factor to all scores. Prune near-zero entries."""
         self._conn.execute(
-            "UPDATE section_scores SET score = score * ?", (_DECAY_FACTOR,),
+            "UPDATE section_scores SET score = score * ?", (self._decay_factor,),
         )
         self._conn.execute(
             "DELETE FROM section_scores WHERE score < ?", (_PRUNE_THRESHOLD,),
@@ -88,14 +96,15 @@ class RelevanceTracker:
         project: str,
         n: int = 5,
         recent_sections: list[str] | None = None,
-        epsilon: float = _DEFAULT_EPSILON,
+        epsilon: float | None = None,
     ) -> list[str]:
         """Top-N sections with epsilon-greedy exploration from recent vault changes."""
+        eps = epsilon if epsilon is not None else self._epsilon
         top = self.top_sections(project, n)
-        if not recent_sections or epsilon <= 0:
+        if not recent_sections or eps <= 0:
             return top
 
-        explore_slots = max(1, int(n * epsilon))
+        explore_slots = max(1, int(n * eps))
         candidates = [s for s in recent_sections if s not in top]
         if not candidates:
             return top

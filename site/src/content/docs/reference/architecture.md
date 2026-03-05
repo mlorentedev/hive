@@ -41,7 +41,7 @@ description: System architecture and module map.
 | `config.py` | pydantic-settings configuration with `HIVE_` env prefix |
 | `frontmatter.py` | YAML frontmatter parsing, validation, and generation |
 | `clients.py` | Async HTTP clients for Ollama and OpenRouter |
-| `budget.py` | SQLite budget tracker with WAL mode ($5/mo cap) |
+| `budget.py` | SQLite budget tracker with WAL mode ($1/mo default cap) |
 | `usage.py` | Tool call analytics and token estimation |
 | `__init__.py` | Package marker |
 

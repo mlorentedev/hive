@@ -103,6 +103,11 @@ uv tool upgrade hive-vault
 | `HIVE_OPENROUTER_BUDGET` | `1.0` | Monthly budget cap in USD |
 | `HIVE_DB_PATH` | `~/.local/share/hive/worker.db` | SQLite database for budget tracking |
 | `HIVE_RELEVANCE_DB_PATH` | `~/.local/share/hive/relevance.db` | SQLite database for adaptive context scoring |
+| `HIVE_STALE_THRESHOLD_DAYS` | `180` | Days before a vault file is flagged as stale |
+| `HIVE_HTTP_TIMEOUT` | `120.0` | HTTP timeout (seconds) for Ollama and OpenRouter |
+| `HIVE_RELEVANCE_ALPHA` | `0.3` | EMA learning rate for adaptive context scoring |
+| `HIVE_RELEVANCE_DECAY` | `0.9` | Session decay factor for relevance scores |
+| `HIVE_RELEVANCE_EPSILON` | `0.15` | Exploration ratio for session_briefing |
 
 ## Architecture
 

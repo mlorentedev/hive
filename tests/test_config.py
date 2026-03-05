@@ -72,6 +72,31 @@ class TestVaultScopes:
         }
 
 
+class TestNewDefaults:
+    def test_stale_threshold_days_default(self) -> None:
+        assert HiveSettings().stale_threshold_days == 180
+
+    def test_stale_threshold_days_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HIVE_STALE_THRESHOLD_DAYS", "90")
+        assert HiveSettings().stale_threshold_days == 90
+
+    def test_http_timeout_default(self) -> None:
+        assert HiveSettings().http_timeout == 120.0
+
+    def test_http_timeout_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HIVE_HTTP_TIMEOUT", "60")
+        assert HiveSettings().http_timeout == 60.0
+
+    def test_relevance_alpha_default(self) -> None:
+        assert HiveSettings().relevance_alpha == 0.3
+
+    def test_relevance_decay_default(self) -> None:
+        assert HiveSettings().relevance_decay == 0.9
+
+    def test_relevance_epsilon_default(self) -> None:
+        assert HiveSettings().relevance_epsilon == 0.15
+
+
 class TestValidation:
     def test_invalid_budget_type_raises(self) -> None:
         with pytest.raises(ValidationError):
