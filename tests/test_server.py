@@ -995,6 +995,110 @@ class TestSessionBriefing:
         assert "not found" in _text(result).lower()
 
 
+# ── relevance tracking ───────────────────────────────────────────────
+
+
+class TestRelevanceTracking:
+    """Tests for relevance recording in vault tools."""
+
+    async def test_vault_query_records_relevance(self, git_vault: Path) -> None:
+        from hive.relevance import RelevanceTracker
+
+        relevance = RelevanceTracker()
+        mcp = create_server(vault_path=git_vault, relevance_tracker=relevance)
+        await mcp.call_tool("vault_query", {"project": "testproject", "section": "tasks"})
+        scores = relevance.get_scores("testproject")
+        assert "tasks" in scores
+
+    async def test_vault_update_records_write_boost(self, git_vault: Path) -> None:
+        from hive.relevance import RelevanceTracker
+
+        relevance = RelevanceTracker()
+        mcp = create_server(vault_path=git_vault, relevance_tracker=relevance)
+        await mcp.call_tool("vault_update", {
+            "project": "testproject",
+            "section": "lessons",
+            "operation": "append",
+            "content": "\n## New Lesson\nTest.",
+        })
+        scores = relevance.get_scores("testproject")
+        assert "lessons" in scores
+
+    async def test_briefing_tracks_sections(self, git_vault: Path) -> None:
+        from hive.relevance import RelevanceTracker
+
+        relevance = RelevanceTracker()
+        mcp = create_server(vault_path=git_vault, relevance_tracker=relevance)
+        await mcp.call_tool("session_briefing", {"project": "testproject"})
+        scores = relevance.get_scores("testproject")
+        assert len(scores) > 0
+
+
+class TestAdaptiveBriefing:
+    """Tests for relevance-based section ordering in session_briefing."""
+
+    async def test_cold_start_includes_defaults(self, git_vault: Path) -> None:
+        """With no history, briefing should include default sections."""
+        from hive.relevance import RelevanceTracker
+
+        relevance = RelevanceTracker()
+        mcp = create_server(vault_path=git_vault, relevance_tracker=relevance)
+        result = await mcp.call_tool("session_briefing", {"project": "testproject"})
+        text = _text(result)
+        assert "Tasks" in text
+        assert "Lessons" in text
+
+    async def test_briefing_prioritizes_high_score_sections(
+        self, git_vault: Path,
+    ) -> None:
+        """After repeated task queries, briefing should show tasks first."""
+        from hive.relevance import RelevanceTracker
+
+        relevance = RelevanceTracker()
+        mcp = create_server(vault_path=git_vault, relevance_tracker=relevance)
+        # Simulate heavy tasks usage
+        for _ in range(5):
+            relevance.record_access("testproject", "tasks")
+        result = await mcp.call_tool("session_briefing", {"project": "testproject"})
+        text = _text(result)
+        tasks_pos = text.find("Tasks")
+        lessons_pos = text.find("Lessons")
+        assert tasks_pos < lessons_pos
+
+    async def test_briefing_reorders_when_lessons_dominate(
+        self, git_vault: Path,
+    ) -> None:
+        """When lessons are accessed more, they should appear before tasks."""
+        from hive.relevance import RelevanceTracker
+
+        relevance = RelevanceTracker()
+        mcp = create_server(vault_path=git_vault, relevance_tracker=relevance)
+        for _ in range(10):
+            relevance.record_access("testproject", "lessons")
+        result = await mcp.call_tool("session_briefing", {"project": "testproject"})
+        text = _text(result)
+        tasks_pos = text.find("Tasks")
+        lessons_pos = text.find("Lessons")
+        assert lessons_pos < tasks_pos
+
+
+class TestDecayOnBriefing:
+    """Verify session_briefing applies decay to prevent stale scores."""
+
+    async def test_briefing_applies_decay(self, git_vault: Path) -> None:
+        from hive.relevance import RelevanceTracker
+
+        relevance = RelevanceTracker()
+        # Record access for a section NOT in briefing so decay isn't offset
+        relevance.record_access("testproject", "roadmap")
+        score_before = relevance.get_scores("testproject")["roadmap"]
+        mcp = create_server(vault_path=git_vault, relevance_tracker=relevance)
+        await mcp.call_tool("session_briefing", {"project": "testproject"})
+        # Decay should reduce roadmap score (briefing doesn't re-access it)
+        score_after = relevance.get_scores("testproject")["roadmap"]
+        assert score_after < score_before
+
+
 # ── vault_recent ─────────────────────────────────────────────────────
 
 

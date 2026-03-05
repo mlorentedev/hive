@@ -22,6 +22,9 @@ class HiveSettings(BaseSettings):
     openrouter_budget: float = 5.0
     openrouter_model: str = "qwen/qwen3-coder:free"
     db_path: str = str(Path.home() / ".local" / "share" / "hive" / "worker.db")
+    relevance_db_path: str = str(
+        Path.home() / ".local" / "share" / "hive" / "relevance.db",
+    )
 
 
 settings = HiveSettings()

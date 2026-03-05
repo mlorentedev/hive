@@ -22,6 +22,7 @@ from hive.frontmatter import (
     parse_frontmatter,
     validate_frontmatter,
 )
+from hive.relevance import RelevanceTracker
 from hive.usage import UsageTracker
 
 _VALID_OPERATIONS = {"append", "replace"}
@@ -200,6 +201,7 @@ def create_server(
     ollama_client: OllamaClient | None = None,
     openrouter_client: OpenRouterClient | None = None,
     vault_scopes: dict[str, str] | None = None,
+    relevance_tracker: RelevanceTracker | None = None,
 ) -> FastMCP:
     """Create and configure the Hive MCP server."""
     resolved_path = vault_path or settings.vault_path
@@ -216,11 +218,19 @@ def create_server(
         openrouter = OpenRouterClient(
             api_key=settings.openrouter_api_key, default_model=settings.openrouter_model
         )
+    relevance = relevance_tracker or RelevanceTracker(
+        db_path=settings.relevance_db_path,
+    )
     mcp = FastMCP("Hive")
 
-    def _track(tool: str, result: str, project: str = "") -> str:
+    def _track(
+        tool: str, result: str, project: str = "", section: str = "",
+    ) -> str:
         """Log a tool call and return the result unchanged."""
         tracker.log_call(tool, project, len(result.splitlines()))
+        if project and section:
+            is_write = tool in {"vault_update", "vault_create"}
+            relevance.record_access(project, section, is_write=is_write)
         return result
 
     # ── Resources ────────────────────────────────────────────────────────
@@ -597,9 +607,10 @@ Total estimated savings: ~C tokens
             max_lines: Maximum lines to return. 0 = unlimited.
             include_metadata: Prepend a structured metadata line from YAML frontmatter.
         """
+        resolved_section = path or section
         result = _resolve_file(resolved_path, project, section, path, scopes)
         if isinstance(result, str):
-            return _track("vault_query", result, project)
+            return _track("vault_query", result, project, resolved_section)
         filepath = result
 
         content = filepath.read_text(encoding="utf-8")
@@ -614,7 +625,8 @@ Total estimated savings: ~C tokens
                 )
                 content = meta_line + content
 
-        return _track("vault_query", _truncate(content, max_lines), project)
+        return _track("vault_query", _truncate(content, max_lines),
+                       project, resolved_section)
 
     @mcp.tool
     def vault_search(
@@ -782,7 +794,8 @@ Total estimated savings: ~C tokens
         _git_commit(resolved_path, rel, f"vault: update {project}/{section}")
 
         return _track("vault_update",
-                       f"Updated {project}/{section} ({operation}).", project)
+                       f"Updated {project}/{section} ({operation}).",
+                       project, section)
 
     @mcp.tool
     def vault_create(
@@ -830,7 +843,8 @@ Total estimated savings: ~C tokens
         _git_commit(resolved_path, rel, f"vault: create {display_project}/{path}")
 
         return _track("vault_create",
-                       f"Created {project}/{path} (type: {doc_type}).", project)
+                       f"Created {project}/{path} (type: {doc_type}).",
+                       project, path)
 
     @mcp.tool
     def vault_summarize(
@@ -937,36 +951,34 @@ Total estimated savings: ~C tokens
                           f"Project '{project}' not found.", project)
         project_dir, _ = resolved
 
-        parts: list[str] = [f"# Session Briefing — {project}", ""]
+        # Decay stale relevance scores at session start
+        relevance.apply_decay()
 
-        # Active Tasks
-        parts.append("## Active Tasks")
+        # Build sections as keyed blocks
+        sections: dict[str, str] = {}
+
+        # Tasks
         task_result = _resolve_file(resolved_path, project, "tasks", "", scopes)
-        if isinstance(task_result, str):
-            parts.append("(not available)")
-        else:
-            parts.append(_truncate(task_result.read_text(encoding="utf-8"), 50))
-        parts.append("")
+        if not isinstance(task_result, str):
+            relevance.record_access(project, "tasks")
+            body = _truncate(task_result.read_text(encoding="utf-8"), 50)
+            sections["tasks"] = f"## Active Tasks\n{body}"
 
-        # Recent Lessons (last 30 lines)
-        parts.append("## Recent Lessons")
-        lessons_result = _resolve_file(resolved_path, project, "lessons", "", scopes)
-        if isinstance(lessons_result, str):
-            parts.append("(not available)")
-        else:
+        # Lessons
+        lessons_result = _resolve_file(
+            resolved_path, project, "lessons", "", scopes,
+        )
+        if not isinstance(lessons_result, str):
+            relevance.record_access(project, "lessons")
             lines = lessons_result.read_text(encoding="utf-8").splitlines()
             tail = lines[-30:] if len(lines) > 30 else lines
-            parts.append("\n".join(tail))
-        parts.append("")
+            sections["lessons"] = "## Recent Lessons\n" + "\n".join(tail)
 
-        # Recent Vault Activity
-        parts.append("## Recent Vault Activity")
-        git_log = _git_log(resolved_path, 5)
-        parts.append(git_log or "(no git history available)")
-        parts.append("")
+        # Git activity (always shown, not ranked)
+        git_block = "## Recent Vault Activity\n"
+        git_block += _git_log(resolved_path, 5) or "(no git history available)"
 
-        # Project Health
-        parts.append("## Project Health")
+        # Health (always shown, not ranked)
         md_files = list(project_dir.rglob("*.md"))
         stale_threshold = date.today() - timedelta(days=180)
         stale_count = 0
@@ -983,9 +995,29 @@ Total estimated savings: ~C tokens
                 created_date = date.fromtimestamp(f.stat().st_mtime)
             if created_date < stale_threshold:
                 stale_count += 1
-        parts.append(f"- Files: {len(md_files)}")
+        health_lines = [f"- Files: {len(md_files)}"]
         if stale_count:
-            parts.append(f"- Stale: {stale_count}")
+            health_lines.append(f"- Stale: {stale_count}")
+        health_block = "## Project Health\n" + "\n".join(health_lines)
+
+        # Order rankable sections by relevance (adaptive)
+        default_order = ["tasks", "lessons"]
+        scores = relevance.get_scores(project)
+        if scores:
+            ranked = sorted(
+                sections.keys(), key=lambda s: scores.get(s, 0.0), reverse=True,
+            )
+        else:
+            ranked = [s for s in default_order if s in sections]
+
+        # Assemble output: header → ranked sections → fixed sections
+        parts: list[str] = [f"# Session Briefing — {project}", ""]
+        for key in ranked:
+            parts.append(sections[key])
+            parts.append("")
+        parts.append(git_block)
+        parts.append("")
+        parts.append(health_block)
 
         return _track("session_briefing", "\n".join(parts), project)
 
