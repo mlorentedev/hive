@@ -46,7 +46,7 @@ uv tool upgrade hive-vault
 
 ## Tools
 
-### Vault Tools (11)
+### Vault Tools (12)
 
 | Tool | Description |
 |---|---|
@@ -56,6 +56,7 @@ uv tool upgrade hive-vault
 | `vault_health` | Health metrics for all vault projects (file counts, staleness, coverage) |
 | `vault_update` | Write to vault with YAML frontmatter validation + auto git commit |
 | `vault_create` | Create new files with auto-generated frontmatter + auto git commit |
+| `capture_lesson` | Capture a lesson learned inline during a session — appends to 90-lessons.md |
 | `vault_summarize` | Smart summarization — returns small files directly, delegates large ones |
 | `vault_smart_search` | Ranked search with relevance scoring (status weight + recency + match density) |
 | `session_briefing` | One-call context briefing: tasks + lessons + git log + health |
@@ -109,13 +110,13 @@ uv tool upgrade hive-vault
 MCP Host (Claude Code, Codex CLI, Cursor, ...)
     └── hive (MCP server, stdio)
             ├── Vault Tools ──── Obsidian vault (~/Projects/knowledge/)
-            │     query, search, update, create, summarize,
-            │     smart_search, briefing, recent, usage, health
+            │     query, search, update, create, capture_lesson,
+            │     summarize, smart_search, briefing, recent, usage, health
             │
             └── Worker Tools ─── delegate_task → routing:
                   list_models        1. Ollama (local, free)
                   worker_status      2. OpenRouter free tier
-                                     3. OpenRouter paid ($5/mo cap)
+                                     3. OpenRouter paid ($1/mo cap)
                                      4. Reject → host handles it
 ```
 
@@ -135,6 +136,10 @@ When hive-vault MCP is available, use it for on-demand context:
 - `session_briefing(project="myproject")` — full context in one call
 
 When writing to the vault: lessons → `90-lessons.md`, decisions → `30-architecture/`.
+
+When you discover a lesson (bug root cause, architectural insight, debugging trick):
+- `capture_lesson(project="myproject", title="...", context="...", problem="...", solution="...")`
+- Don't wait until session end — capture inline when the insight is fresh.
 ```
 
 Without these instructions, your assistant *might* use Hive, but inconsistently. With them, it uses Hive **predictably** for every relevant query.

@@ -1,6 +1,6 @@
 ---
 title: Vault Tools
-description: 11 tools for querying, searching, and managing your Obsidian vault.
+description: 12 tools for querying, searching, and managing your Obsidian vault.
 ---
 
 ## vault_list_projects
@@ -94,6 +94,25 @@ vault_create(
 ```
 
 Generates YAML frontmatter with `id`, `type`, `status: draft`, `created: today`. Auto-commits to git.
+
+## capture_lesson
+
+Capture a lesson learned inline during a session.
+
+```python
+capture_lesson(
+    project="my-project",
+    title="Root cause was stale cache",
+    context="Debugging deploy failure",
+    problem="Service returned 500 after deploy",
+    solution="Clear Redis cache after config changes",
+    tags=["deploy", "cache"]    # optional
+)
+```
+
+Appends a structured entry to `90-lessons.md` with date, context, problem, and solution. Creates the file with frontmatter if it doesn't exist. Deduplicates by title. Auto-commits to git.
+
+**When to use:** Immediately after discovering a bug root cause, architectural insight, or debugging trick — don't wait until session end.
 
 ## vault_summarize
 

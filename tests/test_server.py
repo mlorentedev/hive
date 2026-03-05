@@ -517,6 +517,171 @@ class TestVaultUpdate:
         assert "invalid" in _text(result).lower() or "operation" in _text(result).lower()
 
 
+# ── capture_lesson ───────────────────────────────────────────────────
+
+
+class TestCaptureLesson:
+    """capture_lesson tool — inline lesson extraction to vault."""
+
+    async def test_basic_capture(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "capture_lesson",
+            {
+                "project": "testproject",
+                "title": "Always validate frontmatter",
+                "context": "Writing vault_update tests",
+                "problem": "Replace operation accepted invalid YAML",
+                "solution": "Added frontmatter validation before write",
+                "tags": ["testing", "yaml"],
+            },
+        )
+        text = _text(result)
+        assert "captured" in text.lower()
+
+        lessons = (git_vault / "10_projects" / "testproject" / "90-lessons.md").read_text()
+        assert "Always validate frontmatter" in lessons
+        assert "Writing vault_update tests" in lessons
+        assert "Added frontmatter validation before write" in lessons
+
+    async def test_capture_formats_with_date(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        await mcp.call_tool(
+            "capture_lesson",
+            {
+                "project": "testproject",
+                "title": "Test lesson",
+                "context": "ctx",
+                "problem": "prob",
+                "solution": "sol",
+                "tags": ["test"],
+            },
+        )
+        lessons = (git_vault / "10_projects" / "testproject" / "90-lessons.md").read_text()
+        # Should contain date header
+        from datetime import date
+
+        assert date.today().isoformat() in lessons
+        # Should contain structured fields
+        assert "**Context:**" in lessons
+        assert "**Problem:**" in lessons
+        assert "**Solution:**" in lessons
+        assert "`#test`" in lessons
+
+    async def test_capture_preserves_existing_content(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        await mcp.call_tool(
+            "capture_lesson",
+            {
+                "project": "testproject",
+                "title": "New lesson",
+                "context": "ctx",
+                "problem": "prob",
+                "solution": "sol",
+                "tags": [],
+            },
+        )
+        lessons = (git_vault / "10_projects" / "testproject" / "90-lessons.md").read_text()
+        # Original content preserved
+        assert "Entry 1" in lessons
+        assert "New lesson" in lessons
+
+    async def test_capture_deduplicates_by_title(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        await mcp.call_tool(
+            "capture_lesson",
+            {
+                "project": "testproject",
+                "title": "Unique lesson XYZ",
+                "context": "first",
+                "problem": "prob",
+                "solution": "sol",
+                "tags": [],
+            },
+        )
+        result = await mcp.call_tool(
+            "capture_lesson",
+            {
+                "project": "testproject",
+                "title": "Unique lesson XYZ",
+                "context": "second",
+                "problem": "prob2",
+                "solution": "sol2",
+                "tags": [],
+            },
+        )
+        text = _text(result)
+        assert "already exists" in text.lower()
+
+        lessons = (git_vault / "10_projects" / "testproject" / "90-lessons.md").read_text()
+        assert lessons.count("Unique lesson XYZ") == 1
+
+    async def test_capture_creates_lessons_file_if_missing(self, git_vault: Path) -> None:
+        # Remove lessons file
+        lessons_file = git_vault / "10_projects" / "testproject" / "90-lessons.md"
+        lessons_file.unlink()
+        import subprocess
+
+        subprocess.run(["git", "add", "."], cwd=git_vault, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "remove lessons"],
+            cwd=git_vault, capture_output=True, check=True,
+        )
+
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "capture_lesson",
+            {
+                "project": "testproject",
+                "title": "First lesson",
+                "context": "ctx",
+                "problem": "prob",
+                "solution": "sol",
+                "tags": ["new"],
+            },
+        )
+        assert "captured" in _text(result).lower()
+        assert lessons_file.exists()
+        content = lessons_file.read_text()
+        assert "First lesson" in content
+
+    async def test_capture_rejects_unknown_project(self, mock_vault: Path) -> None:
+        mcp = create_server(vault_path=mock_vault)
+        result = await mcp.call_tool(
+            "capture_lesson",
+            {
+                "project": "nonexistent",
+                "title": "Test",
+                "context": "ctx",
+                "problem": "prob",
+                "solution": "sol",
+                "tags": [],
+            },
+        )
+        assert "not found" in _text(result).lower()
+
+    async def test_capture_git_commits(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        await mcp.call_tool(
+            "capture_lesson",
+            {
+                "project": "testproject",
+                "title": "Git tracked lesson",
+                "context": "ctx",
+                "problem": "prob",
+                "solution": "sol",
+                "tags": [],
+            },
+        )
+        import subprocess
+
+        log = subprocess.run(
+            ["git", "log", "--oneline", "-1"],
+            cwd=git_vault, capture_output=True, text=True, check=True,
+        )
+        assert "capture_lesson" in log.stdout or "lesson" in log.stdout.lower()
+
+
 # ── vault_create ─────────────────────────────────────────────────────
 
 

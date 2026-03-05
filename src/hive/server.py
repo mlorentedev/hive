@@ -847,6 +847,85 @@ Total estimated savings: ~C tokens
                        project, path)
 
     @mcp.tool
+    def capture_lesson(
+        project: str,
+        title: str,
+        context: str,
+        problem: str,
+        solution: str,
+        tags: list[str] | None = None,
+    ) -> str:
+        """Capture a lesson learned inline during a session.
+
+        Appends a structured lesson to the project's 90-lessons.md file.
+        Deduplicates by title to avoid recording the same lesson twice.
+
+        Args:
+            project: Project slug (directory under 10_projects/).
+            title: Short descriptive title for the lesson.
+            context: What you were doing when this came up.
+            problem: What went wrong or what decision was needed.
+            solution: What fixed it or what was decided.
+            tags: Optional list of tags (e.g. ["python", "testing"]).
+        """
+        resolved = _resolve_project_dir(resolved_path, project, scopes)
+        if resolved is None:
+            return _track("capture_lesson",
+                          f"Project '{project}' not found in vault.", project)
+        project_dir, _ = resolved
+
+        lessons_file = project_dir / "90-lessons.md"
+
+        # Read existing content for deduplication
+        existing = ""
+        if lessons_file.exists():
+            existing = lessons_file.read_text(encoding="utf-8")
+
+        # Deduplicate by title
+        if title in existing:
+            return _track(
+                "capture_lesson",
+                f"Lesson already exists: '{title}'. Skipping.",
+                project, "lessons",
+            )
+
+        # Format the lesson entry
+        tag_str = " ".join(f"`#{t}`" for t in (tags or []))
+        entry = (
+            f"\n### [{date.today().isoformat()}] {title}\n"
+            f"**Context:** {context}\n"
+            f"**Problem:** {problem}\n"
+            f"**Solution:** {solution}\n"
+        )
+        if tag_str:
+            entry += f"**Tags:** {tag_str}\n"
+
+        # Append to file (create with frontmatter if missing)
+        if not lessons_file.exists():
+            frontmatter = (
+                f"---\n"
+                f"id: {project}-lessons\n"
+                f"type: lesson\n"
+                f"status: active\n"
+                f'created: "{date.today().isoformat()}"\n'
+                f"---\n\n"
+                f"# Lessons Learned\n"
+            )
+            lessons_file.write_text(frontmatter + entry, encoding="utf-8")
+        else:
+            with lessons_file.open("a", encoding="utf-8") as f:
+                f.write(entry)
+
+        rel = lessons_file.relative_to(resolved_path)
+        _git_commit(resolved_path, rel, f"vault: capture_lesson {project} — {title}")
+
+        return _track(
+            "capture_lesson",
+            f"Lesson captured: '{title}' → {project}/90-lessons.md",
+            project, "lessons",
+        )
+
+    @mcp.tool
     def vault_summarize(
         project: str,
         section: str = "context",

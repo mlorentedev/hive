@@ -69,6 +69,6 @@ You should see project counts, file counts, and staleness metrics for each proje
 
 - [Use Cases](/hive/guides/use-cases/) — real-world workflows with Hive
 - [Configuration](/hive/configuration/) — full environment variable reference
-- [Vault Tools](/hive/tools/vault/) — all 11 vault tools
+- [Vault Tools](/hive/tools/vault/) — all 12 vault tools
 - [Worker Tools](/hive/tools/worker/) — task delegation and routing
 - [Vault Structure](/hive/guides/vault-structure/) — how to organize your vault
