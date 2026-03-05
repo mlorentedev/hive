@@ -16,3 +16,4 @@ site/dist/
 site/.astro/
 site/.vscode/
 
+.claude/plans/
