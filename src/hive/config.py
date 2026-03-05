@@ -19,7 +19,7 @@ class HiveSettings(BaseSettings):
     vault_scopes: dict[str, str] = Field(
         default={"projects": "10_projects", "meta": "00_meta"},
     )
-    openrouter_budget: float = 5.0
+    openrouter_budget: float = 1.0
     openrouter_model: str = "qwen/qwen3-coder:free"
     openrouter_paid_model: str = "qwen/qwen3-coder"
     db_path: str = str(Path.home() / ".local" / "share" / "hive" / "worker.db")

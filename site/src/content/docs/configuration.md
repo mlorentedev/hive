@@ -15,7 +15,7 @@ All configuration is done through environment variables, passed when registering
 | `HIVE_OPENROUTER_API_KEY` | — | OpenRouter API key |
 | `HIVE_OPENROUTER_MODEL` | `qwen/qwen3-coder:free` | Default OpenRouter model (free tier) |
 | `HIVE_OPENROUTER_PAID_MODEL` | `qwen/qwen3-coder` | Paid tier model for delegate_task |
-| `HIVE_OPENROUTER_BUDGET` | `5.0` | Monthly budget cap in USD |
+| `HIVE_OPENROUTER_BUDGET` | `1.0` | Monthly budget cap in USD |
 | `HIVE_DB_PATH` | `~/.local/share/hive/worker.db` | SQLite database for budget/usage tracking |
 | `HIVE_RELEVANCE_DB_PATH` | `~/.local/share/hive/relevance.db` | SQLite database for adaptive context scoring |
 

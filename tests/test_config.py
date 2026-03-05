@@ -25,7 +25,7 @@ class TestDefaults:
         assert HiveSettings().openrouter_api_key is None
 
     def test_openrouter_budget_default(self) -> None:
-        assert HiveSettings().openrouter_budget == 5.0
+        assert HiveSettings().openrouter_budget == 1.0
 
     def test_openrouter_model_default(self) -> None:
         assert HiveSettings().openrouter_model == "qwen/qwen3-coder:free"

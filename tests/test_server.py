@@ -1488,7 +1488,7 @@ class TestWorkerStatus:
         ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
         result = _text(await worker.call_tool("worker_status", {}))
         assert "1.23" in result
-        assert "5.0" in result or "3.77" in result
+        assert "$1.0" in result
 
     @pytest.mark.asyncio
     async def test_status_shows_ollama_connectivity(
