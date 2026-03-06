@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.5](https://github.com/mlorentedev/hive/compare/v1.4.4...v1.4.5) (2026-03-06)
+
+
+### Bug Fixes
+
+* **site:** correct light/dark theme accent colors ([#22](https://github.com/mlorentedev/hive/issues/22)) ([f7cf021](https://github.com/mlorentedev/hive/commit/f7cf021a2a445524f0011472bcb3190afd729e7b))
+
 ## [1.4.4](https://github.com/mlorentedev/hive/compare/v1.4.3...v1.4.4) (2026-03-06)
 
 
