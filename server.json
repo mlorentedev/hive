@@ -7,12 +7,12 @@
     "url": "https://github.com/mlorentedev/hive",
     "source": "github"
   },
-  "version": "1.4.4",
+  "version": "1.4.5",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "hive-vault",
-      "version": "1.4.4",
+      "version": "1.4.5",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
