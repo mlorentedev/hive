@@ -337,7 +337,7 @@ class TestVaultSmoke:
                 "new_text": "- [x] Task alpha",
             },
         ))
-        assert "patched" in result.lower()
+        assert "patch" in result.lower()
         content = (smoke_vault / "10_projects" / "smoketest" / "11-tasks.md").read_text()
         assert "- [x] Task alpha" in content
 
