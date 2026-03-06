@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /hive/
+
+Sitemap: https://mlorentedev.github.io/hive/sitemap-index.xml
