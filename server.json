@@ -1,0 +1,48 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.mlorentedev/hive-vault",
+  "title": "Hive Vault",
+  "description": "On-demand Obsidian vault access for AI coding assistants — 17 tools, 5 resources, 4 prompts.",
+  "repository": {
+    "url": "https://github.com/mlorentedev/hive",
+    "source": "github"
+  },
+  "version": "1.4.4",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "hive-vault",
+      "version": "1.4.4",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "VAULT_PATH",
+          "description": "Absolute path to your Obsidian vault (or any Markdown directory)",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "HIVE_OLLAMA_ENDPOINT",
+          "description": "Ollama API endpoint for local worker delegation",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "OPENROUTER_API_KEY",
+          "description": "OpenRouter API key for cloud worker delegation",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "HIVE_VAULT_SCOPES",
+          "description": "JSON mapping of scope names to vault subdirectories",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}
