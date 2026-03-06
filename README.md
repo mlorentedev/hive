@@ -3,9 +3,10 @@
 [![CI](https://github.com/mlorentedev/hive/actions/workflows/ci.yml/badge.svg)](https://github.com/mlorentedev/hive/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/hive-vault)](https://pypi.org/project/hive-vault/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://python.org)
+[![Docs](https://img.shields.io/badge/docs-hive-blue)](https://mlorentedev.github.io/hive/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Docs](https://img.shields.io/badge/docs-mlorentedev.github.io%2Fhive-blue)](https://mlorentedev.github.io/hive/)
-[![Obsidian](https://img.shields.io/badge/Obsidian-vault%20ready-7C3AED?logo=obsidian)](https://obsidian.md/)
+
+<!-- mcp-name: io.github.mlorentedev/hive-vault -->
 
 **Your AI coding assistant forgets everything between sessions. Hive fixes that.**
 
