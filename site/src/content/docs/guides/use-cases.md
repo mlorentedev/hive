@@ -81,6 +81,25 @@ vault_create(
 
 Hive auto-generates YAML frontmatter and commits to git.
 
+## Capturing Lessons Inline
+
+When you discover something important mid-task, capture it immediately without breaking your flow:
+
+> "Capture a lesson: always validate YAML frontmatter before writing to vault"
+
+```python
+capture_lesson(
+    project="my-project",
+    title="YAML frontmatter validation",
+    body="Always validate frontmatter before vault writes. Missing required fields (id, type, status) cause silent failures in downstream tools like vault_search and session_briefing.",
+    tags=["yaml", "vault", "validation"]
+)
+```
+
+The lesson is appended to the project's `90-lessons.md` with auto-generated frontmatter. If a lesson with the same title already exists, it's skipped (deduplication).
+
+This is better than waiting until end-of-session retrospective — insights captured in the moment are more accurate and less likely to be forgotten.
+
 ## Delegating Trivial Tasks
 
 Save tokens by routing simple tasks to cheaper models:

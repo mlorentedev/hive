@@ -43,6 +43,18 @@ command = "uvx"
 args = ["--upgrade", "hive-vault"]
 ```
 
+**GitHub Copilot (VS Code)** — add to `.vscode/mcp.json`:
+```json
+{
+  "servers": {
+    "hive-vault": {
+      "command": "uvx",
+      "args": ["--upgrade", "hive-vault"]
+    }
+  }
+}
+```
+
 **Other MCP clients** (Cursor, Windsurf, etc.): point your client at `uvx --upgrade hive-vault` via stdio transport.
 
 Then ask your assistant:
@@ -145,6 +157,7 @@ claude mcp add hive \
 | `HIVE_OPENROUTER_MODEL` | `qwen/qwen3-coder:free` | Default free tier model |
 | `HIVE_OPENROUTER_PAID_MODEL` | `qwen/qwen3-coder` | Paid tier model |
 | `HIVE_OPENROUTER_BUDGET` | `1.0` | Monthly budget cap (USD) |
+| `HIVE_VAULT_SCOPES` | `{"projects": "10_projects", "meta": "00_meta"}` | JSON mapping of scope names to vault subdirectories |
 
 See [full configuration reference](https://mlorentedev.github.io/hive/configuration/) for all 15 environment variables.
 
