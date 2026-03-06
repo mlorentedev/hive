@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.3](https://github.com/mlorentedev/hive/compare/v1.4.2...v1.4.3) (2026-03-06)
+
+
+### Documentation
+
+* add multi-client MCP setup (Claude, Gemini, Codex) ([b78a866](https://github.com/mlorentedev/hive/commit/b78a866c24532c6dcff3e6d8c75b8d902a7a74e9))
+* landing page overhaul — multi-client tabs, troubleshooting, model rationale ([#19](https://github.com/mlorentedev/hive/issues/19)) ([2a60e9e](https://github.com/mlorentedev/hive/commit/2a60e9ed22a9a4fda8bd3768fe5397b8e0ac7693))
+
 ## [1.4.2](https://github.com/mlorentedev/hive/compare/v1.4.1...v1.4.2) (2026-03-06)
 
 
