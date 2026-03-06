@@ -5,23 +5,26 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Unified MCP server for AI-assisted development — on-demand Obsidian vault access + worker delegation to local/cloud models.
+**Your AI coding assistant forgets everything between sessions. Hive fixes that.**
 
-## The Problem
+Every session, your assistant loads 800+ lines of static context. Most of it is irrelevant. You pay the full token cost every time. And next session? It starts from zero again.
 
-AI coding assistants load context statically. A typical `CLAUDE.md` grows to 800+ lines of standards, patterns, and project knowledge. Most of it is irrelevant to the current task. Every session pays the full token cost.
+Hive connects your AI assistant to an [Obsidian](https://obsidian.md/) vault via [MCP](https://modelcontextprotocol.io/). Instead of loading everything upfront, it queries only what's needed. Lessons learned, architecture decisions, project context — all available on demand.
 
-## The Solution
+**The numbers:**
 
-Hive replaces static context with **on-demand vault queries** via the [Model Context Protocol](https://modelcontextprotocol.io/). Your knowledge stays in an Obsidian vault. Your AI assistant loads only what it needs, when it needs it.
+| Metric | Without Hive | With Hive |
+|---|---|---|
+| Context loaded per session | ~800 lines (static) | ~50 lines (on demand) |
+| Token cost for context | 100% every session | 6% average per query |
+| Knowledge retained between sessions | 0% | 100% (in vault) |
+| Time to find past decisions | Manual search | `vault_search` in seconds |
 
-For tasks that don't need your primary model's full reasoning, Hive **delegates to cheaper models** (local Ollama or cloud OpenRouter) with automatic routing and budget controls.
+> Measured on a real vault with 19 projects, 200+ files. See [benchmarks](https://mlorentedev.github.io/hive/guides/benchmarks/).
 
-**Works with any MCP client:** Claude Code, Codex CLI, Gemini CLI, Cursor, Windsurf, and others.
+## Install (30 seconds)
 
-**Measured result:** 67–82% token reduction on targeted queries vs static context loading.
-
-## Quick Start
+One command. No cloning, no venv, no config files.
 
 **Claude Code:**
 ```bash
@@ -40,74 +43,98 @@ command = "uvx"
 args = ["--upgrade", "hive-vault"]
 ```
 
-The `--upgrade` flag ensures you always get the latest version from PyPI on each session start.
+**Other MCP clients** (Cursor, Windsurf, etc.): point your client at `uvx --upgrade hive-vault` via stdio transport.
 
-**Other MCP clients:** point your client's MCP config at `uvx --upgrade hive-vault` via stdio transport.
+Then ask your assistant:
 
-To configure the vault path (defaults to `~/Projects/knowledge`):
+> "Use vault_list_projects to see my vault"
+
+That's it. You're running.
+
+## What You Get
+
+### 14 Vault Tools — your knowledge, on demand
+
+| Tool | What it does |
+|---|---|
+| `vault_query` | Load project context, tasks, roadmap, lessons — or any file by path |
+| `vault_search` | Full-text search with metadata filters and regex support |
+| `vault_smart_search` | Ranked results with relevance scoring (status + recency + match density) |
+| `session_briefing` | One call = tasks + lessons + git log + health. Start every session here |
+| `vault_list_projects` | See all projects in your vault |
+| `vault_list_files` | Browse project structure with glob pattern filtering |
+| `vault_health` | File counts, staleness metrics, coverage gaps per project |
+| `vault_recent` | What changed in the last N days (via git + frontmatter) |
+| `vault_update` | Write to vault with YAML validation + auto git commit |
+| `vault_create` | Create files with auto-generated frontmatter + auto git commit |
+| `vault_patch` | Surgical find-and-replace with ambiguity rejection + auto git commit |
+| `capture_lesson` | Capture a lesson inline — deduplicates, appends to `90-lessons.md` |
+| `vault_summarize` | Small files returned directly, large files delegated for compression |
+| `vault_usage` | Tool call analytics — which tools, which projects, how many tokens |
+
+### 3 Worker Tools — delegate to cheaper models
+
+| Tool | What it does |
+|---|---|
+| `delegate_task` | Route tasks to Ollama (free, local) or OpenRouter (free/paid cloud) |
+| `list_models` | See all available models across providers |
+| `worker_status` | Budget remaining, connectivity, usage stats |
+
+**Routing:** Ollama first (free) → OpenRouter free tier → OpenRouter paid ($1/mo cap) → reject.
+
+Your primary model handles architecture. Cheaper models handle boilerplate.
+
+## Before / After
+
+**Before Hive** — static CLAUDE.md:
+```markdown
+# My Project
+## Architecture
+[200 lines of decisions you made 3 months ago]
+## Standards
+[150 lines of coding patterns]
+## Lessons
+[100 lines of past bugs]
+## Tasks
+[50 lines of backlog]
+# ...loaded every single session, whether relevant or not
+```
+
+**With Hive** — dynamic, on demand:
+```python
+# Only when the assistant needs architecture context:
+vault_query(project="my-project", section="context")
+
+# Only when searching for a past decision:
+vault_search(query="database migration strategy")
+
+# Start of session — just the essentials:
+session_briefing(project="my-project")
+```
+
+## Configure Your Vault
+
+Default vault path: `~/Projects/knowledge`. To change it:
 
 ```bash
 # Claude Code
-claude mcp add hive -e VAULT_PATH=/path/to/your/vault -- uvx --upgrade hive-vault
+claude mcp add hive -e VAULT_PATH=/path/to/vault -- uvx --upgrade hive-vault
 
 # Gemini CLI
-gemini mcp add -s user -e VAULT_PATH=/path/to/your/vault hive-vault uvx -- --upgrade hive-vault
+gemini mcp add -s user -e VAULT_PATH=/path/to/vault hive-vault uvx -- --upgrade hive-vault
 ```
 
-**Manual update** (if you prefer not to auto-upgrade on every launch):
+### Enable Worker Delegation (optional)
+
 ```bash
-uv tool upgrade hive-vault
+claude mcp add hive \
+  -e VAULT_PATH=/path/to/vault \
+  -e HIVE_OLLAMA_ENDPOINT=http://your-ollama:11434 \
+  -e OPENROUTER_API_KEY=sk-or-... \
+  -- uvx --upgrade hive-vault
 ```
 
-## Tools
-
-### Vault Tools (14)
-
-| Tool | Description |
-|---|---|
-| `vault_list_projects` | List all projects in the Obsidian vault |
-| `vault_query` | Read sections or files on demand (supports shortcuts: context, tasks, roadmap, lessons) |
-| `vault_search` | Full-text search across the vault with metadata filters + optional regex |
-| `vault_health` | Health metrics for all vault projects (file counts, staleness, coverage) |
-| `vault_update` | Write to vault with YAML frontmatter validation + auto git commit |
-| `vault_create` | Create new files with auto-generated frontmatter + auto git commit |
-| `vault_list_files` | List files and directories with optional glob pattern filtering |
-| `vault_patch` | Surgical text replacement in a vault file with auto git commit |
-| `capture_lesson` | Capture a lesson learned inline during a session — appends to 90-lessons.md |
-| `vault_summarize` | Smart summarization — returns small files directly, delegates large ones |
-| `vault_smart_search` | Ranked search with relevance scoring (status weight + recency + match density) |
-| `session_briefing` | One-call context briefing: tasks + lessons + git log + health |
-| `vault_recent` | Files changed in the vault in the last N days (git + frontmatter) |
-| `vault_usage` | Tool usage analytics — call counts, token estimates, breakdowns |
-
-### Worker Tools (3)
-
-| Tool | Description |
-|---|---|
-| `delegate_task` | Route tasks to cheaper models with automatic tier selection |
-| `list_models` | List available models across all providers |
-| `worker_status` | Worker health: budget remaining, connectivity, usage stats |
-
-## Resources
-
-| URI | Description |
-|---|---|
-| `hive://projects` | All vault projects with file counts and available shortcuts |
-| `hive://health` | Vault health metrics for all projects |
-| `hive://projects/{project}/context` | Project context document (00-context.md) |
-| `hive://projects/{project}/tasks` | Project task backlog (11-tasks.md) |
-| `hive://projects/{project}/lessons` | Project lessons learned (90-lessons.md) |
-
-## Prompts
-
-| Prompt | Description |
-|---|---|
-| `retrospective` | End-of-session review — extracts lessons and appends to vault |
-| `delegate` | Structured protocol for delegating tasks to cheaper models |
-| `vault_sync` | Post-sprint vault synchronization — reconcile docs with shipped code |
-| `benchmark` | Estimate token savings from hive MCP tools in the current session |
-
-## Configuration
+### All Configuration
 
 | Variable | Default | Description |
 |---|---|---|
@@ -115,85 +142,82 @@ uv tool upgrade hive-vault
 | `HIVE_OLLAMA_ENDPOINT` | `http://localhost:11434` | Ollama API endpoint |
 | `HIVE_OLLAMA_MODEL` | `qwen2.5-coder:7b` | Default Ollama model |
 | `HIVE_OPENROUTER_API_KEY` | — | OpenRouter API key (also reads `OPENROUTER_API_KEY`) |
-| `HIVE_OPENROUTER_MODEL` | `qwen/qwen3-coder:free` | Default OpenRouter model (free tier) |
-| `HIVE_OPENROUTER_PAID_MODEL` | `qwen/qwen3-coder` | Paid tier model for delegate_task |
-| `HIVE_OPENROUTER_BUDGET` | `1.0` | Monthly budget cap in USD |
-| `HIVE_DB_PATH` | `~/.local/share/hive/worker.db` | SQLite database for budget tracking |
-| `HIVE_RELEVANCE_DB_PATH` | `~/.local/share/hive/relevance.db` | SQLite database for adaptive context scoring |
-| `HIVE_STALE_THRESHOLD_DAYS` | `180` | Days before a vault file is flagged as stale |
-| `HIVE_HTTP_TIMEOUT` | `120.0` | HTTP timeout (seconds) for Ollama and OpenRouter |
-| `HIVE_RELEVANCE_ALPHA` | `0.3` | EMA learning rate for adaptive context scoring |
-| `HIVE_RELEVANCE_DECAY` | `0.9` | Session decay factor for relevance scores |
-| `HIVE_RELEVANCE_EPSILON` | `0.15` | Exploration ratio for session_briefing |
+| `HIVE_OPENROUTER_MODEL` | `qwen/qwen3-coder:free` | Default free tier model |
+| `HIVE_OPENROUTER_PAID_MODEL` | `qwen/qwen3-coder` | Paid tier model |
+| `HIVE_OPENROUTER_BUDGET` | `1.0` | Monthly budget cap (USD) |
 
-## Architecture
+See [full configuration reference](https://mlorentedev.github.io/hive/configuration/) for all 15 environment variables.
+
+## Vault Structure
+
+Hive works with any directory of Markdown files. For best results, follow this layout:
 
 ```
-MCP Host (Claude Code, Codex CLI, Cursor, ...)
-    └── hive (MCP server, stdio)
-            ├── Vault Tools ──── Obsidian vault (~/Projects/knowledge/)
-            │     query, search, update, create, capture_lesson,
-            │     summarize, smart_search, briefing, recent, usage, health
-            │
-            └── Worker Tools ─── delegate_task → routing:
-                  list_models        1. Ollama (local, free)
-                  worker_status      2. OpenRouter free tier
-                                     3. OpenRouter paid ($1/mo cap)
-                                     4. Reject → host handles it
+~/Projects/knowledge/
+├── 00_meta/patterns/          # cross-project patterns
+├── 10_projects/
+│   ├── my-project/
+│   │   ├── 00-context.md      # vault_query section="context"
+│   │   ├── 10-roadmap.md      # vault_query section="roadmap"
+│   │   ├── 11-tasks.md        # vault_query section="tasks"
+│   │   ├── 90-lessons.md      # vault_query section="lessons"
+│   │   └── 30-architecture/   # any path works with vault_query path="..."
+│   └── another-project/
+└── ...
 ```
 
-## Maximizing Hive with CLAUDE.md
+## Make Your Assistant Use Hive Consistently
 
-MCP servers don't activate themselves — your AI assistant needs guidance on **when** and **how** to use each tool. The `CLAUDE.md` file (or equivalent in your MCP client) is the key lever.
-
-Add instructions like these to your project's `CLAUDE.md`:
+MCP tools don't activate on their own. Add this to your project's `CLAUDE.md` (or equivalent):
 
 ```markdown
 ## Vault & Knowledge (Hive MCP)
 
-When hive-vault MCP is available, use it for on-demand context:
+When hive-vault MCP is available:
+- `session_briefing(project="myproject")` — start every session here
 - `vault_query(project="myproject", section="context")` — project overview
-- `vault_query(project="myproject", section="tasks")` — active backlog
-- `vault_search(query="...")` — cross-vault search
-- `session_briefing(project="myproject")` — full context in one call
-
-When writing to the vault: lessons → `90-lessons.md`, decisions → `30-architecture/`.
-
-When you discover a lesson (bug root cause, architectural insight, debugging trick):
-- `capture_lesson(project="myproject", title="...", context="...", problem="...", solution="...")`
-- Don't wait until session end — capture inline when the insight is fresh.
+- `vault_search(query="...")` — find past decisions
+- `capture_lesson(...)` — capture insights inline, don't wait until session end
 ```
 
-Without these instructions, your assistant *might* use Hive, but inconsistently. With them, it uses Hive **predictably** for every relevant query.
+Without these instructions, your assistant uses Hive inconsistently. With them, it uses Hive **every session, predictably**.
 
-**How it works:** Your MCP client loads all available tools at session start. The assistant sees tool names and descriptions, but `CLAUDE.md` instructions tell it which tools to prefer for which situations. Multiple MCP servers coexist — they don't compete. Each serves its domain, and your instructions guide the routing.
+## Resources & Prompts
 
-## Worker Routing
+**5 MCP Resources** for auto-discoverable data:
 
-Tasks are routed through a tiered system that minimizes cost:
+| URI | Description |
+|---|---|
+| `hive://projects` | All vault projects with file counts |
+| `hive://health` | Vault health metrics |
+| `hive://projects/{project}/context` | Project context |
+| `hive://projects/{project}/tasks` | Project backlog |
+| `hive://projects/{project}/lessons` | Lessons learned |
 
-1. **Ollama** (local) — Free. Runs on homelab hardware. Best for trivial tasks.
-2. **OpenRouter free** — Free tier models (Qwen3 Coder 480B). Real code work.
-3. **OpenRouter paid** — Qwen3 Coder ($0.22/M input, $1.00/M output). Only when `max_cost_per_request > 0` and monthly budget allows.
-4. **Reject** — Returns error so the host handles the task directly.
+**4 MCP Prompts** for guided workflows:
 
-## Vault Structure
+| Prompt | Description |
+|---|---|
+| `retrospective` | End-of-session review → extract lessons to vault |
+| `delegate` | Structured protocol for worker delegation |
+| `vault_sync` | Post-sprint vault sync — reconcile docs with shipped code |
+| `benchmark` | Estimate token savings from Hive in the current session |
 
-Hive expects an Obsidian vault with this layout:
+## Architecture
 
 ```
-~/Projects/knowledge/          # vault root (configurable via VAULT_PATH)
-├── 00_meta/
-│   └── patterns/              # cross-project patterns
-├── 10_projects/
-│   ├── my-project/
-│   │   ├── 00-context.md      # section shortcut: "context"
-│   │   ├── 10-roadmap.md      # section shortcut: "roadmap"
-│   │   ├── 11-tasks.md        # section shortcut: "tasks"
-│   │   ├── 90-lessons.md      # section shortcut: "lessons"
-│   │   └── 30-architecture/   # arbitrary paths
-│   └── another-project/
-└── ...
+MCP Host (Claude Code, Gemini CLI, Codex CLI, Cursor, ...)
+    └── hive-vault (MCP server, stdio)
+            ├── Vault Tools (14) ── Obsidian vault (Markdown + YAML frontmatter)
+            │     query, search, smart_search, list_files, patch,
+            │     update, create, capture_lesson, summarize,
+            │     session_briefing, recent, usage, health, list_projects
+            │
+            └── Worker Tools (3) ── Task delegation + routing:
+                  delegate_task        1. Ollama (local, free)
+                  list_models          2. OpenRouter free tier
+                  worker_status        3. OpenRouter paid ($1/mo cap)
+                                       4. Reject → host handles it
 ```
 
 ## Development
@@ -204,7 +228,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, code standards, and PR workflo
 git clone https://github.com/mlorentedev/hive.git
 cd hive
 make install   # create venv + install deps
-make check     # lint + typecheck + test
+make check     # lint + typecheck + test (265 tests, 92% coverage)
 ```
 
 ## License

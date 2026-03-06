@@ -34,16 +34,39 @@ The OpenRouter API key supports two names for convenience:
 
 If both are set, the `HIVE_` prefixed version takes precedence.
 
-## Example: Full Configuration (Claude Code)
+## Example: Full Configuration
 
+**Claude Code:**
 ```bash
 claude mcp add hive \
   -e VAULT_PATH=$HOME/my-vault \
   -e HIVE_OLLAMA_ENDPOINT=http://minipc.local:11434 \
-  -e HIVE_OLLAMA_MODEL=qwen2.5-coder:7b \
   -e OPENROUTER_API_KEY=sk-or-v1-abc123 \
   -e HIVE_OPENROUTER_BUDGET=10.0 \
   -- uvx --upgrade hive-vault
+```
+
+**Gemini CLI:**
+```bash
+gemini mcp add -s user \
+  -e VAULT_PATH=$HOME/my-vault \
+  -e HIVE_OLLAMA_ENDPOINT=http://minipc.local:11434 \
+  -e OPENROUTER_API_KEY=sk-or-v1-abc123 \
+  -e HIVE_OPENROUTER_BUDGET=10.0 \
+  hive-vault uvx -- --upgrade hive-vault
+```
+
+**Codex CLI** — add to `~/.codex/config.toml`:
+```toml
+[mcp_servers.hive-vault]
+command = "uvx"
+args = ["--upgrade", "hive-vault"]
+
+[mcp_servers.hive-vault.env]
+VAULT_PATH = "~/my-vault"
+HIVE_OLLAMA_ENDPOINT = "http://minipc.local:11434"
+OPENROUTER_API_KEY = "sk-or-v1-abc123"
+HIVE_OPENROUTER_BUDGET = "10.0"
 ```
 
 The `--upgrade` flag ensures you always get the latest version from PyPI on each session start.
@@ -55,6 +78,9 @@ If you only need vault access and don't want worker delegation:
 ```bash
 # Claude Code
 claude mcp add hive -e VAULT_PATH=$HOME/my-vault -- uvx --upgrade hive-vault
+
+# Gemini CLI
+gemini mcp add -s user -e VAULT_PATH=$HOME/my-vault hive-vault uvx -- --upgrade hive-vault
 ```
 
 For other MCP clients, pass the same environment variables through your client's MCP server configuration.
@@ -87,13 +113,13 @@ The default model (`qwen/qwen3-coder:free`) is free. Paid models are only used w
 
 ## Activating Hive in Your Workflow
 
-Installing and registering Hive makes the tools *available*, but your AI assistant needs guidance on **when** to use them. The `CLAUDE.md` file (or equivalent instructions in your MCP client) is the key.
+Installing and registering Hive makes the tools *available*, but your AI assistant needs guidance on **when** to use them. Your project instructions file (`CLAUDE.md`, `GEMINI.md`, or equivalent in your MCP client) is the key.
 
 Without explicit instructions, your assistant *might* use Hive tools, but inconsistently. With clear instructions, it uses them **predictably** for every relevant query.
 
-### Recommended CLAUDE.md Snippet
+### Recommended Instructions Snippet
 
-Add this to your project's `CLAUDE.md` (or global `~/.claude/CLAUDE.md`):
+Add this to your project instructions file (`CLAUDE.md`, `GEMINI.md`, or equivalent):
 
 ```markdown
 ## Vault & Knowledge (Hive MCP)
