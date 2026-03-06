@@ -1,6 +1,6 @@
 [project]
 name = "hive-vault"
-version = "1.2.0"
+version = "1.4.0"
 description = "Unified MCP server for AI-assisted development — on-demand Obsidian vault access + worker delegation"
 readme = "README.md"
 requires-python = ">=3.12"

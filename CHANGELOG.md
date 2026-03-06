@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.4.0](https://github.com/mlorentedev/hive/compare/v1.3.0...v1.4.0) (2026-03-06)
+
+
+### Features
+
+* add vault_list_files, vault_patch, and regex search ([#13](https://github.com/mlorentedev/hive/issues/13)) ([16425b9](https://github.com/mlorentedev/hive/commit/16425b9c6175c43f704063f942b1cf27df560f48))
+
+## [1.3.0](https://github.com/mlorentedev/hive/compare/v1.2.0...v1.3.0) (2026-03-05)
+
+
+### Features
+
+* parametrization audit — extract hardcoded values to HiveSettings ([5a0cb02](https://github.com/mlorentedev/hive/commit/5a0cb020867aaaab9a3e6708344fedb6ce9a9891))
+
 ## [1.2.0](https://github.com/mlorentedev/hive/compare/v1.1.0...v1.2.0) (2026-03-05)
 
 
