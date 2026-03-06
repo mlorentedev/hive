@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/mlorentedev/hive/compare/v1.2.0...v1.3.0) (2026-03-05)
+
+
+### Features
+
+* parametrization audit — extract hardcoded values to HiveSettings ([5a0cb02](https://github.com/mlorentedev/hive/commit/5a0cb020867aaaab9a3e6708344fedb6ce9a9891))
+
 ## [1.2.0](https://github.com/mlorentedev/hive/compare/v1.1.0...v1.2.0) (2026-03-05)
 
 
