@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 from datetime import date, timedelta
@@ -12,12 +13,13 @@ from fastmcp import FastMCP
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from hive.frontmatter import Frontmatter
+
 from hive.budget import BudgetTracker
 from hive.clients import ClientResponse, OllamaClient, OpenRouterClient
 from hive.config import settings
 from hive.frontmatter import (
     _TERMINAL_STATUSES,
-    Frontmatter,
     extract_body,
     parse_date,
     parse_frontmatter,
@@ -25,6 +27,8 @@ from hive.frontmatter import (
 )
 from hive.relevance import RelevanceTracker
 from hive.usage import UsageTracker
+
+_log = logging.getLogger(__name__)
 
 _VALID_OPERATIONS = {"append", "replace"}
 
@@ -55,6 +59,8 @@ def _resolve_project_dir(
     - ``_meta`` maps to the meta scope root (backward compat).
     - ``scope:project`` targets a specific scope.
     - Plain ``project`` auto-scans all scopes, first match wins.
+
+    Returns None if the project is not found or escapes the vault boundary.
     """
     scopes = scopes or _DEFAULT_SCOPES
 
@@ -62,7 +68,11 @@ def _resolve_project_dir(
     if project == "_meta":
         meta_dir_name = scopes.get("meta", "00_meta")
         d = vault / meta_dir_name
-        return (d, "meta") if d.is_dir() else None
+        if not d.is_dir():
+            return None
+        if _check_path_boundary(d, vault) is not None:
+            return None
+        return (d, "meta")
 
     explicit_scope, slug = _parse_project_ref(project)
 
@@ -71,7 +81,11 @@ def _resolve_project_dir(
         if dir_name is None:
             return None
         d = vault / dir_name / slug
-        return (d, explicit_scope) if d.is_dir() else None
+        if not d.is_dir():
+            return None
+        if _check_path_boundary(d, vault) is not None:
+            return None
+        return (d, explicit_scope)
 
     # Auto-scan: iterate scopes, first match wins, skip missing dirs
     for scope_name, dir_name in scopes.items():
@@ -81,7 +95,7 @@ def _resolve_project_dir(
         if not scope_dir.is_dir():
             continue
         d = scope_dir / slug
-        if d.is_dir():
+        if d.is_dir() and _check_path_boundary(d, vault) is None:
             return (d, scope_name)
 
     return None
@@ -96,6 +110,15 @@ def _truncate(text: str, max_lines: int) -> str:
         return text
     remaining = len(lines) - max_lines
     return "\n".join(lines[:max_lines]) + f"\n\n[... truncated, {remaining} more lines]"
+
+
+def _check_path_boundary(filepath: Path, boundary: Path) -> str | None:
+    """Return an error string if filepath escapes boundary, else None."""
+    try:
+        filepath.resolve().relative_to(boundary.resolve())
+    except ValueError:
+        return "Path escapes vault boundary. Use a relative path within the project."
+    return None
 
 
 def _resolve_file(
@@ -113,6 +136,9 @@ def _resolve_file(
 
     if path:
         filepath = project_dir / path
+        boundary_error = _check_path_boundary(filepath, vault)
+        if boundary_error:
+            return boundary_error
     else:
         filename = SECTION_SHORTCUTS.get(section)
         if filename is None:
@@ -240,11 +266,10 @@ def create_server(
             relevance.record_access(project, section, is_write=is_write)
         return result
 
-    # ── Resources ────────────────────────────────────────────────────────
+    # ── Shared helpers ────────────────────────────────────────────────────
 
-    @mcp.resource("hive://projects")
-    def projects_resource() -> str:
-        """List all vault projects with file counts and available shortcuts."""
+    def _list_projects_text() -> str:
+        """Build project listing text (shared by resource and tool)."""
         lines = ["# Vault Projects", ""]
         found_any = False
         for scope_name, dir_name in scopes.items():
@@ -265,14 +290,32 @@ def create_server(
                     f"- **{scope_name}/{project_dir.name}** — {md_count} files, "
                     f"shortcuts: {', '.join(sections) or 'none'}"
                 )
-
         if not found_any:
             return "No projects found in vault."
         return "\n".join(lines)
 
-    @mcp.resource("hive://health")
-    def health_resource() -> str:
-        """Vault health metrics for all projects."""
+    def _count_stale(
+        project_dir: Path, threshold: date,
+    ) -> list[str]:
+        """Return list of stale file paths in a project directory."""
+        stale: list[str] = []
+        for f in project_dir.rglob("*.md"):
+            try:
+                content = f.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            fm = parse_frontmatter(content)
+            if fm is not None and fm.status in _TERMINAL_STATUSES:
+                continue
+            created_date = parse_date(fm.created) if fm is not None else None
+            if created_date is None:
+                created_date = date.fromtimestamp(f.stat().st_mtime)
+            if created_date < threshold:
+                stale.append(f.relative_to(project_dir).as_posix())
+        return stale
+
+    def _health_report_text() -> str:
+        """Build health report text (shared by resource and tool)."""
         stale_threshold = date.today() - timedelta(days=stale_days)
         lines = ["# Vault Health Report", ""]
         found_any = False
@@ -287,27 +330,12 @@ def create_server(
             for project_dir in projects:
                 found_any = True
                 md_files = list(project_dir.rglob("*.md"))
-                total_lines = 0
-                stale_files: list[str] = []
-
-                for f in md_files:
-                    try:
-                        content = f.read_text(encoding="utf-8")
-                    except (OSError, UnicodeDecodeError):
-                        continue
-                    total_lines += len(content.splitlines())
-
-                    fm = parse_frontmatter(content)
-                    if fm is not None and fm.status in _TERMINAL_STATUSES:
-                        continue
-
-                    created_date = parse_date(fm.created) if fm is not None else None
-                    if created_date is None:
-                        created_date = date.fromtimestamp(f.stat().st_mtime)
-
-                    if created_date < stale_threshold:
-                        stale_files.append(f.relative_to(project_dir).as_posix())
-
+                total_lines = sum(
+                    len(f.read_text(encoding="utf-8").splitlines())
+                    for f in md_files
+                    if _safe_read(f) is not None
+                )
+                stale_files = _count_stale(project_dir, stale_threshold)
                 missing = [
                     s for s, fname in SECTION_SHORTCUTS.items()
                     if not (project_dir / fname).exists()
@@ -320,13 +348,33 @@ def create_server(
                     lines.append(f"- Missing sections: {', '.join(missing)}")
                 if stale_files:
                     lines.append(
-                        f"- Stale files (>{stale_days}d): {', '.join(sorted(stale_files))}"
+                        f"- Stale files (>{stale_days}d): "
+                        f"{', '.join(sorted(stale_files))}"
                     )
                 lines.append("")
 
         if not found_any:
             return "No projects found in vault."
         return "\n".join(lines)
+
+    def _safe_read(f: Path) -> str | None:
+        """Read file text, returning None on error."""
+        try:
+            return f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+
+    # ── Resources ────────────────────────────────────────────────────────
+
+    @mcp.resource("hive://projects")
+    def projects_resource() -> str:
+        """List all vault projects with file counts and available shortcuts."""
+        return _list_projects_text()
+
+    @mcp.resource("hive://health")
+    def health_resource() -> str:
+        """Vault health metrics for all projects."""
+        return _health_report_text()
 
     @mcp.resource("hive://projects/{project}/context")
     def context_resource(project: str) -> str:
@@ -572,30 +620,7 @@ Total estimated savings: ~C tokens
     @mcp.tool
     def vault_list_projects() -> str:
         """List all projects available in the Obsidian vault."""
-        lines = ["# Vault Projects", ""]
-        found_any = False
-        for scope_name, dir_name in scopes.items():
-            if scope_name == "meta":
-                continue
-            scope_dir = resolved_path / dir_name
-            if not scope_dir.is_dir():
-                continue
-            projects = sorted(d for d in scope_dir.iterdir() if d.is_dir())
-            for project_dir in projects:
-                found_any = True
-                sections = [
-                    s for s, filename in SECTION_SHORTCUTS.items()
-                    if (project_dir / filename).exists()
-                ]
-                md_count = len(list(project_dir.rglob("*.md")))
-                lines.append(
-                    f"- **{scope_name}/{project_dir.name}** — {md_count} files, "
-                    f"shortcuts: {', '.join(sections) or 'none'}"
-                )
-
-        if not found_any:
-            return _track("vault_list_projects", "No projects found in vault.")
-        return _track("vault_list_projects", "\n".join(lines))
+        return _track("vault_list_projects", _list_projects_text())
 
     @mcp.tool
     def vault_query(
@@ -624,13 +649,9 @@ Total estimated savings: ~C tokens
 
         if include_metadata:
             fm = parse_frontmatter(content)
-            if fm is not None:
-                tags = ", ".join(fm.tags) if fm.tags else "none"
-                meta_line = (
-                    f"**Metadata:** type={fm.type}, status={fm.status}, "
-                    f"tags=[{tags}], created={fm.created}\n\n"
-                )
-                content = meta_line + content
+            meta = _format_metadata(fm)
+            if meta:
+                content = f"**Metadata:** {meta}\n\n{content}"
 
         return _track("vault_query", _truncate(content, max_lines),
                        project, resolved_section)
@@ -694,9 +715,8 @@ Total estimated savings: ~C tokens
                 ]
             if matching_lines:
                 rel = md_file.relative_to(resolved_path)
-                meta = ""
-                if fm is not None:
-                    meta = f" [type: {fm.type}, status: {fm.status}]"
+                meta_str = _format_metadata(fm)
+                meta = f" [{meta_str}]" if meta_str else ""
                 results.append(f"### {rel}{meta}")
                 for line in matching_lines[:5]:
                     results.append(f"  - {line}")
@@ -710,60 +730,7 @@ Total estimated savings: ~C tokens
     @mcp.tool
     def vault_health() -> str:
         """Return health metrics for all vault projects."""
-        stale_threshold = date.today() - timedelta(days=stale_days)
-        lines = ["# Vault Health Report", ""]
-        found_any = False
-
-        for scope_name, dir_name in scopes.items():
-            if scope_name == "meta":
-                continue
-            scope_dir = resolved_path / dir_name
-            if not scope_dir.is_dir():
-                continue
-            projects = sorted(d for d in scope_dir.iterdir() if d.is_dir())
-            for project_dir in projects:
-                found_any = True
-                md_files = list(project_dir.rglob("*.md"))
-                total_lines = 0
-                stale_files: list[str] = []
-
-                for f in md_files:
-                    try:
-                        content = f.read_text(encoding="utf-8")
-                    except (OSError, UnicodeDecodeError):
-                        continue
-                    total_lines += len(content.splitlines())
-
-                    fm = parse_frontmatter(content)
-                    if fm is not None and fm.status in _TERMINAL_STATUSES:
-                        continue
-
-                    created_date = parse_date(fm.created) if fm is not None else None
-                    if created_date is None:
-                        created_date = date.fromtimestamp(f.stat().st_mtime)
-
-                    if created_date < stale_threshold:
-                        stale_files.append(f.relative_to(project_dir).as_posix())
-
-                missing = [
-                    s for s, fname in SECTION_SHORTCUTS.items()
-                    if not (project_dir / fname).exists()
-                ]
-
-                lines.append(f"## {scope_name}/{project_dir.name}")
-                lines.append(f"- Files: {len(md_files)}")
-                lines.append(f"- Total lines: {total_lines}")
-                if missing:
-                    lines.append(f"- Missing sections: {', '.join(missing)}")
-                if stale_files:
-                    lines.append(
-                        f"- Stale files (>{stale_days}d): {', '.join(sorted(stale_files))}"
-                    )
-                lines.append("")
-
-        if not found_any:
-            return _track("vault_health", "No projects found in vault.")
-        return _track("vault_health", "\n".join(lines))
+        return _track("vault_health", _health_report_text())
 
     @mcp.tool
     def vault_update(
@@ -841,17 +808,21 @@ Total estimated savings: ~C tokens
         project_dir, _ = resolved
 
         filepath = project_dir / path
+        boundary_error = _check_path_boundary(filepath, resolved_path)
+        if boundary_error:
+            return _track("vault_create", boundary_error, project)
         if filepath.exists():
             return _track("vault_create",
                           f"File already exists: {path}. Use vault_update to modify it.",
                           project)
 
-        # Auto-generate frontmatter
-        stem = filepath.stem
+        # Auto-generate frontmatter (sanitize to prevent YAML injection)
+        safe_stem = re.sub(r"[^\w\-.]", "_", filepath.stem)
+        safe_type = re.sub(r"[^\w\-.]", "_", doc_type)
         frontmatter = (
             f"---\n"
-            f"id: {stem}\n"
-            f"type: {doc_type}\n"
+            f"id: {safe_stem}\n"
+            f"type: {safe_type}\n"
             f"status: active\n"
             f'created: "{date.today().isoformat()}"\n'
             f"---\n\n"
@@ -1002,8 +973,8 @@ Total estimated savings: ~C tokens
         if lessons_file.exists():
             existing = lessons_file.read_text(encoding="utf-8")
 
-        # Deduplicate by title
-        if title in existing:
+        # Deduplicate by heading title (not substring — avoids false matches)
+        if f"] {title}\n" in existing:
             return _track(
                 "capture_lesson",
                 f"Lesson already exists: '{title}'. Skipping.",
@@ -1023,9 +994,10 @@ Total estimated savings: ~C tokens
 
         # Append to file (create with frontmatter if missing)
         if not lessons_file.exists():
+            safe_project = re.sub(r"[^\w\-.]", "_", project)
             frontmatter = (
                 f"---\n"
-                f"id: {project}-lessons\n"
+                f"id: {safe_project}-lessons\n"
                 f"type: lesson\n"
                 f"status: active\n"
                 f'created: "{date.today().isoformat()}"\n'
@@ -1181,20 +1153,7 @@ Total estimated savings: ~C tokens
         # Health (always shown, not ranked)
         md_files = list(project_dir.rglob("*.md"))
         stale_threshold = date.today() - timedelta(days=stale_days)
-        stale_count = 0
-        for f in md_files:
-            try:
-                content = f.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                continue
-            fm = parse_frontmatter(content)
-            if fm is not None and fm.status in _TERMINAL_STATUSES:
-                continue
-            created_date = parse_date(fm.created) if fm is not None else None
-            if created_date is None:
-                created_date = date.fromtimestamp(f.stat().st_mtime)
-            if created_date < stale_threshold:
-                stale_count += 1
+        stale_count = len(_count_stale(project_dir, stale_threshold))
         health_lines = [f"- Files: {len(md_files)}"]
         if stale_count:
             health_lines.append(f"- Stale: {stale_count}")
@@ -1222,7 +1181,7 @@ Total estimated savings: ~C tokens
         return _track("session_briefing", "\n".join(parts), project)
 
     @mcp.tool
-    def vault_recent(since_days: int = 7, project: str = "") -> str:
+    def vault_recent(since_days: int = 7, project: str = "", max_lines: int = 100) -> str:
         """Show files changed in the vault in the last N days.
 
         Combines git history with frontmatter created dates for completeness.
@@ -1280,7 +1239,7 @@ Total estimated savings: ~C tokens
                 lines.append(f"- {rel_path}")
 
         output = "\n".join(lines)
-        return _track("vault_recent", _truncate(output, 100), project)
+        return _track("vault_recent", _truncate(output, max_lines), project)
 
     @mcp.tool
     def vault_usage(since_days: int = 30) -> str:
@@ -1463,7 +1422,7 @@ Total estimated savings: ~C tokens
         ollama_status = "online" if await ollama.is_available() else "offline / unavailable"
         lines.append(f"## Ollama ({ollama_status})")
         if "online" in ollama_status:
-            lines.append(f"- **{ollama._model}** — local, free, no token limit")
+            lines.append(f"- **{ollama.model}** — local, free, no token limit")
         lines.append("")
 
         # OpenRouter
@@ -1518,40 +1477,56 @@ Total estimated savings: ~C tokens
 
 def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
     """Stage a file and commit it in the vault git repo."""
-    subprocess.run(
-        ["git", "add", str(rel_path)],
-        cwd=vault_path,
-        capture_output=True,
-        check=True,
-    )
-    subprocess.run(
-        ["git", "commit", "-m", message],
-        cwd=vault_path,
-        capture_output=True,
-        check=True,
-    )
+    safe_msg = message.replace("\n", " ").replace("\r", " ")
+    try:
+        subprocess.run(
+            ["git", "add", str(rel_path)],
+            cwd=vault_path,
+            capture_output=True,
+            check=True,
+            timeout=10,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", safe_msg],
+            cwd=vault_path,
+            capture_output=True,
+            check=True,
+            timeout=10,
+        )
+    except subprocess.CalledProcessError as exc:
+        _log.warning("git commit failed for %s: %s", rel_path, exc)
+    except subprocess.TimeoutExpired as exc:
+        _log.warning("git commit timed out for %s: %s", rel_path, exc)
 
 
 def _git_log(vault_path: Path, n: int) -> str:
     """Return last n git log entries, or empty string on failure."""
-    result = subprocess.run(
-        ["git", "log", "--oneline", f"-{n}"],
-        cwd=vault_path,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "log", "--oneline", f"-{n}"],
+            cwd=vault_path,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return ""
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
 def _git_recent(vault_path: Path, since_days: int) -> list[str]:
     """Return vault-relative .md paths changed in the last N days via git."""
-    result = subprocess.run(
-        ["git", "log", f"--since={since_days} days ago",
-         "--name-only", "--pretty=format:"],
-        cwd=vault_path,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "log", f"--since={since_days} days ago",
+             "--name-only", "--pretty=format:"],
+            cwd=vault_path,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return []
     if result.returncode != 0:
         return []
     return sorted({

@@ -39,6 +39,15 @@ class OllamaClient:
         self._model = model
         self._http = httpx.AsyncClient(base_url=self._endpoint, timeout=timeout)
 
+    @property
+    def model(self) -> str:
+        """The configured model name."""
+        return self._model
+
+    async def aclose(self) -> None:
+        """Close the underlying HTTP client."""
+        await self._http.aclose()
+
     async def generate(
         self, prompt: str, context: str = "", max_tokens: int = 2000
     ) -> ClientResponse:
@@ -63,6 +72,10 @@ class OllamaClient:
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             msg = f"Ollama unavailable at {self._endpoint}: {exc}"
             raise ConnectionError(msg) from exc
+
+        if resp.status_code >= 400:
+            msg = f"Ollama error ({resp.status_code}): {resp.text}"
+            raise RuntimeError(msg)
 
         data = resp.json()
         # Ollama returns total_duration in nanoseconds
@@ -94,7 +107,7 @@ class OpenRouterClient:
     def __init__(self, api_key: str, default_model: str, timeout: float = 120.0) -> None:
         self._api_key = api_key
         self._default_model = default_model
-        self._http = httpx.AsyncClient(
+        self._http: httpx.AsyncClient = httpx.AsyncClient(
             base_url=self._BASE_URL,
             timeout=timeout,
             headers={
@@ -152,6 +165,10 @@ class OpenRouterClient:
             cost_usd=usage.get("cost", 0.0),
             latency_ms=elapsed_ms,
         )
+
+    async def aclose(self) -> None:
+        """Close the underlying HTTP client."""
+        await self._http.aclose()
 
     async def list_models(self) -> list[ModelInfo]:
         """Fetch available models from the OpenRouter catalog."""
