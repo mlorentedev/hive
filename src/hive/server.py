@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
@@ -641,16 +642,25 @@ Total estimated savings: ~C tokens
         type_filter: str = "",
         status_filter: str = "",
         tag_filter: str = "",
+        use_regex: bool = False,
     ) -> str:
         """Full-text search across all markdown files in the vault.
 
         Args:
-            query: Text to search for (case-insensitive).
-            max_lines: Maximum output lines. Default 100.
+            query: Text to search for (case-insensitive). Supports regex when use_regex=True.
+            max_lines: Maximum output lines. Default 500.
             type_filter: Only include files whose frontmatter type matches (e.g. 'adr').
             status_filter: Only include files whose frontmatter status matches (e.g. 'active').
             tag_filter: Only include files that have this tag in their frontmatter tags list.
+            use_regex: Treat query as a regular expression. Default False (literal match).
         """
+        if use_regex:
+            try:
+                pattern = re.compile(query, re.IGNORECASE)
+            except re.error as exc:
+                return _track("vault_search",
+                              f"Invalid regex '{query}': {exc}")
+
         results: list[str] = []
         query_lower = query.lower()
         has_filters = bool(type_filter or status_filter or tag_filter)
@@ -673,9 +683,15 @@ Total estimated savings: ~C tokens
                 if tag_filter and tag_filter not in fm.tags:
                     continue
 
-            matching_lines = [
-                line.strip() for line in content.splitlines() if query_lower in line.lower()
-            ]
+            if use_regex:
+                matching_lines = [
+                    line.strip() for line in content.splitlines() if pattern.search(line)
+                ]
+            else:
+                matching_lines = [
+                    line.strip() for line in content.splitlines()
+                    if query_lower in line.lower()
+                ]
             if matching_lines:
                 rel = md_file.relative_to(resolved_path)
                 meta = ""
@@ -850,6 +866,105 @@ Total estimated savings: ~C tokens
 
         return _track("vault_create",
                        f"Created {project}/{path} (type: {doc_type}).",
+                       project, path)
+
+    @mcp.tool
+    def vault_list_files(
+        project: str,
+        path: str = "",
+        pattern: str = "",
+    ) -> str:
+        """List files and directories in a vault project.
+
+        Args:
+            project: Project slug or '_meta' for cross-project content.
+            path: Subdirectory to list (relative to project root). Empty = project root.
+            pattern: Glob pattern to filter files (e.g. 'adr-*', '*.md'). Empty = all.
+        """
+        resolved = _resolve_project_dir(resolved_path, project, scopes)
+        if resolved is None:
+            return _track("vault_list_files",
+                          f"Project '{project}' not found in vault.", project)
+        project_dir, _ = resolved
+
+        target = project_dir / path if path else project_dir
+        if not target.is_dir():
+            return _track("vault_list_files",
+                          f"Path '{path}' not found in project '{project}'.", project)
+
+        lines: list[str] = [f"# Files: {project}/{path}" if path else f"# Files: {project}", ""]
+
+        if pattern:
+            # Recursive glob for pattern matching
+            files = sorted(f for f in target.rglob(pattern) if f.is_file())
+            for f in files:
+                rel_f = f.relative_to(target)
+                lines.append(f"- {rel_f}")
+            if len(lines) == 2:
+                return _track("vault_list_files",
+                              f"No files matching '{pattern}' in {project}/{path}.",
+                              project)
+        else:
+            # List directories first, then files
+            dirs = sorted(d for d in target.iterdir() if d.is_dir())
+            for d in dirs:
+                lines.append(f"- {d.name}/")
+            files = sorted(f for f in target.iterdir() if f.is_file())
+            for f in files:
+                lines.append(f"- {f.name}")
+
+        return _track("vault_list_files", "\n".join(lines), project, path)
+
+    @mcp.tool
+    def vault_patch(
+        project: str,
+        path: str,
+        old_text: str,
+        new_text: str,
+    ) -> str:
+        """Surgical text replacement in a vault file with auto git commit.
+
+        Replaces exactly one occurrence of old_text with new_text. Rejects ambiguous
+        matches (old_text appears more than once) to prevent unintended changes.
+
+        Args:
+            project: Project slug or '_meta' for cross-project content.
+            path: Relative path to the file within the project.
+            old_text: Exact text to find and replace (must appear exactly once).
+            new_text: Replacement text.
+        """
+        resolved = _resolve_project_dir(resolved_path, project, scopes)
+        if resolved is None:
+            return _track("vault_patch",
+                          f"Project '{project}' not found in vault.", project)
+        project_dir, _ = resolved
+
+        filepath = project_dir / path
+        if not filepath.exists():
+            return _track("vault_patch",
+                          f"File '{path}' not found in project '{project}'.",
+                          project)
+
+        content = filepath.read_text(encoding="utf-8")
+        count = content.count(old_text)
+
+        if count == 0:
+            return _track("vault_patch",
+                          f"old_text not found in file '{path}'.", project)
+        if count > 1:
+            return _track("vault_patch",
+                          f"Ambiguous: old_text appears {count} times in '{path}'. "
+                          "Provide more context to make the match unique.",
+                          project)
+
+        new_content = content.replace(old_text, new_text, 1)
+        filepath.write_text(new_content, encoding="utf-8")
+
+        rel = filepath.relative_to(resolved_path)
+        _git_commit(resolved_path, rel, f"vault: patch {project}/{path}")
+
+        return _track("vault_patch",
+                       f"Patched {project}/{path} (1 replacement).",
                        project, path)
 
     @mcp.tool
