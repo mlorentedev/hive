@@ -17,3 +17,4 @@ site/.astro/
 site/.vscode/
 
 .claude/plans/
+.mcpregistry_*

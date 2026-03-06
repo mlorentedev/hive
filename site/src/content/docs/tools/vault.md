@@ -114,8 +114,9 @@ Without `pattern`, lists the immediate contents of the directory (directories fi
 
 ## vault_patch
 
-Surgical text replacement in a vault file.
+Surgical text replacement in a vault file. Supports single or multiple replacements.
 
+**Single replacement:**
 ```python
 vault_patch(
     project="my-project",
@@ -125,7 +126,19 @@ vault_patch(
 )
 ```
 
-Replaces exactly one occurrence of `old_text` with `new_text`. Rejects ambiguous matches — if `old_text` appears more than once, the operation fails with an error asking for more context. Auto-commits to git.
+**Multiple replacements** (atomic — all or nothing):
+```python
+vault_patch(
+    project="my-project",
+    path="30-architecture/adr-001.md",
+    patches=[
+        {"old_text": "status: draft", "new_text": "status: accepted"},
+        {"old_text": "## Decision\nTBD", "new_text": "## Decision\nUse PostgreSQL"},
+    ]
+)
+```
+
+Each replacement must match exactly once — ambiguous matches abort the entire operation. All patches are applied in sequence and committed as a single git commit.
 
 ## capture_lesson
 
