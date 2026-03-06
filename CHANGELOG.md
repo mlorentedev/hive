@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/mlorentedev/hive/compare/v1.4.0...v1.4.1) (2026-03-06)
+
+
+### Bug Fixes
+
+* security hardening + code audit fixes ([#15](https://github.com/mlorentedev/hive/issues/15)) ([a7eb750](https://github.com/mlorentedev/hive/commit/a7eb750c91d3ae6e17741eb8b0b0bcbe3ebffe2a))
+
 ## [1.4.0](https://github.com/mlorentedev/hive/compare/v1.3.0...v1.4.0) (2026-03-06)
 
 
