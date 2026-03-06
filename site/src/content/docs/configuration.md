@@ -38,7 +38,7 @@ If both are set, the `HIVE_` prefixed version takes precedence.
 
 **Claude Code:**
 ```bash
-claude mcp add hive \
+claude mcp add -s user hive \
   -e VAULT_PATH=$HOME/my-vault \
   -e HIVE_OLLAMA_ENDPOINT=http://minipc.local:11434 \
   -e OPENROUTER_API_KEY=sk-or-v1-abc123 \
@@ -77,7 +77,7 @@ If you only need vault access and don't want worker delegation:
 
 ```bash
 # Claude Code
-claude mcp add hive -e VAULT_PATH=$HOME/my-vault -- uvx --upgrade hive-vault
+claude mcp add -s user hive -e VAULT_PATH=$HOME/my-vault -- uvx --upgrade hive-vault
 
 # Gemini CLI
 gemini mcp add -s user -e VAULT_PATH=$HOME/my-vault hive-vault uvx -- --upgrade hive-vault

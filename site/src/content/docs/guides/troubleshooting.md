@@ -3,6 +3,26 @@ title: Troubleshooting
 description: Common issues and fixes for Hive MCP server.
 ---
 
+## Hive Not Available in Other Projects
+
+**Symptom:** You installed Hive in one project but it doesn't appear when starting a session in a different project.
+
+**Cause:** You registered Hive at **project scope** (default) instead of **user scope**. Project-scoped MCP servers only work in the project directory where they were registered.
+
+**Fix:** Re-register at user scope — this is the recommended setup since Hive's vault is shared across all projects:
+
+```bash
+# Claude Code — note the -s user flag
+claude mcp add -s user hive -- uvx --upgrade hive-vault
+
+# Gemini CLI — already user scope by default with -s user
+gemini mcp add -s user hive-vault uvx -- --upgrade hive-vault
+```
+
+After re-registering, restart your AI assistant session. Hive will now appear in every project.
+
+**Why user scope matters:** Hive connects to a single knowledge vault that stores context for *all* your projects. Project-scope registration defeats this — you'd need to register Hive separately in every project, and they'd all point to the same vault anyway.
+
 ## Ollama Shows "offline" in worker_status
 
 **Symptom:** `worker_status` reports Ollama as offline, but `curl http://your-ollama:11434/api/tags` works.
@@ -13,7 +33,7 @@ description: Common issues and fixes for Hive MCP server.
 
 ```bash
 # Claude Code
-claude mcp add hive \
+claude mcp add -s user hive \
   -e HIVE_OLLAMA_ENDPOINT=http://your-ollama:11434 \
   -- uvx --upgrade hive-vault
 

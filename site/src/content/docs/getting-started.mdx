@@ -17,10 +17,17 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 One command. No cloning, no venv, no config files.
 
+:::tip[Use user scope]
+Always register Hive at **user scope** (not project scope) so it works across all your projects. That's the whole point — one vault, every project.
+- **Claude Code:** `-s user` flag
+- **Gemini CLI:** `-s user` flag
+- **Codex CLI / Copilot:** config files are already user-level (`~/.codex/config.toml`) or can be added to VS Code user settings
+:::
+
 <Tabs syncKey="client">
   <TabItem label="Claude Code">
     ```bash
-    claude mcp add hive -- uvx --upgrade hive-vault
+    claude mcp add -s user hive -- uvx --upgrade hive-vault
     ```
   </TabItem>
   <TabItem label="Codex CLI">
@@ -68,7 +75,7 @@ By default, Hive looks for your vault at `~/Projects/knowledge`. To change it:
 <Tabs syncKey="client">
   <TabItem label="Claude Code">
     ```bash
-    claude mcp add hive -e VAULT_PATH=/path/to/your/vault -- uvx --upgrade hive-vault
+    claude mcp add -s user hive -e VAULT_PATH=/path/to/your/vault -- uvx --upgrade hive-vault
     ```
   </TabItem>
   <TabItem label="Codex CLI">
@@ -110,7 +117,7 @@ To enable task delegation to cheaper models:
 <Tabs syncKey="client">
   <TabItem label="Claude Code">
     ```bash
-    claude mcp add hive \
+    claude mcp add -s user hive \
       -e VAULT_PATH=/path/to/your/vault \
       -e HIVE_OLLAMA_ENDPOINT=http://your-ollama:11434 \
       -e OPENROUTER_API_KEY=sk-or-... \

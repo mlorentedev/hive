@@ -26,11 +26,11 @@ Hive is an MCP server that connects your AI assistant to an [Obsidian](https://o
 
 ## Install (30 seconds)
 
-One command. No cloning, no venv, no config files.
+One command. No cloning, no venv, no config files. **Use user scope (`-s user`) so Hive works across all your projects** — that's where cross-project knowledge shines.
 
 **Claude Code:**
 ```bash
-claude mcp add hive -- uvx --upgrade hive-vault
+claude mcp add -s user hive -- uvx --upgrade hive-vault
 ```
 
 **Gemini CLI:**
@@ -132,7 +132,7 @@ Default vault path: `~/Projects/knowledge`. To change it:
 
 ```bash
 # Claude Code
-claude mcp add hive -e VAULT_PATH=/path/to/vault -- uvx --upgrade hive-vault
+claude mcp add -s user hive -e VAULT_PATH=/path/to/vault -- uvx --upgrade hive-vault
 
 # Gemini CLI
 gemini mcp add -s user -e VAULT_PATH=/path/to/vault hive-vault uvx -- --upgrade hive-vault
@@ -141,7 +141,7 @@ gemini mcp add -s user -e VAULT_PATH=/path/to/vault hive-vault uvx -- --upgrade 
 ### Enable Worker Delegation (optional)
 
 ```bash
-claude mcp add hive \
+claude mcp add -s user hive \
   -e VAULT_PATH=/path/to/vault \
   -e HIVE_OLLAMA_ENDPOINT=http://your-ollama:11434 \
   -e OPENROUTER_API_KEY=sk-or-... \
