@@ -245,7 +245,8 @@ class TestVaultSearch:
     async def test_shows_metadata_per_file(self, vault_mcp: FastMCP) -> None:
         result = await vault_mcp.call_tool("vault_search", {"query": "Test Project"})
         text = _text(result)
-        assert "[type: project, status: active]" in text
+        assert "type=project" in text
+        assert "status=active" in text
 
     # -- type_filter --
 
@@ -1772,6 +1773,39 @@ class TestMultiScopeRecent:
         ))
         # Should find files in 50_work/my-company, not return "No changes"
         assert "my-company" in result or "50_work" in result
+
+
+# ── Path Traversal Protection ────────────────────────────────────────
+
+
+class TestPathTraversal:
+    async def test_query_path_escape_blocked(self, vault_mcp: FastMCP) -> None:
+        # Needs enough ../.. to escape tmp_path (vault root)
+        result = _text(await vault_mcp.call_tool(
+            "vault_query",
+            {"project": "testproject", "path": "../../../../etc/passwd"},
+        ))
+        assert "escapes vault boundary" in result.lower()
+
+    async def test_create_path_escape_blocked(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_create",
+            {
+                "project": "testproject",
+                "path": "../../../../tmp/evil.md",
+                "content": "pwned",
+                "doc_type": "test",
+            },
+        ))
+        assert "escapes vault boundary" in result.lower()
+
+    async def test_summarize_path_escape_blocked(self, vault_mcp: FastMCP) -> None:
+        result = _text(await vault_mcp.call_tool(
+            "vault_summarize",
+            {"project": "testproject", "path": "../../../../etc/shadow"},
+        ))
+        assert "escapes vault boundary" in result.lower()
 
 
 class TestSectionFallback:

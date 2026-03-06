@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS requests (
 );
 """
 
-_CURRENT_MONTH = "strftime('%Y-%m', 'now')"
+_MONTH_CLAUSE = "WHERE month = strftime('%Y-%m', 'now')"
 
 
 class BudgetTracker:
@@ -53,7 +53,7 @@ class BudgetTracker:
     def month_spent(self) -> float:
         """Total USD spent in the current month."""
         row = self._conn.execute(
-            f"SELECT COALESCE(SUM(cost_usd), 0.0) FROM requests WHERE month = {_CURRENT_MONTH}"
+            f"SELECT COALESCE(SUM(cost_usd), 0.0) FROM requests {_MONTH_CLAUSE}"
         ).fetchone()
         return float(row[0]) if row else 0.0
 
@@ -69,14 +69,14 @@ class BudgetTracker:
         """Aggregate stats for the current month."""
         spent = self.month_spent()
         count_row = self._conn.execute(
-            f"SELECT COUNT(*) FROM requests WHERE month = {_CURRENT_MONTH}"
+            f"SELECT COUNT(*) FROM requests {_MONTH_CLAUSE}"
         ).fetchone()
         request_count = count_row[0] if count_row else 0
 
         by_model: dict[str, dict[str, Any]] = {}
         rows = self._conn.execute(
-            f"SELECT model, COUNT(*), SUM(cost_usd), AVG(latency_ms) "
-            f"FROM requests WHERE month = {_CURRENT_MONTH} GROUP BY model"
+            "SELECT model, COUNT(*), SUM(cost_usd), AVG(latency_ms) "
+            f"FROM requests {_MONTH_CLAUSE} GROUP BY model"
         ).fetchall()
         for model, cnt, total_cost, avg_latency in rows:
             by_model[model] = {

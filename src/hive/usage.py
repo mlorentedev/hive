@@ -17,8 +17,6 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 );
 """
 
-_TODAY = "date('now')"
-
 
 class UsageTracker:
     """Track vault tool calls for session profiling and analytics."""
@@ -47,16 +45,21 @@ class UsageTracker:
 
     def stats(self, since_days: int = 30) -> dict[str, Any]:
         """Aggregate usage stats for the last N days."""
+        since_clause = "WHERE date >= date('now', ? || ' days')"
+        since_param = str(-since_days)
+
         total_row = self._conn.execute(
-            f"SELECT COUNT(*) FROM tool_calls WHERE date >= date('now', '-{since_days} days')"
+            f"SELECT COUNT(*) FROM tool_calls {since_clause}",
+            (since_param,),
         ).fetchone()
         total_calls = total_row[0] if total_row else 0
 
         by_tool: dict[str, int] = {}
         rows = self._conn.execute(
             "SELECT tool, COUNT(*) FROM tool_calls "
-            f"WHERE date >= date('now', '-{since_days} days') "
-            "GROUP BY tool ORDER BY COUNT(*) DESC"
+            f"{since_clause} "
+            "GROUP BY tool ORDER BY COUNT(*) DESC",
+            (since_param,),
         ).fetchall()
         for tool, count in rows:
             by_tool[tool] = count
@@ -64,16 +67,18 @@ class UsageTracker:
         by_project: dict[str, int] = {}
         rows = self._conn.execute(
             "SELECT project, COUNT(*) FROM tool_calls "
-            f"WHERE date >= date('now', '-{since_days} days') "
+            f"{since_clause} "
             "AND project != '' "
-            "GROUP BY project ORDER BY COUNT(*) DESC"
+            "GROUP BY project ORDER BY COUNT(*) DESC",
+            (since_param,),
         ).fetchall()
         for project, count in rows:
             by_project[project] = count
 
         total_lines_row = self._conn.execute(
             "SELECT COALESCE(SUM(response_lines), 0) FROM tool_calls "
-            f"WHERE date >= date('now', '-{since_days} days')"
+            f"{since_clause}",
+            (since_param,),
         ).fetchone()
         total_lines = total_lines_row[0] if total_lines_row else 0
 
