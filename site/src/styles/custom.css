@@ -1,0 +1,30 @@
+/* Hive theme — dark cyan accent */
+:root {
+  --sl-color-accent-low: #083344;
+  --sl-color-accent: #0e7490;
+  --sl-color-accent-high: #67e8f9;
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #f0fdfa;
+  --sl-color-gray-2: #ccfbf1;
+  --sl-color-gray-3: #94a3b8;
+  --sl-color-gray-4: #64748b;
+  --sl-color-gray-5: #334155;
+  --sl-color-gray-6: #1e293b;
+  --sl-color-gray-7: #0f172a;
+  --sl-color-black: #020617;
+}
+
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #164e63;
+  --sl-color-accent: #22d3ee;
+  --sl-color-accent-high: #083344;
+  --sl-color-white: #0f172a;
+  --sl-color-gray-1: #1e293b;
+  --sl-color-gray-2: #334155;
+  --sl-color-gray-3: #475569;
+  --sl-color-gray-4: #94a3b8;
+  --sl-color-gray-5: #cbd5e1;
+  --sl-color-gray-6: #e2e8f0;
+  --sl-color-gray-7: #f0fdfa;
+  --sl-color-black: #f8fafc;
+}

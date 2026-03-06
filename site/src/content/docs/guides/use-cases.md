@@ -30,7 +30,7 @@ Search across your entire knowledge base:
 > "Search the vault for how we handle authentication"
 
 ```python
-vault_search(query="authentication", doc_type="adr")
+vault_search(query="authentication", type_filter="adr")
 ```
 
 Returns matching lines from all files, filtered to only ADR documents, with metadata headers.
@@ -91,7 +91,9 @@ When you discover something important mid-task, capture it immediately without b
 capture_lesson(
     project="my-project",
     title="YAML frontmatter validation",
-    body="Always validate frontmatter before vault writes. Missing required fields (id, type, status) cause silent failures in downstream tools like vault_search and session_briefing.",
+    context="Writing a vault_update tool that modifies project files",
+    problem="Missing required fields (id, type, status) cause silent failures in downstream tools like vault_search and session_briefing",
+    solution="Always validate frontmatter before vault writes — reject if required fields are missing",
     tags=["yaml", "vault", "validation"]
 )
 ```

@@ -26,7 +26,7 @@ make site-dev # start landing page dev server
 
 ```bash
 # Claude Code
-claude mcp add hive -- uv run --directory /path/to/hive hive-vault
+claude mcp add -s user hive -- uv run --directory /path/to/hive hive-vault
 
 # Gemini CLI
 gemini mcp add -s user hive-vault uv -- run --directory /path/to/hive hive-vault

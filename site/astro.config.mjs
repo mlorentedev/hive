@@ -9,6 +9,25 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'Hive',
+			customCss: ['./src/styles/custom.css'],
+			head: [
+				{ tag: 'meta', attrs: { name: 'theme-color', content: '#0e7490' } },
+				{
+					tag: 'script',
+					attrs: { type: 'application/ld+json' },
+					content: JSON.stringify({
+						'@context': 'https://schema.org',
+						'@type': 'SoftwareApplication',
+						name: 'Hive',
+						description: 'MCP server for on-demand Obsidian vault access for AI coding assistants',
+						applicationCategory: 'DeveloperApplication',
+						operatingSystem: 'Cross-platform',
+						url: 'https://github.com/mlorentedev/hive',
+						offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+						license: 'https://opensource.org/licenses/MIT',
+					}),
+				},
+			],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/mlorentedev/hive' }],
 			sidebar: [
 				{ label: 'Getting Started', slug: 'getting-started' },
