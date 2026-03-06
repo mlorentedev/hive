@@ -45,9 +45,9 @@ Full-text search across the vault.
 vault_search(
     query="authentication",
     max_lines=100,
-    doc_type="",        # filter by frontmatter type
-    status="",          # filter by frontmatter status
-    tag="",             # filter by frontmatter tag
+    type_filter="",     # filter by frontmatter type
+    status_filter="",   # filter by frontmatter status
+    tag_filter="",      # filter by frontmatter tag
     use_regex=False     # treat query as a regular expression
 )
 ```
@@ -64,7 +64,7 @@ Health metrics for all vault projects.
 vault_health()
 ```
 
-Reports per-project: file count, total lines, stale files (>90 days without update), section coverage.
+Reports per-project: file count, total lines, stale files (>180 days by default, configurable via `HIVE_STALE_THRESHOLD_DAYS`), section coverage.
 
 ## vault_update
 

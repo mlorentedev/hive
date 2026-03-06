@@ -9,6 +9,7 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'Hive',
+			customCss: ['./src/styles/custom.css'],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/mlorentedev/hive' }],
 			sidebar: [
 				{ label: 'Getting Started', slug: 'getting-started' },
