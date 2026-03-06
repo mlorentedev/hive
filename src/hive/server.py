@@ -890,20 +890,64 @@ Total estimated savings: ~C tokens
     def vault_patch(
         project: str,
         path: str,
-        old_text: str,
-        new_text: str,
+        old_text: str | None = None,
+        new_text: str | None = None,
+        patches: list[dict[str, str]] | None = None,
     ) -> str:
         """Surgical text replacement in a vault file with auto git commit.
 
-        Replaces exactly one occurrence of old_text with new_text. Rejects ambiguous
-        matches (old_text appears more than once) to prevent unintended changes.
+        Supports single or multi-replacement. For single replacement, provide
+        old_text and new_text. For multiple replacements, provide patches — a list
+        of {old_text, new_text} dicts applied in sequence. Do not mix both modes.
+
+        Each old_text must appear exactly once in the file (after prior patches in
+        the list have been applied). If any patch fails validation, no changes are
+        written.
 
         Args:
             project: Project slug or '_meta' for cross-project content.
             path: Relative path to the file within the project.
-            old_text: Exact text to find and replace (must appear exactly once).
-            new_text: Replacement text.
+            old_text: Exact text to find and replace (single mode).
+            new_text: Replacement text (single mode).
+            patches: List of {old_text, new_text} dicts (multi mode).
         """
+        has_single = old_text is not None or new_text is not None
+        has_multi = patches is not None
+
+        if has_single and has_multi:
+            return _track(
+                "vault_patch",
+                "Cannot mix old_text/new_text with patches. "
+                "Use one mode or the other.",
+                project,
+            )
+
+        if has_single:
+            if old_text is None or new_text is None:
+                return _track(
+                    "vault_patch",
+                    "Provide both old_text and new_text for single replacement.",
+                    project,
+                )
+            patch_list: list[dict[str, str]] = [
+                {"old_text": old_text, "new_text": new_text},
+            ]
+        elif has_multi:
+            assert patches is not None  # narrowing for mypy
+            if len(patches) == 0:
+                return _track(
+                    "vault_patch",
+                    "Empty patches list. Provide at least one patch.",
+                    project,
+                )
+            patch_list = patches
+        else:
+            return _track(
+                "vault_patch",
+                "Provide old_text/new_text or a patches list.",
+                project,
+            )
+
         resolved = _resolve_project_dir(resolved_path, project, scopes)
         if resolved is None:
             return _track("vault_patch",
@@ -917,25 +961,41 @@ Total estimated savings: ~C tokens
                           project)
 
         content = filepath.read_text(encoding="utf-8")
-        count = content.count(old_text)
 
-        if count == 0:
-            return _track("vault_patch",
-                          f"old_text not found in file '{path}'.", project)
-        if count > 1:
-            return _track("vault_patch",
-                          f"Ambiguous: old_text appears {count} times in '{path}'. "
-                          "Provide more context to make the match unique.",
-                          project)
+        # Validate and apply all patches on a working copy first
+        working = content
+        for i, patch in enumerate(patch_list, 1):
+            old = patch["old_text"]
+            new = patch["new_text"]
+            count = working.count(old)
 
-        new_content = content.replace(old_text, new_text, 1)
-        filepath.write_text(new_content, encoding="utf-8")
+            if count == 0:
+                label = f"patch {i}: " if len(patch_list) > 1 else ""
+                return _track(
+                    "vault_patch",
+                    f"{label}old_text not found in file '{path}'.",
+                    project,
+                )
+            if count > 1:
+                label = f"patch {i}: " if len(patch_list) > 1 else ""
+                return _track(
+                    "vault_patch",
+                    f"{label}Ambiguous: old_text appears {count} times "
+                    f"in '{path}'. "
+                    "Provide more context to make the match unique.",
+                    project,
+                )
+            working = working.replace(old, new, 1)
+
+        filepath.write_text(working, encoding="utf-8")
 
         rel = filepath.relative_to(resolved_path)
+        n = len(patch_list)
         _git_commit(resolved_path, rel, f"vault: patch {project}/{path}")
 
+        noun = "patch" if n == 1 else "patches"
         return _track("vault_patch",
-                       f"Patched {project}/{path} (1 replacement).",
+                       f"Applied {n} {noun} to {project}/{path}.",
                        project, path)
 
     @mcp.tool

@@ -1842,6 +1842,252 @@ class TestPathTraversal:
         assert "\ntype: adr" in content
 
 
+# ── vault_patch ─────────────────────────────────────────────────────
+
+
+class TestVaultPatch:
+    """Tests for vault_patch single and multi-replacement."""
+
+    async def test_single_patch_legacy_params(self, git_vault: Path) -> None:
+        """Existing single old_text/new_text still works."""
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "old_text": "- [ ] Task one",
+                "new_text": "- [x] Task one",
+            },
+        ))
+        assert "1 patch" in result.lower()
+        content = (git_vault / "10_projects" / "testproject" / "11-tasks.md").read_text()
+        assert "- [x] Task one" in content
+
+    async def test_multi_patch_applies_all(self, git_vault: Path) -> None:
+        """Multiple patches applied in sequence to the same file."""
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "patches": [
+                    {"old_text": "- [ ] Task one", "new_text": "- [x] Task one"},
+                    {"old_text": "- [x] Task two", "new_text": "- [ ] Task two reopened"},
+                ],
+            },
+        ))
+        assert "2 patches" in result.lower()
+        content = (git_vault / "10_projects" / "testproject" / "11-tasks.md").read_text()
+        assert "- [x] Task one" in content
+        assert "- [ ] Task two reopened" in content
+
+    async def test_multi_patch_single_item(self, git_vault: Path) -> None:
+        """A patches list with one item works fine."""
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "patches": [
+                    {"old_text": "- [ ] Task one", "new_text": "- [x] Task one"},
+                ],
+            },
+        ))
+        assert "1 patch" in result.lower()
+
+    async def test_multi_patch_rejects_mixed_params(self, git_vault: Path) -> None:
+        """Providing both patches AND old_text/new_text is an error."""
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "old_text": "- [ ] Task one",
+                "new_text": "- [x] Task one",
+                "patches": [
+                    {"old_text": "- [x] Task two", "new_text": "- [ ] Task two"},
+                ],
+            },
+        ))
+        assert "error" in result.lower() or "cannot" in result.lower() or "mix" in result.lower()
+        # File must remain unchanged
+        content = (git_vault / "10_projects" / "testproject" / "11-tasks.md").read_text()
+        assert "- [ ] Task one" in content
+
+    async def test_multi_patch_empty_list(self, git_vault: Path) -> None:
+        """An empty patches list is an error."""
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "patches": [],
+            },
+        ))
+        assert "empty" in result.lower() or "error" in result.lower()
+
+    async def test_multi_patch_ambiguous_aborts_all(self, git_vault: Path) -> None:
+        """If any patch in the list is ambiguous, no patches are applied."""
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "patches": [
+                    {"old_text": "- [ ] Task one", "new_text": "- [x] Task one"},
+                    {"old_text": "Task", "new_text": "Item"},  # ambiguous
+                ],
+            },
+        ))
+        assert "ambiguous" in result.lower()
+        # File must remain unchanged — first patch NOT applied
+        content = (git_vault / "10_projects" / "testproject" / "11-tasks.md").read_text()
+        assert "- [ ] Task one" in content
+
+    async def test_multi_patch_not_found_aborts_all(self, git_vault: Path) -> None:
+        """If any patch old_text is not found, no patches are applied."""
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "patches": [
+                    {"old_text": "- [ ] Task one", "new_text": "- [x] Task one"},
+                    {"old_text": "nonexistent text", "new_text": "something"},
+                ],
+            },
+        ))
+        assert "not found" in result.lower()
+        # File must remain unchanged
+        content = (git_vault / "10_projects" / "testproject" / "11-tasks.md").read_text()
+        assert "- [ ] Task one" in content
+
+    async def test_multi_patch_sequential_dependency(self, git_vault: Path) -> None:
+        """Later patches see the result of earlier patches."""
+        mcp = create_server(vault_path=git_vault)
+        # First patch changes text, second patch modifies the result of the first
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "patches": [
+                    {"old_text": "- [ ] Task one", "new_text": "- [x] Task alpha"},
+                    {"old_text": "- [x] Task alpha", "new_text": "- [x] Task alpha (done)"},
+                ],
+            },
+        ))
+        assert "2 patches" in result.lower()
+        content = (git_vault / "10_projects" / "testproject" / "11-tasks.md").read_text()
+        assert "- [x] Task alpha (done)" in content
+
+    async def test_single_patch_project_not_found(self, git_vault: Path) -> None:
+        """Single patch with unknown project returns error."""
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "nonexistent",
+                "path": "11-tasks.md",
+                "old_text": "foo",
+                "new_text": "bar",
+            },
+        ))
+        assert "not found" in result.lower()
+
+    async def test_single_patch_file_not_found(self, git_vault: Path) -> None:
+        """Single patch with unknown file returns error."""
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "nonexistent.md",
+                "old_text": "foo",
+                "new_text": "bar",
+            },
+        ))
+        assert "not found" in result.lower()
+
+    async def test_single_patch_ambiguous(self, git_vault: Path) -> None:
+        """Single patch with ambiguous match returns error."""
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "old_text": "Task",
+                "new_text": "Item",
+            },
+        ))
+        assert "ambiguous" in result.lower()
+
+    async def test_single_patch_not_found_in_file(self, git_vault: Path) -> None:
+        """Single patch with text not in file returns error."""
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "old_text": "nonexistent text here",
+                "new_text": "replacement",
+            },
+        ))
+        assert "not found" in result.lower()
+
+    async def test_no_params_error(self, git_vault: Path) -> None:
+        """Neither old_text/new_text nor patches provided is an error."""
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+            },
+        ))
+        assert "error" in result.lower() or "provide" in result.lower()
+
+    async def test_multi_patch_single_git_commit(self, git_vault: Path) -> None:
+        """Multi-patch produces exactly one git commit."""
+        import subprocess
+
+        mcp = create_server(vault_path=git_vault)
+        # Count commits before
+        before = subprocess.run(
+            ["git", "rev-list", "--count", "HEAD"],
+            cwd=git_vault, capture_output=True, text=True, check=True,
+        )
+        count_before = int(before.stdout.strip())
+
+        await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "patches": [
+                    {"old_text": "- [ ] Task one", "new_text": "- [x] Task one"},
+                    {"old_text": "- [x] Task two", "new_text": "- [ ] Task two reopened"},
+                ],
+            },
+        )
+
+        after = subprocess.run(
+            ["git", "rev-list", "--count", "HEAD"],
+            cwd=git_vault, capture_output=True, text=True, check=True,
+        )
+        count_after = int(after.stdout.strip())
+        assert count_after == count_before + 1
+
+
 class TestSectionFallback:
     async def test_bare_name_takes_priority(self, mock_vault: Path) -> None:
         # Create a bare context.md alongside the legacy 00-context.md
