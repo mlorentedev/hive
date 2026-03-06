@@ -1774,6 +1774,233 @@ class TestMultiScopeRecent:
         assert "my-company" in result or "50_work" in result
 
 
+# ── vault_list_files ─────────────────────────────────────────────────
+
+
+class TestVaultListFiles:
+    async def test_lists_project_root(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_list_files", {"project": "testproject"},
+        )
+        text = _text(result)
+        assert "00-context.md" in text
+        assert "11-tasks.md" in text
+
+    async def test_lists_subdirectory(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_list_files", {"project": "testproject", "path": "30-architecture"},
+        )
+        text = _text(result)
+        assert "adr-001-test.md" in text
+        assert "00-context.md" not in text
+
+    async def test_pattern_filter(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_list_files", {"project": "testproject", "pattern": "adr-*"},
+        )
+        text = _text(result)
+        assert "adr-001-test.md" in text
+        assert "00-context.md" not in text
+
+    async def test_pattern_in_subdirectory(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_list_files",
+            {"project": "testproject", "path": "30-architecture", "pattern": "*.md"},
+        )
+        text = _text(result)
+        assert "adr-001-test.md" in text
+
+    async def test_project_not_found(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_list_files", {"project": "nonexistent"},
+        )
+        assert "not found" in _text(result).lower()
+
+    async def test_path_not_found(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_list_files", {"project": "testproject", "path": "nonexistent"},
+        )
+        assert "not found" in _text(result).lower()
+
+    async def test_shows_directories_and_files(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_list_files", {"project": "testproject"},
+        )
+        text = _text(result)
+        # Should list directories too
+        assert "30-architecture/" in text
+
+    async def test_empty_dir_no_pattern_match(self, mock_vault: Path) -> None:
+        mcp = create_server(vault_path=mock_vault)
+        result = await mcp.call_tool(
+            "vault_list_files", {"project": "testproject", "pattern": "*.xyz"},
+        )
+        assert "no files" in _text(result).lower()
+
+    async def test_meta_project(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_list_files", {"project": "_meta"},
+        )
+        text = _text(result)
+        assert "patterns/" in text
+
+
+# ── vault_patch ──────────────────────────────────────────────────────
+
+
+class TestVaultPatch:
+    async def test_replaces_text(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "old_text": "- [ ] Task one",
+                "new_text": "- [x] Task one",
+            },
+        )
+        text = _text(result)
+        assert "patched" in text.lower()
+        content = (git_vault / "10_projects" / "testproject" / "11-tasks.md").read_text()
+        assert "- [x] Task one" in content
+
+    async def test_preserves_rest_of_file(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "old_text": "- [ ] Task one",
+                "new_text": "- [x] Task one (done)",
+            },
+        )
+        content = (git_vault / "10_projects" / "testproject" / "11-tasks.md").read_text()
+        assert "- [x] Task two" in content
+        assert "testproject-tasks" in content
+
+    async def test_old_text_not_found(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "old_text": "nonexistent text xyz",
+                "new_text": "replacement",
+            },
+        )
+        assert "not found in file" in _text(result).lower()
+
+    async def test_project_not_found(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "nonexistent",
+                "path": "11-tasks.md",
+                "old_text": "x",
+                "new_text": "y",
+            },
+        )
+        assert "not found" in _text(result).lower()
+
+    async def test_file_not_found(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "nonexistent.md",
+                "old_text": "x",
+                "new_text": "y",
+            },
+        )
+        assert "not found" in _text(result).lower()
+
+    async def test_ambiguous_match(self, git_vault: Path) -> None:
+        """old_text that matches multiple locations should be rejected."""
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "old_text": "Task",
+                "new_text": "Item",
+            },
+        )
+        assert "ambiguous" in _text(result).lower()
+
+    async def test_git_commit_created(self, git_vault: Path) -> None:
+        import subprocess
+
+        mcp = create_server(vault_path=git_vault)
+        await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "old_text": "- [ ] Task one",
+                "new_text": "- [x] Task one",
+            },
+        )
+        log = subprocess.run(
+            ["git", "log", "--oneline", "-1"],
+            cwd=git_vault,
+            capture_output=True,
+            text=True,
+        )
+        assert "vault: patch" in log.stdout
+
+
+# ── vault_search regex ───────────────────────────────────────────────
+
+
+class TestVaultSearchRegex:
+    async def test_regex_match(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_search", {"query": r"Task\s+one", "use_regex": True},
+        )
+        text = _text(result)
+        assert "11-tasks.md" in text
+
+    async def test_regex_no_match(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_search", {"query": r"^zzz\d{5}$", "use_regex": True},
+        )
+        assert "no matches" in _text(result).lower()
+
+    async def test_regex_character_class(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_search", {"query": r"Line\s+\d+:", "use_regex": True},
+        )
+        text = _text(result)
+        assert "92-large-doc.md" in text
+
+    async def test_regex_false_uses_literal(self, vault_mcp: FastMCP) -> None:
+        """When use_regex=False, regex metacharacters should be literal."""
+        result = await vault_mcp.call_tool(
+            "vault_search", {"query": r"Task\s+one", "use_regex": False},
+        )
+        assert "no matches" in _text(result).lower()
+
+    async def test_invalid_regex(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_search", {"query": r"[invalid", "use_regex": True},
+        )
+        assert "invalid regex" in _text(result).lower()
+
+    async def test_regex_with_filters(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_search",
+            {"query": r"Line\s+\d+:", "use_regex": True, "type_filter": "lesson"},
+        )
+        text = _text(result)
+        assert "92-large-doc.md" in text
+
+
 class TestSectionFallback:
     async def test_bare_name_takes_priority(self, mock_vault: Path) -> None:
         # Create a bare context.md alongside the legacy 00-context.md

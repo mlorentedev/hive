@@ -24,7 +24,7 @@ See ADR: `~/Projects/knowledge/10_projects/hive/30-architecture/adr-001-orchestr
 
 | Path | Role |
 |---|---|
-| `src/hive/server.py` | Unified Hive MCP server (vault + worker) |
+| `src/hive/server.py` | Unified Hive MCP server (vault + worker, 17 tools) |
 | `src/hive/config.py` | Configuration (vault path, Ollama endpoint, OpenRouter key) |
 | `tests/` | pytest suite |
 | `~/Projects/knowledge/` | Obsidian vault (source of truth) |
