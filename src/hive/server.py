@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-<<<<<<< fix/code-audit
 import logging
-=======
 import re
->>>>>>> master
 import subprocess
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
@@ -62,6 +59,8 @@ def _resolve_project_dir(
     - ``_meta`` maps to the meta scope root (backward compat).
     - ``scope:project`` targets a specific scope.
     - Plain ``project`` auto-scans all scopes, first match wins.
+
+    Returns None if the project is not found or escapes the vault boundary.
     """
     scopes = scopes or _DEFAULT_SCOPES
 
@@ -69,7 +68,11 @@ def _resolve_project_dir(
     if project == "_meta":
         meta_dir_name = scopes.get("meta", "00_meta")
         d = vault / meta_dir_name
-        return (d, "meta") if d.is_dir() else None
+        if not d.is_dir():
+            return None
+        if _check_path_boundary(d, vault) is not None:
+            return None
+        return (d, "meta")
 
     explicit_scope, slug = _parse_project_ref(project)
 
@@ -78,7 +81,11 @@ def _resolve_project_dir(
         if dir_name is None:
             return None
         d = vault / dir_name / slug
-        return (d, explicit_scope) if d.is_dir() else None
+        if not d.is_dir():
+            return None
+        if _check_path_boundary(d, vault) is not None:
+            return None
+        return (d, explicit_scope)
 
     # Auto-scan: iterate scopes, first match wins, skip missing dirs
     for scope_name, dir_name in scopes.items():
@@ -88,7 +95,7 @@ def _resolve_project_dir(
         if not scope_dir.is_dir():
             continue
         d = scope_dir / slug
-        if d.is_dir():
+        if d.is_dir() and _check_path_boundary(d, vault) is None:
             return (d, scope_name)
 
     return None
@@ -809,12 +816,13 @@ Total estimated savings: ~C tokens
                           f"File already exists: {path}. Use vault_update to modify it.",
                           project)
 
-        # Auto-generate frontmatter
-        stem = filepath.stem
+        # Auto-generate frontmatter (sanitize to prevent YAML injection)
+        safe_stem = re.sub(r"[^\w\-.]", "_", filepath.stem)
+        safe_type = re.sub(r"[^\w\-.]", "_", doc_type)
         frontmatter = (
             f"---\n"
-            f"id: {stem}\n"
-            f"type: {doc_type}\n"
+            f"id: {safe_stem}\n"
+            f"type: {safe_type}\n"
             f"status: active\n"
             f'created: "{date.today().isoformat()}"\n'
             f"---\n\n"
@@ -986,9 +994,10 @@ Total estimated savings: ~C tokens
 
         # Append to file (create with frontmatter if missing)
         if not lessons_file.exists():
+            safe_project = re.sub(r"[^\w\-.]", "_", project)
             frontmatter = (
                 f"---\n"
-                f"id: {project}-lessons\n"
+                f"id: {safe_project}-lessons\n"
                 f"type: lesson\n"
                 f"status: active\n"
                 f'created: "{date.today().isoformat()}"\n'
@@ -1468,43 +1477,56 @@ Total estimated savings: ~C tokens
 
 def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
     """Stage a file and commit it in the vault git repo."""
+    safe_msg = message.replace("\n", " ").replace("\r", " ")
     try:
         subprocess.run(
             ["git", "add", str(rel_path)],
             cwd=vault_path,
             capture_output=True,
             check=True,
+            timeout=10,
         )
         subprocess.run(
-            ["git", "commit", "-m", message],
+            ["git", "commit", "-m", safe_msg],
             cwd=vault_path,
             capture_output=True,
             check=True,
+            timeout=10,
         )
     except subprocess.CalledProcessError as exc:
         _log.warning("git commit failed for %s: %s", rel_path, exc)
+    except subprocess.TimeoutExpired as exc:
+        _log.warning("git commit timed out for %s: %s", rel_path, exc)
 
 
 def _git_log(vault_path: Path, n: int) -> str:
     """Return last n git log entries, or empty string on failure."""
-    result = subprocess.run(
-        ["git", "log", "--oneline", f"-{n}"],
-        cwd=vault_path,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "log", "--oneline", f"-{n}"],
+            cwd=vault_path,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return ""
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
 def _git_recent(vault_path: Path, since_days: int) -> list[str]:
     """Return vault-relative .md paths changed in the last N days via git."""
-    result = subprocess.run(
-        ["git", "log", f"--since={since_days} days ago",
-         "--name-only", "--pretty=format:"],
-        cwd=vault_path,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "log", f"--since={since_days} days ago",
+             "--name-only", "--pretty=format:"],
+            cwd=vault_path,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return []
     if result.returncode != 0:
         return []
     return sorted({

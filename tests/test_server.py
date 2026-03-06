@@ -1807,6 +1807,40 @@ class TestPathTraversal:
         ))
         assert "escapes vault boundary" in result.lower()
 
+    async def test_project_param_traversal_blocked(
+        self, vault_mcp: FastMCP,
+    ) -> None:
+        """H1: crafted project name must not escape vault boundary."""
+        result = _text(await vault_mcp.call_tool(
+            "vault_update",
+            {
+                "project": "projects:../../etc",
+                "section": "context",
+                "operation": "append",
+                "content": "pwned",
+            },
+        ))
+        assert "not found" in result.lower()
+
+    async def test_yaml_injection_sanitized(self, git_vault: Path) -> None:
+        """H2: newlines in doc_type must not inject YAML fields."""
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_create",
+            {
+                "project": "testproject",
+                "path": "injected.md",
+                "content": "body",
+                "doc_type": "adr\nevil_field: true",
+            },
+        ))
+        assert "created" in result.lower()
+        content = (git_vault / "10_projects" / "testproject" / "injected.md").read_text()
+        # Newline was stripped — no separate YAML key injected
+        assert "evil_field: true\n" not in content
+        # Type value is sanitized into a single safe string
+        assert "\ntype: adr" in content
+
 
 class TestSectionFallback:
     async def test_bare_name_takes_priority(self, mock_vault: Path) -> None:
