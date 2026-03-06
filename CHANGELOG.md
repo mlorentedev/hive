@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.2](https://github.com/mlorentedev/hive/compare/v1.4.1...v1.4.2) (2026-03-06)
+
+
+### Documentation
+
+* **site:** update landing page for v1.3.0 ([188511e](https://github.com/mlorentedev/hive/commit/188511efdcdd1adaf164b56ca3f9f160538f18a8))
+
 ## [1.4.1](https://github.com/mlorentedev/hive/compare/v1.4.0...v1.4.1) (2026-03-06)
 
 
