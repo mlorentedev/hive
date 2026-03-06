@@ -1,6 +1,6 @@
 ---
 title: Vault Tools
-description: 12 tools for querying, searching, and managing your Obsidian vault.
+description: 14 tools for querying, searching, and managing your Obsidian vault.
 ---
 
 ## vault_list_projects
@@ -45,13 +45,16 @@ Full-text search across the vault.
 vault_search(
     query="authentication",
     max_lines=100,
-    doc_type="",     # filter by frontmatter type
-    status="",       # filter by frontmatter status
-    tag=""           # filter by frontmatter tag
+    doc_type="",        # filter by frontmatter type
+    status="",          # filter by frontmatter status
+    tag="",             # filter by frontmatter tag
+    use_regex=False     # treat query as a regular expression
 )
 ```
 
 Returns matching lines grouped by file, with metadata headers.
+
+When `use_regex=True`, the query is compiled as a Python regular expression (case-insensitive). Invalid regex patterns return an error message.
 
 ## vault_health
 
@@ -94,6 +97,35 @@ vault_create(
 ```
 
 Generates YAML frontmatter with `id`, `type`, `status: draft`, `created: today`. Auto-commits to git.
+
+## vault_list_files
+
+List files and directories in a vault project.
+
+```python
+vault_list_files(
+    project="my-project",
+    path="",           # subdirectory (relative to project root)
+    pattern=""         # glob pattern for recursive filtering (e.g. 'adr-*', '*.md')
+)
+```
+
+Without `pattern`, lists the immediate contents of the directory (directories first, then files). With `pattern`, recursively finds all matching files.
+
+## vault_patch
+
+Surgical text replacement in a vault file.
+
+```python
+vault_patch(
+    project="my-project",
+    path="30-architecture/adr-001.md",
+    old_text="status: draft",
+    new_text="status: accepted"
+)
+```
+
+Replaces exactly one occurrence of `old_text` with `new_text`. Rejects ambiguous matches — if `old_text` appears more than once, the operation fails with an error asking for more context. Auto-commits to git.
 
 ## capture_lesson
 

@@ -23,6 +23,7 @@ All configuration is done through environment variables, passed when registering
 | `HIVE_RELEVANCE_ALPHA` | `0.3` | EMA learning rate for adaptive context scoring |
 | `HIVE_RELEVANCE_DECAY` | `0.9` | Session decay factor for relevance scores |
 | `HIVE_RELEVANCE_EPSILON` | `0.15` | Exploration ratio for session_briefing (epsilon-greedy) |
+| `HIVE_VAULT_SCOPES` | `{"projects": "10_projects", "meta": "00_meta"}` | JSON mapping of scope names to vault subdirectories |
 
 ## API Key Resolution
 
