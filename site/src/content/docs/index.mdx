@@ -14,7 +14,7 @@ hero:
       icon: external
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
 
 ## Why Hive?
 
@@ -41,26 +41,53 @@ Hive replaces static context with **on-demand vault queries** via the [Model Con
 
 ## Quick Install
 
-**Claude Code:**
-```bash
-claude mcp add hive -- uvx --upgrade hive-vault
-```
-
-**Gemini CLI:**
-```bash
-gemini mcp add -s user hive-vault uvx -- --upgrade hive-vault
-```
-
-**Codex CLI** — add to `~/.codex/config.toml`:
-```toml
-[mcp_servers.hive-vault]
-command = "uvx"
-args = ["--upgrade", "hive-vault"]
-```
-
-**Other clients** (Cursor, Windsurf, etc.): point your MCP config at `uvx --upgrade hive-vault` via stdio transport.
+<Tabs syncKey="client">
+  <TabItem label="Claude Code">
+    ```bash
+    claude mcp add hive -- uvx --upgrade hive-vault
+    ```
+  </TabItem>
+  <TabItem label="Codex CLI">
+    Add to `~/.codex/config.toml`:
+    ```toml
+    [mcp_servers.hive-vault]
+    command = "uvx"
+    args = ["--upgrade", "hive-vault"]
+    ```
+  </TabItem>
+  <TabItem label="Gemini CLI">
+    ```bash
+    gemini mcp add -s user hive-vault uvx -- --upgrade hive-vault
+    ```
+  </TabItem>
+  <TabItem label="Copilot (VS Code)">
+    Add to `.vscode/mcp.json`:
+    ```json
+    {
+      "servers": {
+        "hive-vault": {
+          "command": "uvx",
+          "args": ["--upgrade", "hive-vault"]
+        }
+      }
+    }
+    ```
+  </TabItem>
+</Tabs>
 
 No cloning, no venv, no setup. [Learn more →](/hive/getting-started/)
+
+## Recommended Workflow
+
+The highest-value setup:
+
+1. **[Obsidian](https://obsidian.md/)** — local-first knowledge base, Markdown native, 1M+ community
+2. **[Obsidian Git](https://github.com/Vinzent03/obsidian-git)** — auto-commits vault changes on a schedule
+3. **Hive** — bridges your vault to any AI coding assistant via MCP
+
+Your assistant writes to the vault → Obsidian Git auto-commits → next session, everything is there. No manual sync.
+
+> Hive works with any Markdown directory — Obsidian is recommended, not required.
 
 ## Guides
 

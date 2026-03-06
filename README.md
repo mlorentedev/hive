@@ -4,12 +4,14 @@
 [![PyPI](https://img.shields.io/pypi/v/hive-vault)](https://pypi.org/project/hive-vault/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Docs](https://img.shields.io/badge/docs-mlorentedev.github.io%2Fhive-blue)](https://mlorentedev.github.io/hive/)
+[![Obsidian](https://img.shields.io/badge/Obsidian-vault%20ready-7C3AED?logo=obsidian)](https://obsidian.md/)
 
 **Your AI coding assistant forgets everything between sessions. Hive fixes that.**
 
 Every session, your assistant loads 800+ lines of static context. Most of it is irrelevant. You pay the full token cost every time. And next session? It starts from zero again.
 
-Hive connects your AI assistant to an [Obsidian](https://obsidian.md/) vault via [MCP](https://modelcontextprotocol.io/). Instead of loading everything upfront, it queries only what's needed. Lessons learned, architecture decisions, project context — all available on demand.
+Hive is an MCP server that connects your AI assistant to an [Obsidian](https://obsidian.md/) vault. Instead of loading everything upfront, it queries only what's needed — architecture decisions, lessons learned, project context — all on demand via [MCP](https://modelcontextprotocol.io/).
 
 **The numbers:**
 
@@ -161,9 +163,21 @@ claude mcp add hive \
 
 See [full configuration reference](https://mlorentedev.github.io/hive/configuration/) for all 15 environment variables.
 
+## Recommended Workflow
+
+The highest-value setup combines three tools:
+
+1. **[Obsidian](https://obsidian.md/)** — local-first knowledge base with 1M+ community, Markdown native, no lock-in
+2. **[Obsidian Git](https://github.com/Vinzent03/obsidian-git)** — auto-commits your vault changes on a schedule (version history for free)
+3. **Hive** — bridges your vault to any AI coding assistant via MCP
+
+Your assistant writes lessons and decisions to the vault → Obsidian Git auto-commits → next session, everything is there. No manual sync. No context lost.
+
+> Hive works with any directory of Markdown files — Obsidian is recommended, not required.
+
 ## Vault Structure
 
-Hive works with any directory of Markdown files. For best results, follow this layout:
+For best results, follow this layout:
 
 ```
 ~/Projects/knowledge/
