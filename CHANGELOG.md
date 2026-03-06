@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/mlorentedev/hive/compare/v1.4.5...v1.5.0) (2026-03-06)
+
+
+### Features
+
+* add multi-replacement support to vault_patch ([#25](https://github.com/mlorentedev/hive/issues/25)) ([5fcfc85](https://github.com/mlorentedev/hive/commit/5fcfc85cc92a9fa7ced1f444e46c7b6106d08780))
+
 ## [1.4.5](https://github.com/mlorentedev/hive/compare/v1.4.4...v1.4.5) (2026-03-06)
 
 
