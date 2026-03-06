@@ -18,7 +18,7 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 ## Why Hive?
 
-AI coding assistants load context statically. A typical `CLAUDE.md` grows to 800+ lines. Most is irrelevant to the current task. Every session pays the full token cost.
+AI coding assistants load context statically. A typical project instructions file grows to 800+ lines. Most is irrelevant to the current task. Every session pays the full token cost.
 
 Hive replaces static context with **on-demand vault queries** via the [Model Context Protocol](https://modelcontextprotocol.io/). **67–82% token reduction** on targeted queries.
 
@@ -46,7 +46,19 @@ Hive replaces static context with **on-demand vault queries** via the [Model Con
 claude mcp add hive -- uvx --upgrade hive-vault
 ```
 
-**Other clients:** point your MCP config at `uvx --upgrade hive-vault` via stdio transport.
+**Gemini CLI:**
+```bash
+gemini mcp add -s user hive-vault uvx -- --upgrade hive-vault
+```
+
+**Codex CLI** — add to `~/.codex/config.toml`:
+```toml
+[mcp_servers.hive-vault]
+command = "uvx"
+args = ["--upgrade", "hive-vault"]
+```
+
+**Other clients** (Cursor, Windsurf, etc.): point your MCP config at `uvx --upgrade hive-vault` via stdio transport.
 
 No cloning, no venv, no setup. [Learn more →](/hive/getting-started/)
 

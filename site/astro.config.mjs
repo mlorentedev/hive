@@ -27,6 +27,8 @@ export default defineConfig({
 						{ label: 'Vault Structure', slug: 'guides/vault-structure' },
 						{ label: 'Worker Routing', slug: 'guides/worker-routing' },
 						{ label: 'Prompts', slug: 'guides/prompts' },
+						{ label: 'Benchmarks', slug: 'guides/benchmarks' },
+						{ label: 'Troubleshooting', slug: 'guides/troubleshooting' },
 					],
 				},
 				{
