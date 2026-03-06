@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.4](https://github.com/mlorentedev/hive/compare/v1.4.3...v1.4.4) (2026-03-06)
+
+
+### Documentation
+
+* Obsidian branding + recommended workflow + tabbed landing install ([#20](https://github.com/mlorentedev/hive/issues/20)) ([945de00](https://github.com/mlorentedev/hive/commit/945de00f2879726d7ca6526f4b04acb707a27fa2))
+
 ## [1.4.3](https://github.com/mlorentedev/hive/compare/v1.4.2...v1.4.3) (2026-03-06)
 
 
