@@ -28,15 +28,30 @@ For tasks that don't need your primary model's full reasoning, Hive **delegates 
 claude mcp add hive -- uvx --upgrade hive-vault
 ```
 
+**Gemini CLI:**
+```bash
+gemini mcp add -s user hive-vault uvx -- --upgrade hive-vault
+```
+
+**OpenAI Codex CLI** — add to `~/.codex/config.toml`:
+```toml
+[mcp_servers.hive-vault]
+command = "uvx"
+args = ["--upgrade", "hive-vault"]
+```
+
 The `--upgrade` flag ensures you always get the latest version from PyPI on each session start.
 
-**Other MCP clients:** point your client's MCP config at `uvx --upgrade hive-vault` via stdio transport. See your client's docs for the exact syntax.
+**Other MCP clients:** point your client's MCP config at `uvx --upgrade hive-vault` via stdio transport.
 
 To configure the vault path (defaults to `~/Projects/knowledge`):
 
 ```bash
-# Claude Code example
+# Claude Code
 claude mcp add hive -e VAULT_PATH=/path/to/your/vault -- uvx --upgrade hive-vault
+
+# Gemini CLI
+gemini mcp add -s user -e VAULT_PATH=/path/to/your/vault hive-vault uvx -- --upgrade hive-vault
 ```
 
 **Manual update** (if you prefer not to auto-upgrade on every launch):
@@ -46,16 +61,18 @@ uv tool upgrade hive-vault
 
 ## Tools
 
-### Vault Tools (12)
+### Vault Tools (14)
 
 | Tool | Description |
 |---|---|
 | `vault_list_projects` | List all projects in the Obsidian vault |
 | `vault_query` | Read sections or files on demand (supports shortcuts: context, tasks, roadmap, lessons) |
-| `vault_search` | Full-text search across the vault with metadata filters (type, status, tag) |
+| `vault_search` | Full-text search across the vault with metadata filters + optional regex |
 | `vault_health` | Health metrics for all vault projects (file counts, staleness, coverage) |
 | `vault_update` | Write to vault with YAML frontmatter validation + auto git commit |
 | `vault_create` | Create new files with auto-generated frontmatter + auto git commit |
+| `vault_list_files` | List files and directories with optional glob pattern filtering |
+| `vault_patch` | Surgical text replacement in a vault file with auto git commit |
 | `capture_lesson` | Capture a lesson learned inline during a session — appends to 90-lessons.md |
 | `vault_summarize` | Smart summarization — returns small files directly, delegates large ones |
 | `vault_smart_search` | Ranked search with relevance scoring (status weight + recency + match density) |

@@ -13,11 +13,35 @@ description: Install and configure Hive in under a minute.
 
 ## Install
 
-Register Hive as an MCP server. Example with Claude Code:
+Register Hive as an MCP server in your preferred client:
+
+### Claude Code
 
 ```bash
 claude mcp add hive -- uvx --upgrade hive-vault
 ```
+
+### Gemini CLI
+
+```bash
+gemini mcp add -s user hive-vault uvx -- --upgrade hive-vault
+```
+
+### OpenAI Codex CLI
+
+Add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.hive-vault]
+command = "uvx"
+args = ["--upgrade", "hive-vault"]
+```
+
+### Other MCP clients (Cursor, Windsurf, etc.)
+
+Add a stdio MCP server with command `uvx` and args `["--upgrade", "hive-vault"]`. Refer to your client's MCP documentation for the exact format.
+
+---
 
 The `--upgrade` flag ensures you always get the latest version from PyPI on each session start. `uvx` handles the Python environment automatically — no cloning, no venv.
 
@@ -45,7 +69,9 @@ claude mcp add hive -e VAULT_PATH=/path/to/your/vault -- uvx --upgrade hive-vaul
 
 ## Configure Worker (Optional)
 
-To enable task delegation to cheaper models:
+To enable task delegation to cheaper models, pass the relevant environment variables:
+
+### Claude Code
 
 ```bash
 claude mcp add hive \
@@ -53,6 +79,31 @@ claude mcp add hive \
   -e HIVE_OLLAMA_ENDPOINT=http://your-ollama:11434 \
   -e OPENROUTER_API_KEY=sk-or-... \
   -- uvx --upgrade hive-vault
+```
+
+### Gemini CLI
+
+```bash
+gemini mcp add -s user \
+  -e VAULT_PATH=/path/to/your/vault \
+  -e HIVE_OLLAMA_ENDPOINT=http://your-ollama:11434 \
+  -e OPENROUTER_API_KEY=sk-or-... \
+  hive-vault uvx -- --upgrade hive-vault
+```
+
+### OpenAI Codex CLI
+
+Add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.hive-vault]
+command = "uvx"
+args = ["--upgrade", "hive-vault"]
+
+[mcp_servers.hive-vault.env]
+VAULT_PATH = "/path/to/your/vault"
+HIVE_OLLAMA_ENDPOINT = "http://your-ollama:11434"
+OPENROUTER_API_KEY = "sk-or-..."
 ```
 
 See [Configuration](/hive/configuration/) for all environment variables.
@@ -69,6 +120,6 @@ You should see project counts, file counts, and staleness metrics for each proje
 
 - [Use Cases](/hive/guides/use-cases/) — real-world workflows with Hive
 - [Configuration](/hive/configuration/) — full environment variable reference
-- [Vault Tools](/hive/tools/vault/) — all 14 vault tools
+- [Vault Tools](/hive/tools/vault/) — all vault tools
 - [Worker Tools](/hive/tools/worker/) — task delegation and routing
 - [Vault Structure](/hive/guides/vault-structure/) — how to organize your vault
