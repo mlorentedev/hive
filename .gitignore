@@ -14,4 +14,6 @@ htmlcov/
 site/node_modules/
 site/dist/
 site/.astro/
+site/.vscode/
 
+.claude/plans/
