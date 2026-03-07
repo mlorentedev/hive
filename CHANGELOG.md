@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/mlorentedev/hive/compare/v1.6.0...v1.7.0) (2026-03-07)
+
+
+### Features
+
+* add vault_validate tool for drift detection ([#33](https://github.com/mlorentedev/hive/issues/33)) ([0ec4bf5](https://github.com/mlorentedev/hive/commit/0ec4bf59c08162a780b8ceee426223ece5ea61b3))
+
 ## [1.6.0](https://github.com/mlorentedev/hive/compare/v1.5.1...v1.6.0) (2026-03-07)
 
 
