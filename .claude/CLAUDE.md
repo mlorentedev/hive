@@ -32,9 +32,16 @@ See ADR: `~/Projects/knowledge/10_projects/hive/30-architecture/adr-001-orchestr
 ## Vault Integration
 
 - Vault path: `~/Projects/knowledge/`
-- All vault writes MUST auto-commit to git
+- All vault writes MUST auto-commit to git (best-effort — never crash on git failure)
 - All vault writes MUST validate YAML frontmatter
 - Project vault entry: `~/Projects/knowledge/10_projects/hive/`
+
+## MCP Tool Schema Rules
+
+- **NEVER use `| None` in tool parameter types** — generates `anyOf` in JSON Schema, Claude Code drops these tools
+- Use empty defaults: `str = ""`, `list[T] = []` (`# noqa: B006`), `int = 0`
+- All subprocess calls MUST catch `Exception` (not just specific types)
+- HTTP clients MUST catch `httpx.TimeoutException` (covers ReadTimeout, not just ConnectTimeout)
 
 ## Key Modules
 

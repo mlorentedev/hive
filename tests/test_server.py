@@ -299,6 +299,20 @@ class TestVaultSearch:
         text = _text(result)
         assert "extra-lesson" in text
 
+    async def test_regex_too_long_rejected(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_search", {"query": "a" * 201, "use_regex": True}
+        )
+        assert "too long" in _text(result).lower()
+
+    async def test_regex_at_max_length_accepted(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_search", {"query": "a" * 200, "use_regex": True}
+        )
+        text = _text(result)
+        # Should not be rejected — either finds matches or returns "no matches"
+        assert "too long" not in text.lower()
+
     async def test_filter_skips_files_without_frontmatter(self, mock_vault: Path) -> None:
         bare = mock_vault / "10_projects" / "testproject" / "bare.md"
         bare.write_text("# No frontmatter\nSome active content.\n")
@@ -1841,6 +1855,58 @@ class TestPathTraversal:
         # Type value is sanitized into a single safe string
         assert "\ntype: adr" in content
 
+    async def test_patch_path_escape_blocked(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "../../../../etc/passwd",
+                "old_text": "root",
+                "new_text": "pwned",
+            },
+        ))
+        assert "escapes vault boundary" in result.lower()
+
+    async def test_list_files_path_escape_blocked(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_list_files",
+            {
+                "project": "testproject",
+                "path": "../../../../etc",
+            },
+        ))
+        assert "escapes vault boundary" in result.lower()
+
+    async def test_list_files_glob_capped(self, mock_vault: Path) -> None:
+        """vault_list_files caps results at 500 entries."""
+        project = mock_vault / "10_projects" / "testproject" / "bulk"
+        project.mkdir(parents=True, exist_ok=True)
+        for i in range(510):
+            (project / f"file_{i:04d}.md").write_text(f"# File {i}\n")
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool(
+            "vault_list_files",
+            {"project": "testproject", "path": "bulk", "pattern": "*.md"},
+        ))
+        # Should contain at most 500 file entries
+        file_lines = [ln for ln in result.splitlines() if ln.startswith("- ")]
+        assert len(file_lines) <= 500
+
+    async def test_patch_invalid_keys_returns_error(self, git_vault: Path) -> None:
+        """Patches with wrong dict keys return error, not KeyError crash."""
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "patches": [{"old": "wrong", "new": "keys"}],
+            },
+        ))
+        assert "old_text" in result.lower() and "new_text" in result.lower()
+
 
 # ── vault_patch ─────────────────────────────────────────────────────
 
@@ -1929,7 +1995,7 @@ class TestVaultPatch:
                 "patches": [],
             },
         ))
-        assert "empty" in result.lower() or "error" in result.lower()
+        assert "provide" in result.lower() or "error" in result.lower()
 
     async def test_multi_patch_ambiguous_aborts_all(self, git_vault: Path) -> None:
         """If any patch in the list is ambiguous, no patches are applied."""
@@ -2086,6 +2152,148 @@ class TestVaultPatch:
         )
         count_after = int(after.stdout.strip())
         assert count_after == count_before + 1
+
+
+class TestGitCommitResilience:
+    """Verify that git failures never crash the server or lose data."""
+
+    async def test_git_oserror_does_not_crash(self, git_vault: Path) -> None:
+        """OSError in _git_commit (e.g. git not in PATH) must not propagate."""
+        from unittest.mock import patch
+
+        mcp = create_server(vault_path=git_vault)
+
+        with patch("hive.server.subprocess.run", side_effect=OSError("git not found")):
+            result = _text(await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "old_text": "- [ ] Task one",
+                    "new_text": "- [x] Task one done",
+                },
+            ))
+
+        assert "applied" in result.lower()
+        # Data was written to disk despite git failure
+        content = (git_vault / "10_projects" / "testproject" / "11-tasks.md").read_text()
+        assert "- [x] Task one done" in content
+
+    async def test_git_unexpected_exception_does_not_crash(self, git_vault: Path) -> None:
+        """Any unexpected exception in _git_commit must be swallowed."""
+        from unittest.mock import patch
+
+        mcp = create_server(vault_path=git_vault)
+
+        with patch("hive.server.subprocess.run", side_effect=RuntimeError("unexpected")):
+            result = _text(await mcp.call_tool(
+                "vault_update",
+                {
+                    "project": "testproject",
+                    "section": "tasks",
+                    "operation": "append",
+                    "content": "\n- [ ] New task from test\n",
+                },
+            ))
+
+        assert "updated" in result.lower()
+
+    async def test_server_responds_after_git_failure(self, git_vault: Path) -> None:
+        """After a git failure, subsequent MCP calls still work."""
+        from unittest.mock import patch
+
+        mcp = create_server(vault_path=git_vault)
+
+        # First call: git fails
+        with patch("hive.server.subprocess.run", side_effect=OSError("git not found")):
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "old_text": "- [ ] Task one",
+                    "new_text": "- [x] Task one done",
+                },
+            )
+
+        # Second call: read-only, must succeed (no mock — real subprocess)
+        result = _text(await mcp.call_tool(
+            "vault_query", {"project": "testproject", "section": "tasks"},
+        ))
+        assert "task one done" in result.lower()
+
+
+class TestGitReadResilience:
+    """Verify _git_log/_git_recent don't crash on unexpected errors."""
+
+    async def test_session_briefing_survives_git_oserror(self, git_vault: Path) -> None:
+        """session_briefing must not crash if git binary is missing."""
+        from unittest.mock import patch
+
+        mcp = create_server(vault_path=git_vault)
+
+        with patch("hive.server.subprocess.run", side_effect=OSError("git not found")):
+            result = _text(await mcp.call_tool(
+                "session_briefing", {"project": "testproject"},
+            ))
+
+        assert "session briefing" in result.lower()
+
+    async def test_vault_recent_survives_git_oserror(self, git_vault: Path) -> None:
+        """vault_recent must not crash if git binary is missing."""
+        from unittest.mock import patch
+
+        mcp = create_server(vault_path=git_vault)
+
+        with patch("hive.server.subprocess.run", side_effect=OSError("git not found")):
+            result = _text(await mcp.call_tool(
+                "vault_recent", {"since_days": 7},
+            ))
+
+        # Should return gracefully (no changes or empty result)
+        assert result  # non-empty response
+
+
+class TestFileIOResilience:
+    """Verify write tools return errors instead of crashing on I/O failures."""
+
+    async def test_vault_patch_read_permission_error(self, git_vault: Path) -> None:
+        """vault_patch returns error on read failure, not crash."""
+        mcp = create_server(vault_path=git_vault)
+        tasks = git_vault / "10_projects" / "testproject" / "11-tasks.md"
+        tasks.chmod(0o000)
+        try:
+            result = _text(await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "old_text": "foo",
+                    "new_text": "bar",
+                },
+            ))
+            assert "error" in result.lower()
+        finally:
+            tasks.chmod(0o644)
+
+    async def test_vault_update_write_permission_error(self, git_vault: Path) -> None:
+        """vault_update returns error on write failure, not crash."""
+        mcp = create_server(vault_path=git_vault)
+        tasks = git_vault / "10_projects" / "testproject" / "11-tasks.md"
+        tasks.chmod(0o444)
+        try:
+            result = _text(await mcp.call_tool(
+                "vault_update",
+                {
+                    "project": "testproject",
+                    "section": "tasks",
+                    "operation": "append",
+                    "content": "\n- [ ] New task\n",
+                },
+            ))
+            assert "error" in result.lower()
+        finally:
+            tasks.chmod(0o644)
 
 
 class TestSectionFallback:

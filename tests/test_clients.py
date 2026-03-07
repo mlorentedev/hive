@@ -236,3 +236,86 @@ class TestOpenRouterListModels:
             pytest.raises(ConnectionError, match="OpenRouter"),
         ):
             await client.list_models()
+
+    @pytest.mark.asyncio
+    async def test_list_models_http_error(self) -> None:
+        client = OpenRouterClient(api_key="sk-test", default_model="m")
+        mock_resp = _mock_response(status_code=500, json_data={"error": "internal"})
+        with (
+            patch.object(client._http, "get", new_callable=AsyncMock, return_value=mock_resp),
+            pytest.raises(RuntimeError, match="models error"),
+        ):
+            await client.list_models()
+
+    @pytest.mark.asyncio
+    async def test_list_models_malformed_pricing(self) -> None:
+        """Malformed pricing values default to 0.0 instead of crashing."""
+        client = OpenRouterClient(api_key="sk-test", default_model="m")
+        mock_resp = _mock_response(
+            json_data={
+                "data": [
+                    {
+                        "id": "bad-model",
+                        "name": "Bad Pricing",
+                        "context_length": 4096,
+                        "pricing": {"prompt": "not-a-number", "completion": None},
+                    },
+                ],
+            }
+        )
+        with patch.object(client._http, "get", new_callable=AsyncMock, return_value=mock_resp):
+            models = await client.list_models()
+
+        assert len(models) == 1
+        assert models[0].cost_per_million_input == 0.0
+        assert models[0].cost_per_million_output == 0.0
+        assert models[0].is_free is True
+
+    @pytest.mark.asyncio
+    async def test_list_models_read_timeout(self) -> None:
+        client = OpenRouterClient(api_key="sk-test", default_model="m")
+        with (
+            patch.object(
+                client._http, "get", new_callable=AsyncMock,
+                side_effect=httpx.ReadTimeout("read timed out"),
+            ),
+            pytest.raises(ConnectionError, match="timed out"),
+        ):
+            await client.list_models()
+
+
+class TestReadTimeoutResilience:
+    """Verify ReadTimeout is caught and converted to ConnectionError."""
+
+    @pytest.mark.asyncio
+    async def test_ollama_read_timeout(self) -> None:
+        client = OllamaClient(endpoint="http://localhost:11434", model="test")
+        with (
+            patch.object(
+                client._http, "post", new_callable=AsyncMock,
+                side_effect=httpx.ReadTimeout("inference took too long"),
+            ),
+            pytest.raises(ConnectionError, match="timed out"),
+        ):
+            await client.generate("test")
+
+    @pytest.mark.asyncio
+    async def test_openrouter_read_timeout(self) -> None:
+        client = OpenRouterClient(api_key="sk-test", default_model="m")
+        with (
+            patch.object(
+                client._http, "post", new_callable=AsyncMock,
+                side_effect=httpx.ReadTimeout("inference took too long"),
+            ),
+            pytest.raises(ConnectionError, match="timed out"),
+        ):
+            await client.generate("test")
+
+    @pytest.mark.asyncio
+    async def test_ollama_is_available_read_timeout(self) -> None:
+        client = OllamaClient(endpoint="http://localhost:11434", model="test")
+        with patch.object(
+            client._http, "get", new_callable=AsyncMock,
+            side_effect=httpx.ReadTimeout("slow"),
+        ):
+            assert await client.is_available() is False

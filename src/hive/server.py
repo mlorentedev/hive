@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
 from fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -31,6 +32,9 @@ from hive.usage import UsageTracker
 _log = logging.getLogger(__name__)
 
 _VALID_OPERATIONS = {"append", "replace"}
+
+_READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
+_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False)
 
 SECTION_SHORTCUTS: dict[str, str] = {
     "context": "00-context.md",
@@ -254,7 +258,17 @@ def create_server(
         epsilon=settings.relevance_epsilon,
     )
     stale_days = settings.stale_threshold_days
-    mcp = FastMCP("Hive")
+    mcp = FastMCP(
+        "Hive",
+        instructions=(
+            "Hive provides on-demand access to an Obsidian vault. "
+            "Use vault tools (vault_query, vault_search, vault_patch, etc.) "
+            "instead of direct filesystem access for files under the vault path. "
+            "Read-only tools are safe to call freely. "
+            "Write tools (vault_update, vault_create, vault_patch, capture_lesson) "
+            "auto-commit to git."
+        ),
+    )
 
     def _track(
         tool: str, result: str, project: str = "", section: str = "",
@@ -382,7 +396,8 @@ def create_server(
         result = _resolve_file(resolved_path, project, "context", "", scopes)
         if isinstance(result, str):
             return result
-        return _truncate(result.read_text(encoding="utf-8"), 200)
+        content = _safe_read(result)
+        return _truncate(content, 200) if content else "Error reading file."
 
     @mcp.resource("hive://projects/{project}/tasks")
     def tasks_resource(project: str) -> str:
@@ -390,7 +405,8 @@ def create_server(
         result = _resolve_file(resolved_path, project, "tasks", "", scopes)
         if isinstance(result, str):
             return result
-        return _truncate(result.read_text(encoding="utf-8"), 200)
+        content = _safe_read(result)
+        return _truncate(content, 200) if content else "Error reading file."
 
     @mcp.resource("hive://projects/{project}/lessons")
     def lessons_resource(project: str) -> str:
@@ -398,7 +414,8 @@ def create_server(
         result = _resolve_file(resolved_path, project, "lessons", "", scopes)
         if isinstance(result, str):
             return result
-        return _truncate(result.read_text(encoding="utf-8"), 200)
+        content = _safe_read(result)
+        return _truncate(content, 200) if content else "Error reading file."
 
     # ── Prompts ─────────────────────────────────────────────────────────
 
@@ -617,12 +634,12 @@ Total estimated savings: ~C tokens
 
     # ── Tools ───────────────────────────────────────────────────────────
 
-    @mcp.tool
+    @mcp.tool(annotations=_READ_ONLY)
     def vault_list_projects() -> str:
         """List all projects available in the Obsidian vault."""
         return _track("vault_list_projects", _list_projects_text())
 
-    @mcp.tool
+    @mcp.tool(annotations=_READ_ONLY)
     def vault_query(
         project: str,
         section: str = "context",
@@ -645,7 +662,11 @@ Total estimated savings: ~C tokens
             return _track("vault_query", result, project, resolved_section)
         filepath = result
 
-        content = filepath.read_text(encoding="utf-8")
+        try:
+            content = filepath.read_text(encoding="utf-8")
+        except OSError as exc:
+            return _track("vault_query",
+                          f"File I/O error: {exc}", project, resolved_section)
 
         if include_metadata:
             fm = parse_frontmatter(content)
@@ -656,7 +677,7 @@ Total estimated savings: ~C tokens
         return _track("vault_query", _truncate(content, max_lines),
                        project, resolved_section)
 
-    @mcp.tool
+    @mcp.tool(annotations=_READ_ONLY)
     def vault_search(
         query: str,
         max_lines: int = 500,
@@ -676,6 +697,9 @@ Total estimated savings: ~C tokens
             use_regex: Treat query as a regular expression. Default False (literal match).
         """
         if use_regex:
+            if len(query) > 200:
+                return _track("vault_search",
+                              "Regex pattern too long (max 200 chars).")
             try:
                 pattern = re.compile(query, re.IGNORECASE)
             except re.error as exc:
@@ -727,12 +751,12 @@ Total estimated savings: ~C tokens
         output = f"# Search: '{query}'\n\n" + "\n".join(results)
         return _track("vault_search", _truncate(output, max_lines))
 
-    @mcp.tool
+    @mcp.tool(annotations=_READ_ONLY)
     def vault_health() -> str:
         """Return health metrics for all vault projects."""
         return _track("vault_health", _health_report_text())
 
-    @mcp.tool
+    @mcp.tool(annotations=_WRITE)
     def vault_update(
         project: str,
         section: str,
@@ -773,11 +797,15 @@ Total estimated savings: ~C tokens
                 return _track("vault_update",
                               f"Frontmatter validation failed: {error}", project)
 
-        if operation == "append":
-            existing = filepath.read_text(encoding="utf-8") if filepath.exists() else ""
-            filepath.write_text(existing + content, encoding="utf-8")
-        else:
-            filepath.write_text(content, encoding="utf-8")
+        try:
+            if operation == "append":
+                existing = filepath.read_text(encoding="utf-8") if filepath.exists() else ""
+                filepath.write_text(existing + content, encoding="utf-8")
+            else:
+                filepath.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            return _track("vault_update",
+                          f"File I/O error: {exc}", project)
 
         rel = filepath.relative_to(resolved_path)
         _git_commit(resolved_path, rel, f"vault: update {project}/{section}")
@@ -786,7 +814,7 @@ Total estimated savings: ~C tokens
                        f"Updated {project}/{section} ({operation}).",
                        project, section)
 
-    @mcp.tool
+    @mcp.tool(annotations=_WRITE)
     def vault_create(
         project: str,
         path: str,
@@ -828,8 +856,12 @@ Total estimated savings: ~C tokens
             f"---\n\n"
         )
 
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        filepath.write_text(frontmatter + content, encoding="utf-8")
+        try:
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            filepath.write_text(frontmatter + content, encoding="utf-8")
+        except OSError as exc:
+            return _track("vault_create",
+                          f"File I/O error: {exc}", project)
 
         rel = filepath.relative_to(resolved_path)
         display_project = "00_meta" if project == "_meta" else project
@@ -839,7 +871,7 @@ Total estimated savings: ~C tokens
                        f"Created {project}/{path} (type: {doc_type}).",
                        project, path)
 
-    @mcp.tool
+    @mcp.tool(annotations=_READ_ONLY)
     def vault_list_files(
         project: str,
         path: str = "",
@@ -859,16 +891,20 @@ Total estimated savings: ~C tokens
         project_dir, _ = resolved
 
         target = project_dir / path if path else project_dir
+        boundary_error = _check_path_boundary(target, resolved_path)
+        if boundary_error:
+            return _track("vault_list_files", boundary_error, project)
         if not target.is_dir():
             return _track("vault_list_files",
                           f"Path '{path}' not found in project '{project}'.", project)
 
         lines: list[str] = [f"# Files: {project}/{path}" if path else f"# Files: {project}", ""]
 
+        max_list_results = 500
         if pattern:
             # Recursive glob for pattern matching
             files = sorted(f for f in target.rglob(pattern) if f.is_file())
-            for f in files:
+            for f in files[:max_list_results]:
                 rel_f = f.relative_to(target)
                 lines.append(f"- {rel_f}")
             if len(lines) == 2:
@@ -886,13 +922,13 @@ Total estimated savings: ~C tokens
 
         return _track("vault_list_files", "\n".join(lines), project, path)
 
-    @mcp.tool
+    @mcp.tool(annotations=_WRITE)
     def vault_patch(
         project: str,
         path: str,
-        old_text: str | None = None,
-        new_text: str | None = None,
-        patches: list[dict[str, str]] | None = None,
+        old_text: str = "",
+        new_text: str = "",
+        patches: list[dict[str, str]] = [],  # noqa: B006
     ) -> str:
         """Surgical text replacement in a vault file with auto git commit.
 
@@ -907,12 +943,12 @@ Total estimated savings: ~C tokens
         Args:
             project: Project slug or '_meta' for cross-project content.
             path: Relative path to the file within the project.
-            old_text: Exact text to find and replace (single mode).
-            new_text: Replacement text (single mode).
+            old_text: Exact text to find and replace (single mode). Empty = not set.
+            new_text: Replacement text (single mode). Empty = not set.
             patches: List of {old_text, new_text} dicts (multi mode).
         """
-        has_single = old_text is not None or new_text is not None
-        has_multi = patches is not None
+        has_single = bool(old_text) or bool(new_text)
+        has_multi = len(patches) > 0
 
         if has_single and has_multi:
             return _track(
@@ -923,7 +959,7 @@ Total estimated savings: ~C tokens
             )
 
         if has_single:
-            if old_text is None or new_text is None:
+            if not old_text or not new_text:
                 return _track(
                     "vault_patch",
                     "Provide both old_text and new_text for single replacement.",
@@ -933,13 +969,6 @@ Total estimated savings: ~C tokens
                 {"old_text": old_text, "new_text": new_text},
             ]
         elif has_multi:
-            assert patches is not None  # narrowing for mypy
-            if len(patches) == 0:
-                return _track(
-                    "vault_patch",
-                    "Empty patches list. Provide at least one patch.",
-                    project,
-                )
             patch_list = patches
         else:
             return _track(
@@ -955,16 +984,30 @@ Total estimated savings: ~C tokens
         project_dir, _ = resolved
 
         filepath = project_dir / path
+        boundary_error = _check_path_boundary(filepath, resolved_path)
+        if boundary_error:
+            return _track("vault_patch", boundary_error, project)
         if not filepath.exists():
             return _track("vault_patch",
                           f"File '{path}' not found in project '{project}'.",
                           project)
 
-        content = filepath.read_text(encoding="utf-8")
+        try:
+            content = filepath.read_text(encoding="utf-8")
+        except OSError as exc:
+            return _track("vault_patch",
+                          f"File I/O error reading '{path}': {exc}", project)
 
         # Validate and apply all patches on a working copy first
         working = content
         for i, patch in enumerate(patch_list, 1):
+            if "old_text" not in patch or "new_text" not in patch:
+                label = f"patch {i}: " if len(patch_list) > 1 else ""
+                return _track(
+                    "vault_patch",
+                    f"{label}Each patch must have 'old_text' and 'new_text' keys.",
+                    project,
+                )
             old = patch["old_text"]
             new = patch["new_text"]
             count = working.count(old)
@@ -987,7 +1030,11 @@ Total estimated savings: ~C tokens
                 )
             working = working.replace(old, new, 1)
 
-        filepath.write_text(working, encoding="utf-8")
+        try:
+            filepath.write_text(working, encoding="utf-8")
+        except OSError as exc:
+            return _track("vault_patch",
+                          f"File I/O error writing '{path}': {exc}", project)
 
         rel = filepath.relative_to(resolved_path)
         n = len(patch_list)
@@ -998,14 +1045,14 @@ Total estimated savings: ~C tokens
                        f"Applied {n} {noun} to {project}/{path}.",
                        project, path)
 
-    @mcp.tool
+    @mcp.tool(annotations=_WRITE)
     def capture_lesson(
         project: str,
         title: str,
         context: str,
         problem: str,
         solution: str,
-        tags: list[str] | None = None,
+        tags: list[str] = [],  # noqa: B006
     ) -> str:
         """Capture a lesson learned inline during a session.
 
@@ -1031,7 +1078,11 @@ Total estimated savings: ~C tokens
         # Read existing content for deduplication
         existing = ""
         if lessons_file.exists():
-            existing = lessons_file.read_text(encoding="utf-8")
+            try:
+                existing = lessons_file.read_text(encoding="utf-8")
+            except OSError as exc:
+                return _track("capture_lesson",
+                              f"File I/O error: {exc}", project)
 
         # Deduplicate by heading title (not substring — avoids false matches)
         if f"] {title}\n" in existing:
@@ -1042,7 +1093,7 @@ Total estimated savings: ~C tokens
             )
 
         # Format the lesson entry
-        tag_str = " ".join(f"`#{t}`" for t in (tags or []))
+        tag_str = " ".join(f"`#{t}`" for t in tags)
         entry = (
             f"\n### [{date.today().isoformat()}] {title}\n"
             f"**Context:** {context}\n"
@@ -1053,21 +1104,25 @@ Total estimated savings: ~C tokens
             entry += f"**Tags:** {tag_str}\n"
 
         # Append to file (create with frontmatter if missing)
-        if not lessons_file.exists():
-            safe_project = re.sub(r"[^\w\-.]", "_", project)
-            frontmatter = (
-                f"---\n"
-                f"id: {safe_project}-lessons\n"
-                f"type: lesson\n"
-                f"status: active\n"
-                f'created: "{date.today().isoformat()}"\n'
-                f"---\n\n"
-                f"# Lessons Learned\n"
-            )
-            lessons_file.write_text(frontmatter + entry, encoding="utf-8")
-        else:
-            with lessons_file.open("a", encoding="utf-8") as f:
-                f.write(entry)
+        try:
+            if not lessons_file.exists():
+                safe_project = re.sub(r"[^\w\-.]", "_", project)
+                frontmatter = (
+                    f"---\n"
+                    f"id: {safe_project}-lessons\n"
+                    f"type: lesson\n"
+                    f"status: active\n"
+                    f'created: "{date.today().isoformat()}"\n'
+                    f"---\n\n"
+                    f"# Lessons Learned\n"
+                )
+                lessons_file.write_text(frontmatter + entry, encoding="utf-8")
+            else:
+                with lessons_file.open("a", encoding="utf-8") as f:
+                    f.write(entry)
+        except OSError as exc:
+            return _track("capture_lesson",
+                          f"File I/O error: {exc}", project)
 
         rel = lessons_file.relative_to(resolved_path)
         _git_commit(resolved_path, rel, f"vault: capture_lesson {project} — {title}")
@@ -1078,7 +1133,7 @@ Total estimated savings: ~C tokens
             project, "lessons",
         )
 
-    @mcp.tool
+    @mcp.tool(annotations=_READ_ONLY)
     def vault_summarize(
         project: str,
         section: str = "context",
@@ -1101,7 +1156,11 @@ Total estimated savings: ~C tokens
             return _track("vault_summarize", result, project)
         filepath = result
 
-        content = filepath.read_text(encoding="utf-8")
+        try:
+            content = filepath.read_text(encoding="utf-8")
+        except OSError as exc:
+            return _track("vault_summarize",
+                          f"File I/O error: {exc}", project)
         fm = parse_frontmatter(content)
         body = extract_body(content)
         line_count = len(content.splitlines())
@@ -1115,7 +1174,7 @@ Total estimated savings: ~C tokens
                        _build_delegation_prompt(meta, body, line_count, max_summary_lines),
                        project)
 
-    @mcp.tool
+    @mcp.tool(annotations=_READ_ONLY)
     def vault_smart_search(
         query: str,
         max_results: int = 10,
@@ -1167,7 +1226,7 @@ Total estimated savings: ~C tokens
         output = "\n".join(results)
         return _track("vault_smart_search", _truncate(output, max_lines))
 
-    @mcp.tool
+    @mcp.tool(annotations=_READ_ONLY)
     def session_briefing(project: str) -> str:
         """One-call context briefing to start a new session.
 
@@ -1192,19 +1251,23 @@ Total estimated savings: ~C tokens
         # Tasks
         task_result = _resolve_file(resolved_path, project, "tasks", "", scopes)
         if not isinstance(task_result, str):
-            relevance.record_access(project, "tasks")
-            body = _truncate(task_result.read_text(encoding="utf-8"), 50)
-            sections["tasks"] = f"## Active Tasks\n{body}"
+            task_content = _safe_read(task_result)
+            if task_content is not None:
+                relevance.record_access(project, "tasks")
+                body = _truncate(task_content, 50)
+                sections["tasks"] = f"## Active Tasks\n{body}"
 
         # Lessons
         lessons_result = _resolve_file(
             resolved_path, project, "lessons", "", scopes,
         )
         if not isinstance(lessons_result, str):
-            relevance.record_access(project, "lessons")
-            lines = lessons_result.read_text(encoding="utf-8").splitlines()
-            tail = lines[-30:] if len(lines) > 30 else lines
-            sections["lessons"] = "## Recent Lessons\n" + "\n".join(tail)
+            lessons_content = _safe_read(lessons_result)
+            if lessons_content is not None:
+                relevance.record_access(project, "lessons")
+                lines = lessons_content.splitlines()
+                tail = lines[-30:] if len(lines) > 30 else lines
+                sections["lessons"] = "## Recent Lessons\n" + "\n".join(tail)
 
         # Git activity (always shown, not ranked)
         git_block = "## Recent Vault Activity\n"
@@ -1240,7 +1303,7 @@ Total estimated savings: ~C tokens
 
         return _track("session_briefing", "\n".join(parts), project)
 
-    @mcp.tool
+    @mcp.tool(annotations=_READ_ONLY)
     def vault_recent(since_days: int = 7, project: str = "", max_lines: int = 100) -> str:
         """Show files changed in the vault in the last N days.
 
@@ -1301,7 +1364,7 @@ Total estimated savings: ~C tokens
         output = "\n".join(lines)
         return _track("vault_recent", _truncate(output, max_lines), project)
 
-    @mcp.tool
+    @mcp.tool(annotations=_READ_ONLY)
     def vault_usage(since_days: int = 30) -> str:
         """Show vault tool usage analytics.
 
@@ -1400,7 +1463,7 @@ Total estimated savings: ~C tokens
             msg = f"OpenRouter error ({model_id}): {exc}"
             return f"{msg}. The host should handle this task directly."
 
-    @mcp.tool
+    @mcp.tool(annotations=_WRITE)
     async def delegate_task(
         prompt: str,
         context: str = "",
@@ -1473,7 +1536,7 @@ Total estimated savings: ~C tokens
         reasons = "; ".join(errors)
         return f"All workers unavailable. [{reasons}]. The host should handle this task directly."
 
-    @mcp.tool
+    @mcp.tool(annotations=_READ_ONLY)
     async def list_models() -> str:
         """List available models across all providers."""
         lines = ["# Available Models", ""]
@@ -1500,7 +1563,7 @@ Total estimated savings: ~C tokens
 
         return "\n".join(lines)
 
-    @mcp.tool
+    @mcp.tool(annotations=_READ_ONLY)
     async def worker_status() -> str:
         """Show worker health: budget, connectivity, usage stats."""
         stats = budget.month_stats(settings.openrouter_budget)
@@ -1536,7 +1599,12 @@ Total estimated savings: ~C tokens
 
 
 def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
-    """Stage a file and commit it in the vault git repo."""
+    """Stage a file and commit it in the vault git repo.
+
+    This is a best-effort side-effect: failures are logged but never
+    propagated, so a git problem cannot crash the MCP server or prevent
+    the tool response from reaching the client.
+    """
     safe_msg = message.replace("\n", " ").replace("\r", " ")
     try:
         subprocess.run(
@@ -1544,19 +1612,21 @@ def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
             cwd=vault_path,
             capture_output=True,
             check=True,
-            timeout=10,
+            timeout=30,
         )
         subprocess.run(
             ["git", "commit", "-m", safe_msg],
             cwd=vault_path,
             capture_output=True,
             check=True,
-            timeout=10,
+            timeout=30,
         )
     except subprocess.CalledProcessError as exc:
         _log.warning("git commit failed for %s: %s", rel_path, exc)
     except subprocess.TimeoutExpired as exc:
         _log.warning("git commit timed out for %s: %s", rel_path, exc)
+    except Exception as exc:
+        _log.warning("git commit unexpected error for %s: %s", rel_path, exc)
 
 
 def _git_log(vault_path: Path, n: int) -> str:
@@ -1567,9 +1637,9 @@ def _git_log(vault_path: Path, n: int) -> str:
             cwd=vault_path,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=30,
         )
-    except subprocess.TimeoutExpired:
+    except Exception:
         return ""
     return result.stdout.strip() if result.returncode == 0 else ""
 
@@ -1583,9 +1653,9 @@ def _git_recent(vault_path: Path, since_days: int) -> list[str]:
             cwd=vault_path,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=30,
         )
-    except subprocess.TimeoutExpired:
+    except Exception:
         return []
     if result.returncode != 0:
         return []
