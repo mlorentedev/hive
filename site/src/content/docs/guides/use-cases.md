@@ -102,6 +102,27 @@ The lesson is appended to the project's `90-lessons.md` with auto-generated fron
 
 This is better than waiting until end-of-session retrospective — insights captured in the moment are more accurate and less likely to be forgotten.
 
+## Batch Lesson Extraction
+
+After a long debugging session or architecture discussion, extract multiple lessons at once:
+
+> "Extract lessons from these session notes about the database migration"
+
+```python
+extract_lessons(
+    project="my-project",
+    text="We discovered the migration failed because...[paste session notes]...",
+    min_confidence=0.7,
+    max_lessons=5
+)
+```
+
+This sends the text to a worker model (Ollama or OpenRouter) which identifies decisions, bug root causes, and pattern choices — then writes them to `90-lessons.md`. Your primary model saves tokens by not processing the raw text itself.
+
+**When to use `capture_lesson` vs `extract_lessons`:**
+- `capture_lesson`: You know the exact lesson — structured input, single lesson
+- `extract_lessons`: You have raw text and want the worker to find lessons — batch extraction
+
 ## Delegating Trivial Tasks
 
 Save tokens by routing simple tasks to cheaper models:

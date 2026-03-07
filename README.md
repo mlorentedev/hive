@@ -68,7 +68,7 @@ That's it. You're running.
 
 ## What You Get
 
-### 14 Vault Tools — your knowledge, on demand
+### 15 Vault Tools — your knowledge, on demand
 
 | Tool | What it does |
 |---|---|
@@ -84,6 +84,7 @@ That's it. You're running.
 | `vault_create` | Create files with auto-generated frontmatter + auto git commit |
 | `vault_patch` | Surgical find-and-replace with ambiguity rejection + auto git commit |
 | `capture_lesson` | Capture a lesson inline — deduplicates, appends to `90-lessons.md` |
+| `extract_lessons` | Worker-powered batch extraction — send text, get structured lessons |
 | `vault_summarize` | Small files returned directly, large files delegated for compression |
 | `vault_usage` | Tool call analytics — which tools, which projects, how many tokens |
 
@@ -97,7 +98,7 @@ That's it. You're running.
 
 **Routing:** Ollama first (free) → OpenRouter free tier → OpenRouter paid ($1/mo cap) → reject.
 
-Your primary model handles architecture. Cheaper models handle boilerplate.
+Your primary model handles architecture. Cheaper models handle boilerplate. `extract_lessons` uses workers to batch-extract lessons from session notes — saving your primary model's tokens.
 
 ## Before / After
 

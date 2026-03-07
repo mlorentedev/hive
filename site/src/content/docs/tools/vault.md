@@ -1,6 +1,6 @@
 ---
 title: Vault Tools
-description: 14 tools for querying, searching, and managing your Obsidian vault.
+description: 15 tools for querying, searching, and managing your Obsidian vault.
 ---
 
 ## vault_list_projects
@@ -145,6 +145,25 @@ capture_lesson(
 Appends a structured entry to `90-lessons.md` with date, context, problem, and solution. Creates the file with frontmatter if it doesn't exist. Deduplicates by title. Auto-commits to git.
 
 **When to use:** Immediately after discovering a bug root cause, architectural insight, or debugging trick — don't wait until session end.
+
+## extract_lessons
+
+Batch-extract lessons from raw text using a worker model.
+
+```python
+extract_lessons(
+    project="my-project",
+    text="We found that the cache was stale after deploy...",
+    min_confidence=0.7,   # 0.0-1.0, filter low-confidence extractions
+    max_lessons=5          # cap on lessons extracted
+)
+```
+
+Sends the text to a worker model (Ollama/OpenRouter) which extracts structured lessons (title, context, problem, solution, tags, confidence). Lessons above the confidence threshold are written to `90-lessons.md` with deduplication.
+
+**Why use this instead of `capture_lesson`?** `capture_lesson` requires you to structure each lesson manually. `extract_lessons` sends raw text to a cheaper model that does the structuring — saving your primary model's tokens on bulk extraction.
+
+Returns a summary: which lessons were written, which were skipped (duplicates or low confidence).
 
 ## vault_summarize
 

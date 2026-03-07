@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import subprocess
@@ -266,7 +267,9 @@ def create_server(
             "instead of direct filesystem access for files under the vault path. "
             "Read-only tools are safe to call freely. "
             "Write tools (vault_update, vault_create, vault_patch, capture_lesson) "
-            "auto-commit to git."
+            "auto-commit to git. "
+            "Use extract_lessons to batch-extract lessons from session text "
+            "via a worker model — saves host tokens on bulk extraction."
         ),
     )
 
@@ -1045,6 +1048,62 @@ Total estimated savings: ~C tokens
                        f"Applied {n} {noun} to {project}/{path}.",
                        project, path)
 
+    def _write_lesson(
+        project_dir: Path,
+        project: str,
+        title: str,
+        context: str,
+        problem: str,
+        solution: str,
+        tags: list[str],
+    ) -> tuple[str, str]:
+        """Write a single lesson to 90-lessons.md. Returns (status, message).
+
+        Status is one of: 'written', 'skipped' (duplicate), 'error'.
+        """
+        lessons_file = project_dir / "90-lessons.md"
+
+        existing = ""
+        if lessons_file.exists():
+            try:
+                existing = lessons_file.read_text(encoding="utf-8")
+            except OSError as exc:
+                return "error", f"File I/O error: {exc}"
+
+        if f"] {title}\n" in existing:
+            return "skipped", f"Lesson already exists: '{title}'. Skipping."
+
+        tag_str = " ".join(f"`#{t}`" for t in tags)
+        entry = (
+            f"\n### [{date.today().isoformat()}] {title}\n"
+            f"**Context:** {context}\n"
+            f"**Problem:** {problem}\n"
+            f"**Solution:** {solution}\n"
+        )
+        if tag_str:
+            entry += f"**Tags:** {tag_str}\n"
+
+        try:
+            if not lessons_file.exists():
+                safe_project = re.sub(r"[^\w\-.]", "_", project)
+                frontmatter = (
+                    f"---\n"
+                    f"id: {safe_project}-lessons\n"
+                    f"type: lesson\n"
+                    f"status: active\n"
+                    f'created: "{date.today().isoformat()}"\n'
+                    f"---\n\n"
+                    f"# Lessons Learned\n"
+                )
+                lessons_file.write_text(frontmatter + entry, encoding="utf-8")
+            else:
+                with lessons_file.open("a", encoding="utf-8") as f:
+                    f.write(entry)
+        except OSError as exc:
+            return "error", f"File I/O error: {exc}"
+
+        return "written", f"Lesson captured: '{title}' → {project}/90-lessons.md"
+
     @mcp.tool(annotations=_WRITE)
     def capture_lesson(
         project: str,
@@ -1073,65 +1132,189 @@ Total estimated savings: ~C tokens
                           f"Project '{project}' not found in vault.", project)
         project_dir, _ = resolved
 
-        lessons_file = project_dir / "90-lessons.md"
+        status, msg = _write_lesson(project_dir, project, title, context, problem, solution, tags)
+        if status == "error":
+            return _track("capture_lesson", msg, project)
+        if status == "skipped":
+            return _track("capture_lesson", msg, project, "lessons")
 
-        # Read existing content for deduplication
-        existing = ""
-        if lessons_file.exists():
-            try:
-                existing = lessons_file.read_text(encoding="utf-8")
-            except OSError as exc:
-                return _track("capture_lesson",
-                              f"File I/O error: {exc}", project)
-
-        # Deduplicate by heading title (not substring — avoids false matches)
-        if f"] {title}\n" in existing:
-            return _track(
-                "capture_lesson",
-                f"Lesson already exists: '{title}'. Skipping.",
-                project, "lessons",
-            )
-
-        # Format the lesson entry
-        tag_str = " ".join(f"`#{t}`" for t in tags)
-        entry = (
-            f"\n### [{date.today().isoformat()}] {title}\n"
-            f"**Context:** {context}\n"
-            f"**Problem:** {problem}\n"
-            f"**Solution:** {solution}\n"
-        )
-        if tag_str:
-            entry += f"**Tags:** {tag_str}\n"
-
-        # Append to file (create with frontmatter if missing)
-        try:
-            if not lessons_file.exists():
-                safe_project = re.sub(r"[^\w\-.]", "_", project)
-                frontmatter = (
-                    f"---\n"
-                    f"id: {safe_project}-lessons\n"
-                    f"type: lesson\n"
-                    f"status: active\n"
-                    f'created: "{date.today().isoformat()}"\n'
-                    f"---\n\n"
-                    f"# Lessons Learned\n"
-                )
-                lessons_file.write_text(frontmatter + entry, encoding="utf-8")
-            else:
-                with lessons_file.open("a", encoding="utf-8") as f:
-                    f.write(entry)
-        except OSError as exc:
-            return _track("capture_lesson",
-                          f"File I/O error: {exc}", project)
-
-        rel = lessons_file.relative_to(resolved_path)
+        rel = (project_dir / "90-lessons.md").relative_to(resolved_path)
         _git_commit(resolved_path, rel, f"vault: capture_lesson {project} — {title}")
 
-        return _track(
-            "capture_lesson",
-            f"Lesson captured: '{title}' → {project}/90-lessons.md",
-            project, "lessons",
+        return _track("capture_lesson", msg, project, "lessons")
+
+    def _parse_lessons_json(raw: str) -> list[dict[str, object]]:
+        """Parse JSON from worker response, stripping markdown fences."""
+        text = raw.strip()
+        # Strip markdown code fences
+        if text.startswith("```"):
+            lines = text.splitlines()
+            # Remove first line (```json) and last line (```)
+            inner = "\n".join(
+                ln for ln in lines[1:] if not ln.strip().startswith("```")
+            )
+            text = inner.strip()
+        # Fallback: extract first [...] block
+        if not text.startswith("["):
+            match = re.search(r"\[.*\]", text, re.DOTALL)
+            if match:
+                text = match.group(0)
+        return json.loads(text)  # type: ignore[no-any-return]
+
+    extract_prompt = (
+        "Extract key lessons from the following text. A lesson is a decision, "
+        "bug root cause, or pattern choice worth remembering.\n\n"
+        "For each lesson, provide a JSON object with:\n"
+        '- "title": Short descriptive title (max 10 words)\n'
+        '- "context": What was being done (1 sentence)\n'
+        '- "problem": What went wrong or what decision was needed (1 sentence)\n'
+        '- "solution": What fixed it or what was decided (1 sentence)\n'
+        '- "tags": List of 1-3 relevant tags (lowercase, no #)\n'
+        '- "confidence": 0.0-1.0 how confident this is a real, reusable lesson\n\n'
+        "Return ONLY a JSON array. No markdown, no explanation. "
+        "Max {max_lessons} lessons. "
+        "Only include lessons with confidence > {min_confidence}.\n"
+        "If no lessons found, return: []\n\n"
+        "Text:\n---\n{text}\n---"
+    )
+
+    max_extract_input = 8000  # chars, safe for any worker model
+
+    @mcp.tool(annotations=_WRITE)
+    async def extract_lessons(
+        project: str,
+        text: str,
+        min_confidence: float = 0.7,
+        max_lessons: int = 5,
+    ) -> str:
+        """Extract lessons from text using a worker model and write to vault.
+
+        Sends text to a cheaper model (Ollama/OpenRouter) which extracts
+        structured lessons, then writes them to the project's 90-lessons.md.
+
+        Args:
+            project: Project slug (directory under 10_projects/).
+            text: Raw text to extract lessons from (session notes, debug logs, etc.).
+            min_confidence: Minimum confidence threshold (0.0-1.0). Default 0.7.
+            max_lessons: Maximum lessons to extract. Default 5.
+        """
+        resolved = _resolve_project_dir(resolved_path, project, scopes)
+        if resolved is None:
+            return _track("extract_lessons",
+                          f"Project '{project}' not found in vault.", project)
+        project_dir, _ = resolved
+
+        # Truncate input to safe length
+        truncated = text[:max_extract_input]
+        # Escape braces so str.format() doesn't choke on user code/JSON
+        safe_text = truncated.replace("{", "{{").replace("}", "}}")
+        prompt = extract_prompt.format(
+            max_lessons=max_lessons,
+            min_confidence=min_confidence,
+            text=safe_text,
         )
+
+        # Send to worker via auto-routing
+        errors: list[str] = []
+
+        if await ollama.is_available():
+            try:
+                resp = await ollama.generate(prompt, max_tokens=2000)
+                _record(resp)
+            except (ConnectionError, RuntimeError) as exc:
+                errors.append(f"Ollama: {exc}")
+                resp = None
+        else:
+            errors.append("Ollama: offline")
+            resp = None
+
+        if resp is None and openrouter is not None:
+            try:
+                resp = await openrouter.generate(prompt, max_tokens=2000)
+                _record(resp)
+            except (ConnectionError, RuntimeError) as exc:
+                errors.append(f"OpenRouter: {exc}")
+
+        if resp is None:
+            reasons = "; ".join(errors) if errors else "no workers configured"
+            return _track("extract_lessons",
+                          f"All workers unavailable [{reasons}]. "
+                          "Cannot extract lessons without a worker model.",
+                          project)
+
+        # Parse worker response
+        try:
+            lessons_raw = _parse_lessons_json(resp.text)
+        except (json.JSONDecodeError, ValueError):
+            snippet = resp.text[:200]
+            return _track("extract_lessons",
+                          f"Could not parse worker response as JSON: {snippet}",
+                          project)
+
+        if not isinstance(lessons_raw, list):
+            return _track("extract_lessons",
+                          "Worker returned non-array JSON.", project)
+
+        if not lessons_raw:
+            return _track("extract_lessons", "No lessons found in text.", project)
+
+        # Filter, validate, and write
+        written: list[str] = []
+        skipped: list[str] = []
+        for lesson in lessons_raw[:max_lessons]:
+            if not isinstance(lesson, dict):
+                continue
+            raw_title = str(lesson.get("title", "")).strip()
+            title = raw_title.replace("\n", " ").replace("\r", " ")
+            if not title:
+                continue
+            try:
+                confidence = float(str(lesson.get("confidence", 0.5)))
+            except (ValueError, TypeError):
+                confidence = 0.5
+            if confidence < min_confidence:
+                skipped.append(f"{title} (confidence {confidence:.1f})")
+                continue
+
+            l_context = str(lesson.get("context", "")).replace("\n", " ").replace("\r", " ")
+            l_problem = str(lesson.get("problem", "")).replace("\n", " ").replace("\r", " ")
+            l_solution = str(lesson.get("solution", "")).replace("\n", " ").replace("\r", " ")
+            raw_tags = lesson.get("tags", [])
+            l_tags = [
+                str(t).replace("\n", " ").replace("\r", " ")
+                for t in raw_tags
+            ] if isinstance(raw_tags, list) else []
+
+            status, msg = _write_lesson(
+                project_dir, project, title, l_context, l_problem, l_solution, l_tags,
+            )
+            if status == "written":
+                written.append(title)
+            elif status == "skipped":
+                skipped.append(f"{title} (duplicate)")
+            elif status == "error":
+                _log.warning("extract_lessons: failed to write '%s': %s", title, msg)
+                skipped.append(f"{title} (write error)")
+
+        # Single git commit for all lessons
+        if written:
+            rel = (project_dir / "90-lessons.md").relative_to(resolved_path)
+            _git_commit(resolved_path, rel,
+                        f"vault: extract_lessons {project} — {len(written)} lessons")
+
+        # Build summary
+        parts: list[str] = []
+        if written:
+            titles = ", ".join(written)
+            parts.append(f"Extracted {len(written)} lessons: {titles}")
+        if skipped:
+            skip_details = ", ".join(skipped)
+            parts.append(f"Skipped {len(skipped)}: {skip_details}")
+        if not written and not skipped:
+            parts.append("No lessons found in text.")
+
+        summary = ". ".join(parts) + "."
+        return _track("extract_lessons", summary, project, "lessons")
 
     @mcp.tool(annotations=_READ_ONLY)
     def vault_summarize(
