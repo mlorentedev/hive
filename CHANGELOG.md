@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/mlorentedev/hive/compare/v1.5.1...v1.6.0) (2026-03-07)
+
+
+### Features
+
+* add extract_lessons tool for worker-powered lesson extraction ([#31](https://github.com/mlorentedev/hive/issues/31)) ([37c0173](https://github.com/mlorentedev/hive/commit/37c0173fa57bfcd03affff35a7c0f58ab2d713b3))
+
 ## [1.5.1](https://github.com/mlorentedev/hive/compare/v1.5.0...v1.5.1) (2026-03-07)
 
 
