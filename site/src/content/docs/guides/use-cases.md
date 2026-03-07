@@ -162,6 +162,24 @@ The `vault_sync` prompt walks through:
 3. Updating stale documentation
 4. Flagging gaps that need new docs
 
+## Detecting Vault Drift
+
+Find broken frontmatter, stale docs, and dead links before they cause problems:
+
+> "Validate my vault for issues"
+
+```python
+vault_validate(project="my-project")
+```
+
+Returns categorized issues: missing frontmatter fields, files that haven't been updated in 180+ days, and `[[wikilinks]]` pointing to nonexistent files. Run it after shipping a feature to catch documentation that drifted from reality.
+
+You can also target specific checks:
+
+```python
+vault_validate(checks=["stale"])  # Only flag stale files across all projects
+```
+
 ## Monitoring Token Savings
 
 Curious how much Hive is saving you?

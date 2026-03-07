@@ -759,6 +759,143 @@ Total estimated savings: ~C tokens
         """Return health metrics for all vault projects."""
         return _track("vault_health", _health_report_text())
 
+    all_checks = frozenset({"frontmatter", "stale", "links"})
+    wikilink_re = re.compile(r"\[\[([^\]|#]+?)(?:[|#][^\]]*?)?\]\]")
+
+    @mcp.tool(annotations=_READ_ONLY)
+    def vault_validate(
+        project: str = "",
+        checks: list[str] = [],  # noqa: B006
+        max_issues: int = 50,
+    ) -> str:
+        """Validate vault files for common issues (drift detector).
+
+        Checks for: missing/incomplete frontmatter, stale active files,
+        and broken wikilinks. Returns a list of issues found.
+
+        Args:
+            project: Project slug to validate. Empty = all projects.
+            checks: Which checks to run. Empty = all. Options: frontmatter, stale, links.
+            max_issues: Maximum issues to report. Default 50.
+        """
+        active_checks = frozenset(checks) & all_checks if checks else all_checks
+
+        # Collect project dirs to scan
+        project_dirs: list[tuple[Path, str]] = []
+        if project:
+            resolved = _resolve_project_dir(resolved_path, project, scopes)
+            if resolved is None:
+                return _track("vault_validate",
+                              f"Project '{project}' not found in vault.", project)
+            project_dirs.append(resolved)
+        else:
+            for scope_name, dir_name in scopes.items():
+                if scope_name == "meta":
+                    continue
+                scope_dir = resolved_path / dir_name
+                if not scope_dir.is_dir():
+                    continue
+                for d in sorted(scope_dir.iterdir()):
+                    if d.is_dir():
+                        project_dirs.append((d, scope_name))
+
+        if not project_dirs:
+            return _track("vault_validate", "No projects found in vault.")
+
+        # Build index of all known file stems for wikilink resolution
+        all_stems: set[str] = set()
+        if "links" in active_checks:
+            for pd, _ in project_dirs:
+                for f in pd.rglob("*.md"):
+                    all_stems.add(f.stem)
+
+        issues: list[str] = []
+        stale_threshold = date.today() - timedelta(days=stale_days)
+
+        for project_dir, _scope_name in project_dirs:
+            proj_name = project_dir.name
+            for f in sorted(project_dir.rglob("*.md")):
+                if len(issues) >= max_issues:
+                    break
+                rel = f.relative_to(project_dir).as_posix()
+                content = _safe_read(f)
+                if content is None:
+                    continue
+
+                fm = parse_frontmatter(content)
+
+                # ── frontmatter checks ──
+                if "frontmatter" in active_checks:
+                    if fm is None:
+                        issues.append(
+                            f"[error] {proj_name}/{rel}: "
+                            "Missing or invalid frontmatter"
+                        )
+                        continue
+                    missing = {"id", "type", "status"} - fm.raw.keys()
+                    if missing:
+                        issues.append(
+                            f"[error] {proj_name}/{rel}: "
+                            f"Frontmatter missing fields: "
+                            f"{', '.join(sorted(missing))}"
+                        )
+                    if fm.created and parse_date(fm.created) is None:
+                        issues.append(
+                            f"[warning] {proj_name}/{rel}: "
+                            f"Unparseable date: '{fm.created}'"
+                        )
+
+                # ── stale checks ──
+                if (
+                    "stale" in active_checks
+                    and fm is not None
+                    and fm.status not in _TERMINAL_STATUSES
+                ):
+                        created_date = parse_date(fm.created) if fm.created else None
+                        if created_date is None:
+                            try:
+                                created_date = date.fromtimestamp(f.stat().st_mtime)
+                            except OSError:
+                                continue
+                        if created_date < stale_threshold:
+                            issues.append(
+                                f"[warning] {proj_name}/{rel}: "
+                                f"Stale (active since {created_date.isoformat()}, "
+                                f">{stale_days}d)"
+                            )
+
+                # ── link checks ──
+                if "links" in active_checks:
+                    body = extract_body(content)
+                    for m in wikilink_re.finditer(body):
+                        target = m.group(1).strip()
+                        if target not in all_stems:
+                            issues.append(
+                                f"[warning] {proj_name}/{rel}: "
+                                f"Broken link [[{target}]]"
+                            )
+                            if len(issues) >= max_issues:
+                                break
+
+            if len(issues) >= max_issues:
+                break
+
+        # Build output
+        if not issues:
+            scope_label = f" for '{project}'" if project else ""
+            return _track("vault_validate",
+                          f"Vault clean{scope_label}. "
+                          f"0 issues found ({', '.join(sorted(active_checks))}).")
+
+        errors = sum(1 for i in issues if i.startswith("[error]"))
+        warnings = sum(1 for i in issues if i.startswith("[warning]"))
+        header = f"Found {len(issues)} issues ({errors} errors, {warnings} warnings)"
+        if len(issues) >= max_issues:
+            header += f" — truncated at {max_issues}, more may exist"
+        lines = [header, ""]
+        lines.extend(issues)
+        return _track("vault_validate", "\n".join(lines), project)
+
     @mcp.tool(annotations=_WRITE)
     def vault_update(
         project: str,

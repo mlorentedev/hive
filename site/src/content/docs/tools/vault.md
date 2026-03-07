@@ -1,6 +1,6 @@
 ---
 title: Vault Tools
-description: 15 tools for querying, searching, and managing your Obsidian vault.
+description: 16 tools for querying, searching, and managing your Obsidian vault.
 ---
 
 ## vault_list_projects
@@ -65,6 +65,27 @@ vault_health()
 ```
 
 Reports per-project: file count, total lines, stale files (>180 days by default, configurable via `HIVE_STALE_THRESHOLD_DAYS`), section coverage.
+
+## vault_validate
+
+Drift detector — validate vault files for common issues.
+
+```python
+vault_validate(project="my-project", checks=["frontmatter", "stale", "links"], max_issues=50)
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `project` | `""` (all) | Project to validate. Empty scans all projects |
+| `checks` | `[]` (all) | Which checks to run: `frontmatter`, `stale`, `links` |
+| `max_issues` | `50` | Maximum issues to report |
+
+**Checks:**
+- **frontmatter**: Missing or malformed YAML frontmatter, missing required fields (id, type, status), unparseable dates
+- **stale**: Active files not modified in `HIVE_STALE_THRESHOLD_DAYS` (default 180)
+- **links**: Broken `[[wikilinks]]` pointing to nonexistent files
+
+Issues are categorized as `[error]` or `[warning]` with file path and description.
 
 ## vault_update
 
