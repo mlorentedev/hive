@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/mlorentedev/hive/compare/v1.5.0...v1.5.1) (2026-03-07)
+
+
+### Bug Fixes
+
+* harden MCP server stability and security ([#29](https://github.com/mlorentedev/hive/issues/29)) ([3388d6d](https://github.com/mlorentedev/hive/commit/3388d6df99dcc955e3a864b682598c831adf248e))
+
 ## [1.5.0](https://github.com/mlorentedev/hive/compare/v1.4.5...v1.5.0) (2026-03-06)
 
 
