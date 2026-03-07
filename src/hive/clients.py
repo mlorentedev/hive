@@ -72,18 +72,31 @@ class OllamaClient:
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             msg = f"Ollama unavailable at {self._endpoint}: {exc}"
             raise ConnectionError(msg) from exc
+        except httpx.TimeoutException as exc:
+            msg = f"Ollama request timed out at {self._endpoint}: {exc}"
+            raise ConnectionError(msg) from exc
 
         if resp.status_code >= 400:
-            msg = f"Ollama error ({resp.status_code}): {resp.text}"
+            msg = f"Ollama error ({resp.status_code}): {resp.text[:200]}"
             raise RuntimeError(msg)
 
-        data = resp.json()
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            msg = f"Ollama returned non-JSON response: {exc}"
+            raise RuntimeError(msg) from exc
         # Ollama returns total_duration in nanoseconds
         total_ns = data.get("total_duration", 0)
         latency = int(total_ns / 1_000_000) if total_ns else elapsed_ms
 
+        try:
+            text = data["message"]["content"]
+        except (KeyError, TypeError) as exc:
+            msg = f"Ollama response missing expected fields: {exc}"
+            raise RuntimeError(msg) from exc
+
         return ClientResponse(
-            text=data["message"]["content"],
+            text=text,
             model=self._model,
             tokens=data.get("eval_count", 0),
             cost_usd=0.0,
@@ -95,7 +108,7 @@ class OllamaClient:
         try:
             resp = await self._http.get("/")
             return resp.status_code == 200
-        except (httpx.ConnectError, httpx.ConnectTimeout):
+        except (httpx.ConnectError, httpx.TimeoutException):
             return False
 
 
@@ -144,22 +157,38 @@ class OpenRouterClient:
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             msg = f"OpenRouter unavailable: {exc}"
             raise ConnectionError(msg) from exc
+        except httpx.TimeoutException as exc:
+            msg = f"OpenRouter request timed out: {exc}"
+            raise ConnectionError(msg) from exc
 
         if resp.status_code == 429:
             msg = "OpenRouter rate limit exceeded. Retry later."
             raise RuntimeError(msg)
 
         if resp.status_code >= 400:
-            data = resp.json()
-            error_msg = data.get("error", {}).get("message", resp.text)
+            try:
+                data = resp.json()
+                error_msg = data.get("error", {}).get("message", resp.text[:200])
+            except ValueError:
+                error_msg = resp.text[:200]
             msg = f"OpenRouter API error ({resp.status_code}): {error_msg}"
             raise RuntimeError(msg)
 
-        data = resp.json()
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            msg = f"OpenRouter returned non-JSON response: {exc}"
+            raise RuntimeError(msg) from exc
         usage = data.get("usage", {})
 
+        try:
+            text = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            msg = f"OpenRouter response missing expected fields: {exc}"
+            raise RuntimeError(msg) from exc
+
         return ClientResponse(
-            text=data["choices"][0]["message"]["content"],
+            text=text,
             model=data.get("model", resolved_model),
             tokens=usage.get("total_tokens", 0),
             cost_usd=usage.get("cost", 0.0),
@@ -177,13 +206,24 @@ class OpenRouterClient:
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             msg = f"OpenRouter unavailable: {exc}"
             raise ConnectionError(msg) from exc
+        except httpx.TimeoutException as exc:
+            msg = f"OpenRouter request timed out: {exc}"
+            raise ConnectionError(msg) from exc
+
+        if resp.status_code >= 400:
+            msg = f"OpenRouter models error ({resp.status_code}): {resp.text[:200]}"
+            raise RuntimeError(msg)
 
         data = resp.json()
         models: list[ModelInfo] = []
         for m in data.get("data", []):
             pricing = m.get("pricing", {})
-            input_cost = float(pricing.get("prompt", "0"))
-            output_cost = float(pricing.get("completion", "0"))
+            try:
+                input_cost = float(pricing.get("prompt", "0"))
+                output_cost = float(pricing.get("completion", "0"))
+            except (ValueError, TypeError):
+                input_cost = 0.0
+                output_cost = 0.0
             models.append(
                 ModelInfo(
                     id=m["id"],
