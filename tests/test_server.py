@@ -2430,9 +2430,13 @@ class TestExtractLessons:
         assert "0" in result or "no lessons" in result.lower()
 
     @pytest.mark.asyncio
-    async def test_worker_unavailable(self, worker_vault: FastMCP, ollama: OllamaClient) -> None:
+    async def test_worker_unavailable(
+        self, worker_vault: FastMCP, ollama: OllamaClient, openrouter: OpenRouterClient,
+    ) -> None:
         ollama.is_available = AsyncMock(return_value=False)  # type: ignore[method-assign]
-        # openrouter is a mock with no generate configured -> will fail too
+        openrouter.generate = AsyncMock(  # type: ignore[method-assign]
+            side_effect=ConnectionError("no workers"),
+        )
         result = _text(await worker_vault.call_tool(
             "extract_lessons",
             {"project": "testproject", "text": "some text"},
@@ -2535,3 +2539,65 @@ class TestExtractLessons:
         # Newlines stripped — no injection
         assert "evil_field: true" not in lessons.split("\n")
         assert "\nevil_field" not in lessons
+
+    @pytest.mark.asyncio
+    async def test_write_error_surfaces_in_summary(
+        self, git_vault: Path, worker_vault: FastMCP, ollama: OllamaClient,
+    ) -> None:
+        """Filesystem errors during lesson write are reported, not silently dropped."""
+        lessons_file = git_vault / "10_projects" / "testproject" / "90-lessons.md"
+        # Make file read-only so appends fail
+        lessons_file.chmod(0o444)
+        try:
+            ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
+            ollama.generate = AsyncMock(  # type: ignore[method-assign]
+                return_value=_worker_response(_VALID_LESSONS_JSON),
+            )
+            result = _text(await worker_vault.call_tool(
+                "extract_lessons",
+                {"project": "testproject", "text": "session notes"},
+            ))
+            assert "write error" in result.lower() or "error" in result.lower()
+        finally:
+            lessons_file.chmod(0o644)
+
+    @pytest.mark.asyncio
+    async def test_curly_braces_in_user_text(
+        self, git_vault: Path, worker_vault: FastMCP, ollama: OllamaClient,
+    ) -> None:
+        """User text with curly braces (code, JSON) doesn't crash str.format()."""
+        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+            return_value=_worker_response(_VALID_LESSONS_JSON),
+        )
+        # Text containing curly braces — would crash without escaping
+        result = _text(await worker_vault.call_tool(
+            "extract_lessons",
+            {"project": "testproject", "text": 'def foo(): return {"key": value}'},
+        ))
+        assert "Always check return values" in result
+
+    @pytest.mark.asyncio
+    async def test_sanitizes_newlines_in_tags(
+        self, git_vault: Path, worker_vault: FastMCP, ollama: OllamaClient,
+    ) -> None:
+        """Tags with newlines are sanitized to prevent markdown injection."""
+        injected_tags = json.dumps([{
+            "title": "Tag injection test",
+            "context": "ctx", "problem": "prob", "solution": "sol",
+            "tags": ["python\n### Fake Lesson"],
+            "confidence": 0.9,
+        }])
+        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+            return_value=_worker_response(injected_tags),
+        )
+        result = _text(await worker_vault.call_tool(
+            "extract_lessons",
+            {"project": "testproject", "text": "session"},
+        ))
+        assert "Tag injection test" in result
+        lessons = (git_vault / "10_projects" / "testproject" / "90-lessons.md").read_text()
+        # Newline sanitized: "### Fake Lesson" must NOT appear as a standalone heading
+        for line in lessons.splitlines():
+            assert not line.startswith("### Fake Lesson")

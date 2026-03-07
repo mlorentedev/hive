@@ -1206,10 +1206,12 @@ Total estimated savings: ~C tokens
 
         # Truncate input to safe length
         truncated = text[:max_extract_input]
+        # Escape braces so str.format() doesn't choke on user code/JSON
+        safe_text = truncated.replace("{", "{{").replace("}", "}}")
         prompt = extract_prompt.format(
             max_lessons=max_lessons,
             min_confidence=min_confidence,
-            text=truncated,
+            text=safe_text,
         )
 
         # Send to worker via auto-routing
@@ -1278,7 +1280,10 @@ Total estimated savings: ~C tokens
             l_problem = str(lesson.get("problem", "")).replace("\n", " ").replace("\r", " ")
             l_solution = str(lesson.get("solution", "")).replace("\n", " ").replace("\r", " ")
             raw_tags = lesson.get("tags", [])
-            l_tags = [str(t) for t in raw_tags] if isinstance(raw_tags, list) else []
+            l_tags = [
+                str(t).replace("\n", " ").replace("\r", " ")
+                for t in raw_tags
+            ] if isinstance(raw_tags, list) else []
 
             status, msg = _write_lesson(
                 project_dir, project, title, l_context, l_problem, l_solution, l_tags,
