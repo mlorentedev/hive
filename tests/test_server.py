@@ -2601,3 +2601,140 @@ class TestExtractLessons:
         # Newline sanitized: "### Fake Lesson" must NOT appear as a standalone heading
         for line in lessons.splitlines():
             assert not line.startswith("### Fake Lesson")
+
+
+# ── vault_validate ─────────────────────────────────────────────────
+
+
+class TestVaultValidate:
+    """vault_validate tool — drift detection and vault linting."""
+
+    async def test_healthy_vault_no_errors(self, mock_vault: Path) -> None:
+        """Well-formed vault produces no error-level issues."""
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool("vault_validate", {}))
+        assert "error" not in result.lower() or "0 errors" in result.lower()
+
+    async def test_missing_frontmatter_detected(self, mock_vault: Path) -> None:
+        """File with no frontmatter is flagged."""
+        bad = mock_vault / "10_projects" / "testproject" / "no-frontmatter.md"
+        bad.write_text("# Just a heading\n\nNo frontmatter here.\n")
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool("vault_validate", {}))
+        assert "no-frontmatter.md" in result
+        assert "frontmatter" in result.lower()
+
+    async def test_incomplete_frontmatter_detected(self, mock_vault: Path) -> None:
+        """Frontmatter missing required fields is flagged."""
+        bad = mock_vault / "10_projects" / "testproject" / "incomplete.md"
+        bad.write_text("---\nid: incomplete\n---\n\n# Missing type and status\n")
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool("vault_validate", {}))
+        assert "incomplete.md" in result
+        assert "type" in result.lower() or "status" in result.lower()
+
+    async def test_unparseable_date_detected(self, mock_vault: Path) -> None:
+        """Frontmatter with bad created date is flagged."""
+        bad = mock_vault / "10_projects" / "testproject" / "bad-date.md"
+        bad.write_text(
+            '---\nid: bad-date\ntype: note\nstatus: active\ncreated: "not-a-date"\n'
+            "---\n\n# Bad date\n"
+        )
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool("vault_validate", {}))
+        assert "bad-date.md" in result
+        assert "date" in result.lower()
+
+    async def test_stale_file_detected(self, mock_vault: Path) -> None:
+        """Active file with old created date is flagged as stale."""
+        stale = mock_vault / "10_projects" / "testproject" / "ancient.md"
+        stale.write_text(
+            '---\nid: ancient\ntype: note\nstatus: active\ncreated: "2020-01-01"\n'
+            "---\n\n# Very old file\n"
+        )
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool("vault_validate", {}))
+        assert "ancient.md" in result
+        assert "stale" in result.lower()
+
+    async def test_terminal_status_not_flagged_stale(self, mock_vault: Path) -> None:
+        """Completed/archived files are NOT flagged as stale."""
+        old = mock_vault / "10_projects" / "testproject" / "old-done.md"
+        old.write_text(
+            '---\nid: old-done\ntype: note\nstatus: completed\ncreated: "2020-01-01"\n'
+            "---\n\n# Old but done\n"
+        )
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool("vault_validate", {}))
+        assert "old-done.md" not in result
+
+    async def test_broken_wikilink_detected(self, mock_vault: Path) -> None:
+        """Wikilink pointing to nonexistent file is flagged."""
+        doc = mock_vault / "10_projects" / "testproject" / "with-links.md"
+        doc.write_text(
+            "---\nid: with-links\ntype: note\nstatus: active\n---\n\n"
+            "See [[nonexistent-doc]] for details.\n"
+        )
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool("vault_validate", {}))
+        assert "nonexistent-doc" in result
+        assert "link" in result.lower() or "broken" in result.lower()
+
+    async def test_valid_wikilink_not_flagged(self, mock_vault: Path) -> None:
+        """Wikilink to existing file is NOT flagged."""
+        doc = mock_vault / "10_projects" / "testproject" / "good-link.md"
+        doc.write_text(
+            "---\nid: good-link\ntype: note\nstatus: active\n---\n\n"
+            "See [[adr-001-test]] for details.\n"
+        )
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool("vault_validate", {}))
+        assert "adr-001-test" not in result
+
+    async def test_project_filter(self, mock_vault: Path) -> None:
+        """Only validates the specified project."""
+        # Add a bad file to a different project
+        other = mock_vault / "10_projects" / "otherproject"
+        other.mkdir(parents=True)
+        (other / "broken.md").write_text("No frontmatter here.\n")
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool(
+            "vault_validate", {"project": "testproject"},
+        ))
+        assert "broken.md" not in result
+
+    async def test_checks_filter(self, mock_vault: Path) -> None:
+        """Only runs specified checks."""
+        stale = mock_vault / "10_projects" / "testproject" / "ancient2.md"
+        stale.write_text(
+            '---\nid: ancient2\ntype: note\nstatus: active\ncreated: "2020-01-01"\n'
+            "---\n\n# Very old\n"
+        )
+        bad = mock_vault / "10_projects" / "testproject" / "no-fm.md"
+        bad.write_text("No frontmatter.\n")
+        mcp = create_server(vault_path=mock_vault)
+        # Only run frontmatter check — stale should not appear
+        result = _text(await mcp.call_tool(
+            "vault_validate", {"checks": ["frontmatter"]},
+        ))
+        assert "no-fm.md" in result
+        assert "ancient2.md" not in result
+
+    async def test_max_issues_cap(self, mock_vault: Path) -> None:
+        """Output is capped at max_issues."""
+        project = mock_vault / "10_projects" / "testproject"
+        for i in range(20):
+            (project / f"bad-{i}.md").write_text("No frontmatter.\n")
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool(
+            "vault_validate", {"max_issues": 5},
+        ))
+        assert "truncated" in result.lower() or "more" in result.lower()
+
+    async def test_project_not_found(self, mock_vault: Path) -> None:
+        """Unknown project returns error."""
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool(
+            "vault_validate", {"project": "nonexistent"},
+        ))
+        assert "not found" in result.lower()

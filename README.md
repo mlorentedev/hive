@@ -68,7 +68,7 @@ That's it. You're running.
 
 ## What You Get
 
-### 15 Vault Tools — your knowledge, on demand
+### 16 Vault Tools — your knowledge, on demand
 
 | Tool | What it does |
 |---|---|
@@ -79,6 +79,7 @@ That's it. You're running.
 | `vault_list_projects` | See all projects in your vault |
 | `vault_list_files` | Browse project structure with glob pattern filtering |
 | `vault_health` | File counts, staleness metrics, coverage gaps per project |
+| `vault_validate` | Drift detector — find broken frontmatter, stale files, broken wikilinks |
 | `vault_recent` | What changed in the last N days (via git + frontmatter) |
 | `vault_update` | Write to vault with YAML validation + auto git commit |
 | `vault_create` | Create files with auto-generated frontmatter + auto git commit |
@@ -237,10 +238,11 @@ Without these instructions, your assistant uses Hive inconsistently. With them, 
 ```
 MCP Host (Claude Code, Gemini CLI, Codex CLI, Cursor, ...)
     └── hive-vault (MCP server, stdio)
-            ├── Vault Tools (14) ── Obsidian vault (Markdown + YAML frontmatter)
+            ├── Vault Tools (16) ── Obsidian vault (Markdown + YAML frontmatter)
             │     query, search, smart_search, list_files, patch,
-            │     update, create, capture_lesson, summarize,
-            │     session_briefing, recent, usage, health, list_projects
+            │     update, create, capture_lesson, extract_lessons,
+            │     summarize, validate, session_briefing, recent,
+            │     usage, health, list_projects
             │
             └── Worker Tools (3) ── Task delegation + routing:
                   delegate_task        1. Ollama (local, free)
