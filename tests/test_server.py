@@ -2508,3 +2508,30 @@ class TestExtractLessons:
         # At most 3 lessons written
         count = lessons.count("### [")
         assert count <= 3
+
+    @pytest.mark.asyncio
+    async def test_sanitizes_newlines_in_worker_output(
+        self, git_vault: Path, worker_vault: FastMCP, ollama: OllamaClient,
+    ) -> None:
+        """Worker output with newlines in fields is sanitized."""
+        injected = json.dumps([{
+            "title": "Good title\nevil_field: true",
+            "context": "ctx\ninjection",
+            "problem": "prob",
+            "solution": "sol",
+            "tags": [],
+            "confidence": 0.9,
+        }])
+        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+            return_value=_worker_response(injected),
+        )
+        result = _text(await worker_vault.call_tool(
+            "extract_lessons",
+            {"project": "testproject", "text": "session"},
+        ))
+        assert "Good title" in result
+        lessons = (git_vault / "10_projects" / "testproject" / "90-lessons.md").read_text()
+        # Newlines stripped — no injection
+        assert "evil_field: true" not in lessons.split("\n")
+        assert "\nevil_field" not in lessons

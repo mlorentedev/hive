@@ -1218,11 +1218,10 @@ Total estimated savings: ~C tokens
         if await ollama.is_available():
             try:
                 resp = await ollama.generate(prompt, max_tokens=2000)
+                _record(resp)
             except (ConnectionError, RuntimeError) as exc:
                 errors.append(f"Ollama: {exc}")
                 resp = None
-            else:
-                pass  # resp is set
         else:
             errors.append("Ollama: offline")
             resp = None
@@ -1230,6 +1229,7 @@ Total estimated savings: ~C tokens
         if resp is None and openrouter is not None:
             try:
                 resp = await openrouter.generate(prompt, max_tokens=2000)
+                _record(resp)
             except (ConnectionError, RuntimeError) as exc:
                 errors.append(f"OpenRouter: {exc}")
 
@@ -1262,7 +1262,8 @@ Total estimated savings: ~C tokens
         for lesson in lessons_raw[:max_lessons]:
             if not isinstance(lesson, dict):
                 continue
-            title = str(lesson.get("title", "")).strip()
+            raw_title = str(lesson.get("title", "")).strip()
+            title = raw_title.replace("\n", " ").replace("\r", " ")
             if not title:
                 continue
             try:
@@ -1273,9 +1274,9 @@ Total estimated savings: ~C tokens
                 skipped.append(f"{title} (confidence {confidence:.1f})")
                 continue
 
-            l_context = str(lesson.get("context", ""))
-            l_problem = str(lesson.get("problem", ""))
-            l_solution = str(lesson.get("solution", ""))
+            l_context = str(lesson.get("context", "")).replace("\n", " ").replace("\r", " ")
+            l_problem = str(lesson.get("problem", "")).replace("\n", " ").replace("\r", " ")
+            l_solution = str(lesson.get("solution", "")).replace("\n", " ").replace("\r", " ")
             raw_tags = lesson.get("tags", [])
             l_tags = [str(t) for t in raw_tags] if isinstance(raw_tags, list) else []
 
@@ -1286,7 +1287,9 @@ Total estimated savings: ~C tokens
                 written.append(title)
             elif status == "skipped":
                 skipped.append(f"{title} (duplicate)")
-            # errors are silently skipped for individual lessons
+            elif status == "error":
+                _log.warning("extract_lessons: failed to write '%s': %s", title, msg)
+                skipped.append(f"{title} (write error)")
 
         # Single git commit for all lessons
         if written:

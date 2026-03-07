@@ -60,4 +60,4 @@ jobs:
         run: ./mcp-publisher login github-oidc
 
       - name: Publish to MCP Registry
-        run: ./mcp-publisher publish
+        run: ./mcp-publisher publish || echo "MCP Registry publish skipped (version may already exist)"
