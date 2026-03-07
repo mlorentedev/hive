@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
@@ -2316,3 +2317,194 @@ class TestSectionFallback:
             "vault_query", {"project": "testproject", "section": "context"},
         ))
         assert "Test Project" in result
+
+
+# ── extract_lessons ─────────────────────────────────────────────────
+
+
+@pytest.fixture
+def worker_vault(
+    git_vault: Path,
+    budget: BudgetTracker,
+    ollama: OllamaClient,
+    openrouter: OpenRouterClient,
+) -> FastMCP:
+    """Server with git vault + worker deps for extract_lessons tests."""
+    return create_server(
+        vault_path=git_vault,
+        budget_tracker=budget,
+        ollama_client=ollama,
+        openrouter_client=openrouter,
+    )
+
+
+def _worker_response(text: str) -> ClientResponse:
+    return ClientResponse(
+        text=text, model="qwen2.5-coder:7b", tokens=100, cost_usd=0.0, latency_ms=500,
+    )
+
+
+_VALID_LESSONS_JSON = json.dumps([
+    {
+        "title": "Always check return values",
+        "context": "Debugging a crash in the parser",
+        "problem": "Function returned None, caller didn't check",
+        "solution": "Added explicit None guard before use",
+        "tags": ["python", "debugging"],
+        "confidence": 0.9,
+    },
+    {
+        "title": "Use parameterized queries",
+        "context": "Writing database layer",
+        "problem": "String interpolation in SQL is injection risk",
+        "solution": "Switched to ? placeholders",
+        "tags": ["sql", "security"],
+        "confidence": 0.8,
+    },
+])
+
+
+class TestExtractLessons:
+    """extract_lessons tool — worker-powered lesson extraction."""
+
+    @pytest.mark.asyncio
+    async def test_extracts_and_writes_lessons(
+        self, git_vault: Path, worker_vault: FastMCP, ollama: OllamaClient,
+    ) -> None:
+        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+            return_value=_worker_response(_VALID_LESSONS_JSON),
+        )
+        result = _text(await worker_vault.call_tool(
+            "extract_lessons",
+            {"project": "testproject", "text": "We found a crash..."},
+        ))
+        assert "2" in result  # 2 lessons extracted
+        assert "Always check return values" in result
+
+        lessons = (git_vault / "10_projects" / "testproject" / "90-lessons.md").read_text()
+        assert "Always check return values" in lessons
+        assert "Use parameterized queries" in lessons
+
+    @pytest.mark.asyncio
+    async def test_deduplicates_existing(
+        self, git_vault: Path, worker_vault: FastMCP, ollama: OllamaClient,
+    ) -> None:
+        # Pre-write a lesson with same title
+        lessons_file = git_vault / "10_projects" / "testproject" / "90-lessons.md"
+        existing = lessons_file.read_text()
+        lessons_file.write_text(
+            existing + "\n### [2026-01-01] Always check return values\nExisting.\n"
+        )
+        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+            return_value=_worker_response(_VALID_LESSONS_JSON),
+        )
+        result = _text(await worker_vault.call_tool(
+            "extract_lessons",
+            {"project": "testproject", "text": "session text"},
+        ))
+        # First lesson skipped (duplicate), second written
+        assert "skipped" in result.lower() or "duplicate" in result.lower()
+        assert "Use parameterized queries" in result
+
+    @pytest.mark.asyncio
+    async def test_filters_low_confidence(
+        self, worker_vault: FastMCP, ollama: OllamaClient,
+    ) -> None:
+        low_conf = json.dumps([
+            {
+                "title": "Maybe this matters",
+                "context": "ctx", "problem": "prob", "solution": "sol",
+                "tags": [], "confidence": 0.3,
+            },
+        ])
+        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+            return_value=_worker_response(low_conf),
+        )
+        result = _text(await worker_vault.call_tool(
+            "extract_lessons",
+            {"project": "testproject", "text": "some text", "min_confidence": 0.7},
+        ))
+        assert "0" in result or "no lessons" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_worker_unavailable(self, worker_vault: FastMCP, ollama: OllamaClient) -> None:
+        ollama.is_available = AsyncMock(return_value=False)  # type: ignore[method-assign]
+        # openrouter is a mock with no generate configured -> will fail too
+        result = _text(await worker_vault.call_tool(
+            "extract_lessons",
+            {"project": "testproject", "text": "some text"},
+        ))
+        assert "unavailable" in result.lower() or "worker" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_worker_invalid_json(
+        self, worker_vault: FastMCP, ollama: OllamaClient,
+    ) -> None:
+        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+            return_value=_worker_response("This is not JSON at all, just text."),
+        )
+        result = _text(await worker_vault.call_tool(
+            "extract_lessons",
+            {"project": "testproject", "text": "some text"},
+        ))
+        assert "parse" in result.lower() or "invalid" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_worker_empty_array(
+        self, worker_vault: FastMCP, ollama: OllamaClient,
+    ) -> None:
+        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+            return_value=_worker_response("[]"),
+        )
+        result = _text(await worker_vault.call_tool(
+            "extract_lessons",
+            {"project": "testproject", "text": "nothing interesting"},
+        ))
+        assert "no lessons" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_markdown_wrapped_json(
+        self, git_vault: Path, worker_vault: FastMCP, ollama: OllamaClient,
+    ) -> None:
+        """Worker wraps JSON in markdown fences — still parsed correctly."""
+        wrapped = '```json\n' + json.dumps([{
+            "title": "Fence test",
+            "context": "ctx", "problem": "prob", "solution": "sol",
+            "tags": [], "confidence": 0.9,
+        }]) + '\n```'
+        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+            return_value=_worker_response(wrapped),
+        )
+        result = _text(await worker_vault.call_tool(
+            "extract_lessons",
+            {"project": "testproject", "text": "session notes"},
+        ))
+        assert "Fence test" in result
+
+    @pytest.mark.asyncio
+    async def test_respects_max_lessons(
+        self, git_vault: Path, worker_vault: FastMCP, ollama: OllamaClient,
+    ) -> None:
+        many = json.dumps([
+            {"title": f"Lesson {i}", "context": "c", "problem": "p",
+             "solution": "s", "tags": [], "confidence": 0.9}
+            for i in range(10)
+        ])
+        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+            return_value=_worker_response(many),
+        )
+        await worker_vault.call_tool(
+            "extract_lessons",
+            {"project": "testproject", "text": "big session", "max_lessons": 3},
+        )
+        lessons = (git_vault / "10_projects" / "testproject" / "90-lessons.md").read_text()
+        # At most 3 lessons written
+        count = lessons.count("### [")
+        assert count <= 3
