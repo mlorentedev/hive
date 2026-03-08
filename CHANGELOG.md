@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.2](https://github.com/mlorentedev/hive/compare/v1.7.1...v1.7.2) (2026-03-08)
+
+
+### Documentation
+
+* add hook automation examples for session briefing ([#38](https://github.com/mlorentedev/hive/issues/38)) ([d8312b4](https://github.com/mlorentedev/hive/commit/d8312b457d828e261583f960bb1d9280a909550b))
+
 ## [1.7.1](https://github.com/mlorentedev/hive/compare/v1.7.0...v1.7.1) (2026-03-08)
 
 
