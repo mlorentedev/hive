@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/mlorentedev/hive/compare/v1.7.0...v1.7.1) (2026-03-08)
+
+
+### Documentation
+
+* update architecture diagram and server instructions ([#35](https://github.com/mlorentedev/hive/issues/35)) ([95de6fa](https://github.com/mlorentedev/hive/commit/95de6fa6b4cb06b9706277fa9c740e0a483adf99))
+
 ## [1.7.0](https://github.com/mlorentedev/hive/compare/v1.6.0...v1.7.0) (2026-03-07)
 
 
