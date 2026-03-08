@@ -277,16 +277,26 @@ def create_server(
     mcp = FastMCP(
         "Hive",
         instructions=(
-            "Hive provides on-demand access to an Obsidian vault. "
-            "Use vault tools (vault_query, vault_search, vault_patch, etc.) "
-            "instead of direct filesystem access for files under the vault path. "
+            "Hive provides on-demand access to an Obsidian vault.\n\n"
+            "## When to use each tool\n\n"
+            "- **Start of session:** Call `session_briefing(project)` to load "
+            "tasks, lessons, git activity, and health in one call.\n"
+            "- **Reading vault files:** Use `vault_query` instead of direct "
+            "filesystem access. Supports section shortcuts (context, tasks, "
+            "roadmap, lessons) and arbitrary paths.\n"
+            "- **Finding information:** Use `vault_search` for keyword/regex "
+            "lookup with filters. Use `vault_smart_search` when you need "
+            "results ranked by relevance.\n"
+            "- **Recording lessons:** Call `capture_lesson` when a bug fix, "
+            "architectural decision, or useful insight emerges during work. "
+            "Use `extract_lessons` for bulk extraction from large text blocks.\n"
+            "- **Offloading work:** Use `delegate_task` for summarization, "
+            "boilerplate generation, or analysis that doesn't need the host's "
+            "full capability.\n"
+            "- **Checking vault health:** Call `vault_validate` after modifying "
+            "vault files or periodically to detect drift.\n\n"
             "Read-only tools are safe to call freely. "
-            "Write tools (vault_update, vault_create, vault_patch, capture_lesson) "
-            "auto-commit to git. "
-            "Use extract_lessons to batch-extract lessons from session text "
-            "via a worker model — saves host tokens on bulk extraction. "
-            "Use vault_validate to detect drift: broken frontmatter, stale files, "
-            "and broken wikilinks."
+            "Write tools auto-commit to git."
         ),
     )
 
@@ -666,7 +676,7 @@ Total estimated savings: ~C tokens
         max_lines: int = 0,
         include_metadata: bool = False,
     ) -> str:
-        """Read content from a vault project.
+        """Read content from a vault project — use instead of direct filesystem access.
 
         Args:
             project: Project slug (directory under 10_projects/), or '_meta' for 00_meta/.
@@ -705,7 +715,9 @@ Total estimated savings: ~C tokens
         tag_filter: str = "",
         use_regex: bool = False,
     ) -> str:
-        """Full-text search across all markdown files in the vault.
+        """Full-text search across the vault. Use for keyword lookup or filtered queries.
+
+        Prefer vault_smart_search when relevance ranking matters.
 
         Args:
             query: Text to search for (case-insensitive). Supports regex when use_regex=True.
@@ -783,7 +795,7 @@ Total estimated savings: ~C tokens
         checks: list[str] = [],  # noqa: B006
         max_issues: int = 50,
     ) -> str:
-        """Validate vault files for common issues (drift detector).
+        """Detect vault drift — call after bulk edits or periodically for maintenance.
 
         Checks for: missing/incomplete frontmatter, stale active files,
         and broken wikilinks. Returns a list of issues found.
@@ -1248,7 +1260,7 @@ Total estimated savings: ~C tokens
         solution: str,
         tags: list[str] = [],  # noqa: B006
     ) -> str:
-        """Capture a lesson learned inline during a session.
+        """Capture a lesson when a bug fix, decision, or insight worth preserving emerges.
 
         Appends a structured lesson to the project's 90-lessons.md file.
         Deduplicates by title to avoid recording the same lesson twice.
@@ -1322,7 +1334,7 @@ Total estimated savings: ~C tokens
         min_confidence: float = 0.7,
         max_lessons: int = 5,
     ) -> str:
-        """Extract lessons from text using a worker model and write to vault.
+        """Batch-extract lessons from large text (e.g. session transcripts) via worker.
 
         Sends text to a cheaper model (Ollama/OpenRouter) which extracts
         structured lessons, then writes them to the project's 90-lessons.md.
@@ -1493,14 +1505,15 @@ Total estimated savings: ~C tokens
         max_results: int = 10,
         max_lines: int = 500,
     ) -> str:
-        """Ranked full-text search across the vault with frontmatter-aware scoring.
+        """Ranked full-text search — use when relevance ordering matters.
 
         Results are scored by match density, status weight, and recency.
+        Prefer over vault_search when you need the most relevant matches first.
 
         Args:
             query: Text to search for (case-insensitive).
             max_results: Maximum number of files to return. Default 10.
-            max_lines: Maximum output lines. Default 100.
+            max_lines: Maximum output lines. Default 500.
         """
         query_lower = query.lower()
         today = date.today()
@@ -1539,7 +1552,7 @@ Total estimated savings: ~C tokens
 
     @mcp.tool(annotations=_READ_ONLY)
     def session_briefing(project: str) -> str:
-        """One-call context briefing to start a new session.
+        """Call at the start of every new session to load project context.
 
         Assembles active tasks, recent lessons, git activity, and project
         health into a single response — replaces 3-4 manual tool calls.
@@ -1761,7 +1774,7 @@ Total estimated savings: ~C tokens
         max_tokens: int = 2000,
         max_cost_per_request: float = 0.0,
     ) -> str:
-        """Delegate a task to a cheaper model (Ollama or OpenRouter).
+        """Offload work to a cheaper model — use for summarization, boilerplate, or analysis.
 
         Args:
             prompt: The task description or code to process.
