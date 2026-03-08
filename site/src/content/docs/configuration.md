@@ -141,3 +141,64 @@ Replace `myproject` with your actual project slug (the directory name under `10_
 2. **Discovery** — The assistant reads tool names and descriptions to understand capabilities.
 3. **Routing** — Your `CLAUDE.md` instructions tell the assistant which tools to prefer for which situations. Multiple MCP servers coexist without conflict — each serves its domain.
 4. **Adaptation** — Hive's `session_briefing` learns from your usage patterns. Sections you query often get prioritized automatically in future briefings.
+
+## Automating Session Briefing (Claude Code Hooks)
+
+Claude Code supports [hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) — shell commands that run in response to lifecycle events. You can use a `SessionStart` hook to automatically remind your assistant to load context from Hive at the beginning of every session.
+
+### Option 1: Context Injection (Recommended)
+
+Add a `SessionStart` hook that outputs a system reminder. The text is injected into the conversation automatically:
+
+In `~/.claude/settings.json` (or `.claude/settings.json` per-project):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'Call session_briefing(project=\"myproject\") to load context before starting work.'"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Replace `myproject` with your vault project slug. The assistant will see the reminder and call `session_briefing` at the start of every session.
+
+### Option 2: Agent Hook (Autonomous)
+
+For fully automatic context loading without any manual invocation, use an agent hook. This spawns a lightweight subagent that calls the tool directly:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "agent",
+            "prompt": "Call session_briefing(project=\"myproject\") and present the results to the user.",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+This is more autonomous but spawns a subagent (consuming extra tokens). Option 1 is usually sufficient since the assistant follows the injected reminder reliably.
+
+### Notes
+
+- Hooks are a Claude Code feature, not part of Hive itself. Other MCP clients may have their own automation mechanisms.
+- You can also use `UserPromptSubmit` hooks for per-message context injection, but `SessionStart` is the natural fit for briefings.
+- See `claude /hooks` within Claude Code to manage hooks interactively.
