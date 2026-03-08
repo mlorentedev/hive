@@ -2738,3 +2738,37 @@ class TestVaultValidate:
             "vault_validate", {"project": "nonexistent"},
         ))
         assert "not found" in result.lower()
+
+
+# ── _setup_file_logging ─────────────────────────────────────────────
+
+
+class TestSetupFileLogging:
+    def test_creates_log_file_and_handler(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import logging
+
+        from hive.server import _setup_file_logging
+
+        log_file = tmp_path / "subdir" / "test.log"
+        monkeypatch.setattr("hive.server.settings.log_path", str(log_file))
+
+        _setup_file_logging()
+
+        logger = logging.getLogger("hive")
+        # Handler was attached
+        file_handlers = [
+            h for h in logger.handlers
+            if isinstance(h, logging.handlers.RotatingFileHandler)
+            and str(log_file) in str(getattr(h, "baseFilename", ""))
+        ]
+        assert len(file_handlers) == 1
+
+        # Log directory was created
+        assert log_file.parent.is_dir()
+
+        # Cleanup: remove the handler to avoid leaking into other tests
+        for h in file_handlers:
+            logger.removeHandler(h)
+            h.close()
