@@ -17,7 +17,7 @@ description: System architecture and module map.
 │                                                  │
 │  ┌─────────────┐  ┌────────────┐  ┌──────────┐  │
 │  │ Vault Tools  │  │Worker Tools│  │Resources │  │
-│  │ (14 tools)   │  │ (3 tools)  │  │(5 URIs)  │  │
+│  │ (16 tools)   │  │ (3 tools)  │  │(5 URIs)  │  │
 │  └──────┬──────┘  └─────┬──────┘  └──────────┘  │
 │         │               │                        │
 │  ┌──────▼──────┐  ┌─────▼──────┐                 │
