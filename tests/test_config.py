@@ -72,6 +72,16 @@ class TestVaultScopes:
         }
 
 
+class TestLogPath:
+    def test_log_path_default(self) -> None:
+        expected = str(Path.home() / ".local" / "share" / "hive" / "hive.log")
+        assert HiveSettings().log_path == expected
+
+    def test_log_path_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HIVE_LOG_PATH", "/tmp/hive-test.log")
+        assert HiveSettings().log_path == "/tmp/hive-test.log"
+
+
 class TestNewDefaults:
     def test_stale_threshold_days_default(self) -> None:
         assert HiveSettings().stale_threshold_days == 180

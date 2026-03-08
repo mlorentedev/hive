@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
 import re
 import subprocess
 from datetime import date, timedelta
@@ -1972,8 +1973,25 @@ def _git_recent(vault_path: Path, since_days: int) -> list[str]:
 server = create_server()
 
 
+def _setup_file_logging() -> None:
+    """Configure persistent file logging for post-mortem debugging."""
+    from pathlib import Path as _Path
+
+    log_file = _Path(settings.log_path)
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=1_000_000, backupCount=1, encoding="utf-8",
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"),
+    )
+    logging.getLogger("hive").addHandler(handler)
+    logging.getLogger("hive").setLevel(logging.WARNING)
+
+
 def main() -> None:
     """Entry point for the hive CLI command."""
+    _setup_file_logging()
     server.run()
 
 
