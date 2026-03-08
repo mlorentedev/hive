@@ -33,6 +33,7 @@ from hive.usage import UsageTracker
 _log = logging.getLogger(__name__)
 
 _VALID_OPERATIONS = {"append", "replace"}
+_REJECT_MSG = "The host should handle this task directly."
 
 _READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
 _WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False)
@@ -158,6 +159,20 @@ def _resolve_file(
         return f"'{target}' not found in project '{project}'."
 
     return filepath
+
+
+def _make_frontmatter(doc_id: str, doc_type: str) -> str:
+    """Generate YAML frontmatter block with sanitized id and type."""
+    safe_id = re.sub(r"[^\w\-.]", "_", doc_id)
+    safe_type = re.sub(r"[^\w\-.]", "_", doc_type)
+    return (
+        f"---\n"
+        f"id: {safe_id}\n"
+        f"type: {safe_type}\n"
+        f"status: active\n"
+        f'created: "{date.today().isoformat()}"\n'
+        f"---\n\n"
+    )
 
 
 _SUMMARIZE_THRESHOLD = 50
@@ -319,9 +334,8 @@ def create_server(
         """Return list of stale file paths in a project directory."""
         stale: list[str] = []
         for f in project_dir.rglob("*.md"):
-            try:
-                content = f.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
+            content = _safe_read(f)
+            if content is None:
                 continue
             fm = parse_frontmatter(content)
             if fm is not None and fm.status in _TERMINAL_STATUSES:
@@ -716,9 +730,8 @@ Total estimated savings: ~C tokens
         has_filters = bool(type_filter or status_filter or tag_filter)
 
         for md_file in sorted(resolved_path.rglob("*.md")):
-            try:
-                content = md_file.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
+            content = _safe_read(md_file)
+            if content is None:
                 continue
 
             fm = parse_frontmatter(content)
@@ -986,17 +999,7 @@ Total estimated savings: ~C tokens
                           f"File already exists: {path}. Use vault_update to modify it.",
                           project)
 
-        # Auto-generate frontmatter (sanitize to prevent YAML injection)
-        safe_stem = re.sub(r"[^\w\-.]", "_", filepath.stem)
-        safe_type = re.sub(r"[^\w\-.]", "_", doc_type)
-        frontmatter = (
-            f"---\n"
-            f"id: {safe_stem}\n"
-            f"type: {safe_type}\n"
-            f"status: active\n"
-            f'created: "{date.today().isoformat()}"\n'
-            f"---\n\n"
-        )
+        frontmatter = _make_frontmatter(filepath.stem, doc_type)
 
         try:
             filepath.parent.mkdir(parents=True, exist_ok=True)
@@ -1224,17 +1227,10 @@ Total estimated savings: ~C tokens
 
         try:
             if not lessons_file.exists():
-                safe_project = re.sub(r"[^\w\-.]", "_", project)
-                frontmatter = (
-                    f"---\n"
-                    f"id: {safe_project}-lessons\n"
-                    f"type: lesson\n"
-                    f"status: active\n"
-                    f'created: "{date.today().isoformat()}"\n'
-                    f"---\n\n"
-                    f"# Lessons Learned\n"
+                frontmatter = _make_frontmatter(f"{project}-lessons", "lesson")
+                lessons_file.write_text(
+                    frontmatter + "# Lessons Learned\n" + entry, encoding="utf-8",
                 )
-                lessons_file.write_text(frontmatter + entry, encoding="utf-8")
             else:
                 with lessons_file.open("a", encoding="utf-8") as f:
                     f.write(entry)
@@ -1355,24 +1351,19 @@ Total estimated savings: ~C tokens
 
         # Send to worker via auto-routing
         errors: list[str] = []
+        resp: ClientResponse | None = None
 
         if await ollama.is_available():
-            try:
-                resp = await ollama.generate(prompt, max_tokens=2000)
-                _record(resp)
-            except (ConnectionError, RuntimeError) as exc:
-                errors.append(f"Ollama: {exc}")
-                resp = None
+            resp, err = await _try_worker(prompt, 2000, "ollama")
+            if resp is None:
+                errors.append(err)
         else:
             errors.append("Ollama: offline")
-            resp = None
 
-        if resp is None and openrouter is not None:
-            try:
-                resp = await openrouter.generate(prompt, max_tokens=2000)
-                _record(resp)
-            except (ConnectionError, RuntimeError) as exc:
-                errors.append(f"OpenRouter: {exc}")
+        if resp is None:
+            resp, err = await _try_worker(prompt, 2000, "openrouter")
+            if resp is None:
+                errors.append(err)
 
         if resp is None:
             reasons = "; ".join(errors) if errors else "no workers configured"
@@ -1516,13 +1507,11 @@ Total estimated savings: ~C tokens
         scored: list[tuple[float, str, str, list[str]]] = []
 
         for md_file in sorted(resolved_path.rglob("*.md")):
-            try:
-                content = md_file.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
+            content = _safe_read(md_file)
+            if content is None:
                 continue
 
-            lines = content.splitlines()
-            matching = [ln.strip() for ln in lines if query_lower in ln.lower()]
+            matching = [ln.strip() for ln in content.splitlines() if query_lower in ln.lower()]
             if not matching:
                 continue
 
@@ -1641,9 +1630,8 @@ Total estimated savings: ~C tokens
         # Source 2: frontmatter created dates within window
         cutoff = date.today() - timedelta(days=since_days)
         for md_file in resolved_path.rglob("*.md"):
-            try:
-                content = md_file.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
+            content = _safe_read(md_file)
+            if content is None:
                 continue
             fm = parse_frontmatter(content)
             if fm is None:
@@ -1733,57 +1721,37 @@ Total estimated savings: ~C tokens
             task_type="delegate",
         )
 
-    async def _try_ollama(prompt: str, context: str, max_tokens: int) -> str:
-        try:
-            resp = await ollama.generate(prompt, context=context, max_tokens=max_tokens)
-            _record(resp)
-            return _format_response(resp)
-        except (ConnectionError, RuntimeError) as exc:
-            return f"Ollama error: {exc}. The host should handle this task directly."
+    async def _try_worker(
+        prompt: str,
+        max_tokens: int,
+        provider: str = "ollama",
+        context: str = "",
+        model: str = "",
+    ) -> tuple[ClientResponse | None, str]:
+        """Try to generate via a worker provider.
 
-    async def _try_openrouter_free(prompt: str, context: str, max_tokens: int) -> str:
-        if openrouter is None:
-            return "OpenRouter not configured. The host should handle this task directly."
+        Returns (response, "") on success or (None, error_detail) on failure.
+        """
         try:
-            resp = await openrouter.generate(prompt, context=context, max_tokens=max_tokens)
+            if provider == "ollama":
+                resp = await ollama.generate(
+                    prompt, context=context, max_tokens=max_tokens,
+                )
+            elif openrouter is None:
+                return None, "OpenRouter not configured"
+            elif model:
+                resp = await openrouter.generate(
+                    prompt, context=context, model=model, max_tokens=max_tokens,
+                )
+            else:
+                resp = await openrouter.generate(
+                    prompt, context=context, max_tokens=max_tokens,
+                )
             _record(resp)
-            return _format_response(resp)
+            return resp, ""
         except (ConnectionError, RuntimeError) as exc:
-            return f"OpenRouter error: {exc}. The host should handle this task directly."
-
-    async def _try_openrouter_paid(
-        prompt: str, context: str, max_tokens: int, max_cost: float
-    ) -> str:
-        if openrouter is None:
-            return "OpenRouter not configured. The host should handle this task directly."
-        if not budget.can_spend(settings.openrouter_budget, max_cost):
-            return "Monthly budget exhausted. The host should handle this task directly."
-        try:
-            resp = await openrouter.generate(
-                prompt,
-                context=context,
-                model=settings.openrouter_paid_model,
-                max_tokens=max_tokens,
-            )
-            _record(resp)
-            return _format_response(resp)
-        except (ConnectionError, RuntimeError) as exc:
-            return f"OpenRouter paid error: {exc}. The host should handle this task directly."
-
-    async def _try_openrouter_specific(
-        prompt: str, context: str, max_tokens: int, model_id: str
-    ) -> str:
-        if openrouter is None:
-            return "OpenRouter not configured. The host should handle this task directly."
-        try:
-            resp = await openrouter.generate(
-                prompt, context=context, model=model_id, max_tokens=max_tokens
-            )
-            _record(resp)
-            return _format_response(resp)
-        except (ConnectionError, RuntimeError) as exc:
-            msg = f"OpenRouter error ({model_id}): {exc}"
-            return f"{msg}. The host should handle this task directly."
+            label = f"OpenRouter ({model})" if model else provider.capitalize()
+            return None, f"{label}: {exc}"
 
     @mcp.tool(annotations=_WRITE)
     async def delegate_task(
@@ -1802,39 +1770,44 @@ Total estimated savings: ~C tokens
             max_tokens: Maximum tokens in the response.
             max_cost_per_request: Max USD to spend on this request. 0 = free models only.
         """
+        # Explicit routing
         if model == "ollama":
-            return await _try_ollama(prompt, context, max_tokens)
+            resp, err = await _try_worker(prompt, max_tokens, "ollama", context)
+            return _format_response(resp) if resp else f"{err}. {_REJECT_MSG}"
         if model == "openrouter-free":
-            return await _try_openrouter_free(prompt, context, max_tokens)
+            resp, err = await _try_worker(prompt, max_tokens, "openrouter", context)
+            return _format_response(resp) if resp else f"{err}. {_REJECT_MSG}"
         if model == "openrouter":
-            return await _try_openrouter_paid(prompt, context, max_tokens, max_cost_per_request)
+            if not budget.can_spend(settings.openrouter_budget, max_cost_per_request):
+                return f"Monthly budget exhausted. {_REJECT_MSG}"
+            resp, err = await _try_worker(
+                prompt, max_tokens, "openrouter", context,
+                model=settings.openrouter_paid_model,
+            )
+            return _format_response(resp) if resp else f"{err}. {_REJECT_MSG}"
         if model != "auto":
-            return await _try_openrouter_specific(prompt, context, max_tokens, model)
+            resp, err = await _try_worker(
+                prompt, max_tokens, "openrouter", context, model=model,
+            )
+            return _format_response(resp) if resp else f"{err}. {_REJECT_MSG}"
 
         # Auto routing: Ollama → OpenRouter free → OpenRouter paid → reject
         errors: list[str] = []
 
         # Tier 1: Ollama
         if await ollama.is_available():
-            try:
-                resp = await ollama.generate(prompt, context=context, max_tokens=max_tokens)
-                _record(resp)
+            resp, err = await _try_worker(prompt, max_tokens, "ollama", context)
+            if resp is not None:
                 return _format_response(resp)
-            except (ConnectionError, RuntimeError) as exc:
-                errors.append(f"Ollama: {exc}")
+            errors.append(err)
         else:
             errors.append("Ollama: offline")
 
         # Tier 2: OpenRouter free
-        if openrouter is not None:
-            try:
-                resp = await openrouter.generate(prompt, context=context, max_tokens=max_tokens)
-                _record(resp)
-                return _format_response(resp)
-            except (ConnectionError, RuntimeError) as exc:
-                errors.append(f"OpenRouter free: {exc}")
-        else:
-            errors.append("OpenRouter: no API key configured")
+        resp, err = await _try_worker(prompt, max_tokens, "openrouter", context)
+        if resp is not None:
+            return _format_response(resp)
+        errors.append(err)
 
         # Tier 3: OpenRouter paid (only if max_cost > 0 and budget allows)
         if (
@@ -1842,21 +1815,17 @@ Total estimated savings: ~C tokens
             and openrouter is not None
             and budget.can_spend(settings.openrouter_budget, max_cost_per_request)
         ):
-            try:
-                resp = await openrouter.generate(
-                    prompt,
-                    context=context,
-                    model=settings.openrouter_paid_model,
-                    max_tokens=max_tokens,
-                )
-                _record(resp)
+            resp, err = await _try_worker(
+                prompt, max_tokens, "openrouter", context,
+                model=settings.openrouter_paid_model,
+            )
+            if resp is not None:
                 return _format_response(resp)
-            except (ConnectionError, RuntimeError) as exc:
-                errors.append(f"OpenRouter paid: {exc}")
+            errors.append(err)
 
         # All tiers exhausted
         reasons = "; ".join(errors)
-        return f"All workers unavailable. [{reasons}]. The host should handle this task directly."
+        return f"All workers unavailable. [{reasons}]. {_REJECT_MSG}"
 
     @mcp.tool(annotations=_READ_ONLY)
     async def list_models() -> str:
