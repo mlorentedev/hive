@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/mlorentedev/hive/compare/v1.7.2...v1.8.0) (2026-03-08)
+
+
+### Features
+
+* improve server instructions for universal tool adoption ([#40](https://github.com/mlorentedev/hive/issues/40)) ([5ad8474](https://github.com/mlorentedev/hive/commit/5ad84744173ddb2e4b9236687eb11eb16ec19e4d))
+
 ## [1.7.2](https://github.com/mlorentedev/hive/compare/v1.7.1...v1.7.2) (2026-03-08)
 
 
