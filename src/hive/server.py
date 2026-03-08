@@ -269,7 +269,9 @@ def create_server(
             "Write tools (vault_update, vault_create, vault_patch, capture_lesson) "
             "auto-commit to git. "
             "Use extract_lessons to batch-extract lessons from session text "
-            "via a worker model — saves host tokens on bulk extraction."
+            "via a worker model — saves host tokens on bulk extraction. "
+            "Use vault_validate to detect drift: broken frontmatter, stale files, "
+            "and broken wikilinks."
         ),
     )
 
