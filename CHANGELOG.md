@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/mlorentedev/hive/compare/v1.9.0...v1.9.1) (2026-03-09)
+
+
+### Bug Fixes
+
+* resolve all audit findings from tool consolidation ([#44](https://github.com/mlorentedev/hive/issues/44)) ([417934a](https://github.com/mlorentedev/hive/commit/417934a9cd21d0c50a0ec15c44fccab7c5bd1e10))
+
 ## [1.9.0](https://github.com/mlorentedev/hive/compare/v1.8.0...v1.9.0) (2026-03-09)
 
 
