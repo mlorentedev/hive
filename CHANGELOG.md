@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/mlorentedev/hive/compare/v1.8.0...v1.9.0) (2026-03-09)
+
+
+### Features
+
+* consolidate 19 MCP tools into 10 ([#42](https://github.com/mlorentedev/hive/issues/42)) ([d7ac3b5](https://github.com/mlorentedev/hive/commit/d7ac3b56bfd3ec8504810926f2e8f76d5ef1fbad))
+
 ## [1.8.0](https://github.com/mlorentedev/hive/compare/v1.7.2...v1.8.0) (2026-03-08)
 
 
