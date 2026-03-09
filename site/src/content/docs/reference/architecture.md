@@ -17,7 +17,7 @@ description: System architecture and module map.
 │                                                  │
 │  ┌─────────────┐  ┌────────────┐  ┌──────────┐  │
 │  │ Vault Tools  │  │Worker Tools│  │Resources │  │
-│  │ (16 tools)   │  │ (3 tools)  │  │(5 URIs)  │  │
+│  │ (7 tools)    │  │ (2 tools)  │  │(5 URIs)  │  │
 │  └──────┬──────┘  └─────┬──────┘  └──────────┘  │
 │         │               │                        │
 │  ┌──────▼──────┐  ┌─────▼──────┐                 │
@@ -57,7 +57,7 @@ Vault and worker functionality are served from a single FastMCP instance. This s
 
 ### Git Auto-Commit
 
-All vault writes auto-commit to git. This provides full history and enables `vault_recent` to detect changes via `git log`.
+All vault writes auto-commit to git. This provides full history and enables `vault_search(since_days=N)` to detect changes via `git log`.
 
 ### Budget Controls
 

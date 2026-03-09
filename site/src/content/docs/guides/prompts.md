@@ -15,7 +15,7 @@ End-of-session review that extracts lessons and appends them to the vault.
 1. Review work completed in the current session
 2. Identify patterns, mistakes, and insights
 3. Format as structured lessons
-4. Use `vault_update` to append to the project's `90-lessons.md`
+4. Use `vault_write` to append to the project's `90-lessons.md`
 
 **Usage**: Ask your assistant to "run a retrospective for my-project" at the end of a work session.
 
@@ -55,7 +55,7 @@ Estimate token savings from hive MCP tools in the current session.
 **Parameters**: none
 
 **Protocol**:
-1. Call `vault_usage` to get tool call statistics
+1. Call `vault_health(include_usage=True)` to get tool call statistics
 2. Estimate tokens that would have been consumed by static loading
 3. Calculate savings percentage
 4. Report results

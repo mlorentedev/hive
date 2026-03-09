@@ -166,7 +166,7 @@ class TestVaultSmoke:
 
     # B1
     async def test_list_projects(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool("vault_list_projects", {}))
+        result = _text(await server.call_tool("vault_list", {}))
         assert "smoketest" in result
 
     # B2
@@ -258,7 +258,7 @@ class TestVaultSmoke:
     # B13
     async def test_update_append(self, server: FastMCP, smoke_vault: Path) -> None:
         result = _text(await server.call_tool(
-            "vault_update",
+            "vault_write",
             {
                 "project": "smoketest",
                 "section": "lessons",
@@ -273,7 +273,7 @@ class TestVaultSmoke:
     # B14
     async def test_update_invalid_frontmatter(self, server: FastMCP) -> None:
         result = _text(await server.call_tool(
-            "vault_update",
+            "vault_write",
             {
                 "project": "smoketest",
                 "section": "tasks",
@@ -286,12 +286,13 @@ class TestVaultSmoke:
     # B15
     async def test_create(self, server: FastMCP, smoke_vault: Path) -> None:
         result = _text(await server.call_tool(
-            "vault_create",
+            "vault_write",
             {
                 "project": "smoketest",
                 "path": "30-architecture/adr-test.md",
                 "content": "# Test ADR\n",
                 "doc_type": "adr",
+                "operation": "create",
             },
         ))
         assert "created" in result.lower()
@@ -301,12 +302,13 @@ class TestVaultSmoke:
     # B16
     async def test_create_duplicate(self, server: FastMCP) -> None:
         result = _text(await server.call_tool(
-            "vault_create",
+            "vault_write",
             {
                 "project": "smoketest",
                 "path": "30-architecture/adr-001.md",
                 "content": "dup",
                 "doc_type": "adr",
+                "operation": "create",
             },
         ))
         assert "already exists" in result.lower()
@@ -314,7 +316,7 @@ class TestVaultSmoke:
     # B17
     async def test_list_files(self, server: FastMCP) -> None:
         result = _text(await server.call_tool(
-            "vault_list_files", {"project": "smoketest"},
+            "vault_list", {"project": "smoketest"},
         ))
         assert "00-context.md" in result
         assert "30-architecture/" in result
@@ -322,7 +324,7 @@ class TestVaultSmoke:
     # B18
     async def test_list_files_pattern(self, server: FastMCP) -> None:
         result = _text(await server.call_tool(
-            "vault_list_files", {"project": "smoketest", "pattern": "adr-*"},
+            "vault_list", {"project": "smoketest", "pattern": "adr-*"},
         ))
         assert "adr-001.md" in result
 
@@ -394,14 +396,14 @@ class TestVaultSmoke:
     # B23
     async def test_summarize_small_file(self, server: FastMCP) -> None:
         result = _text(await server.call_tool(
-            "vault_summarize", {"project": "smoketest", "section": "context"},
+            "delegate_task", {"project": "smoketest", "section": "context"},
         ))
         assert "Smoke Test Project" in result
 
     # B24
-    async def test_smart_search(self, server: FastMCP) -> None:
+    async def test_ranked_search(self, server: FastMCP) -> None:
         result = _text(await server.call_tool(
-            "vault_smart_search", {"query": "Decision"},
+            "vault_search", {"query": "Decision", "ranked": True},
         ))
         assert "adr-001" in result
 
@@ -413,19 +415,21 @@ class TestVaultSmoke:
         assert "Session Briefing" in result
 
     # B26
-    async def test_vault_recent(self, server: FastMCP) -> None:
+    async def test_vault_search_recent(self, server: FastMCP) -> None:
         result = _text(await server.call_tool(
-            "vault_recent", {"project": "smoketest"},
+            "vault_search", {"project": "smoketest", "since_days": 30},
         ))
         # Should return something (at least the recently created files)
         assert "smoketest" in result.lower() or "recent" in result.lower()
 
     # B27
-    async def test_vault_usage(self, server: FastMCP) -> None:
+    async def test_vault_health_usage(self, server: FastMCP) -> None:
         # Call a tool first to generate usage data
-        await server.call_tool("vault_list_projects", {})
-        result = _text(await server.call_tool("vault_usage", {}))
-        assert "vault_list_projects" in result
+        await server.call_tool("vault_list", {})
+        result = _text(await server.call_tool(
+            "vault_health", {"include_usage": True},
+        ))
+        assert "vault_list" in result
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -480,7 +484,7 @@ class TestEdgeCasesSmoke:
     async def test_empty_vault(self, tmp_path: Path) -> None:
         (tmp_path / "10_projects").mkdir()
         mcp = create_server(vault_path=tmp_path)
-        result = _text(await mcp.call_tool("vault_list_projects", {}))
+        result = _text(await mcp.call_tool("vault_list", {}))
         assert "no projects" in result.lower()
 
     async def test_empty_vault_health(self, tmp_path: Path) -> None:
@@ -627,28 +631,23 @@ class TestAutoRouting:
         assert stats["request_count"] == 1
 
 
-class TestListModelsSmoke:
-    """Real model listing."""
-
-    @skip_no_ollama
-    async def test_list_models_shows_ollama(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool("list_models", {}))
-        assert "online" in result.lower()
-        assert OLLAMA_MODEL in result
-
-    @skip_no_openrouter
-    async def test_list_models_shows_openrouter(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool("list_models", {}))
-        assert "OpenRouter" in result
-
-
 class TestWorkerStatusSmoke:
-    """Real status check."""
+    """Real status + model listing."""
 
     @skip_no_ollama
     async def test_status_shows_ollama_online(self, server: FastMCP) -> None:
         result = _text(await server.call_tool("worker_status", {}))
         assert "online" in result.lower()
+
+    @skip_no_ollama
+    async def test_status_shows_ollama_model(self, server: FastMCP) -> None:
+        result = _text(await server.call_tool("worker_status", {}))
+        assert OLLAMA_MODEL in result
+
+    @skip_no_openrouter
+    async def test_status_shows_openrouter_models(self, server: FastMCP) -> None:
+        result = _text(await server.call_tool("worker_status", {}))
+        assert "OpenRouter" in result
 
     async def test_status_shows_budget(self, server: FastMCP) -> None:
         result = _text(await server.call_tool("worker_status", {}))

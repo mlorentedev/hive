@@ -327,8 +327,8 @@ class TestSignalToNoise:
              {"query": "paragraph", "max_lines": 100}),
             ("vault_search (500)", "vault_search",
              {"query": "paragraph", "max_lines": 500}),
-            ("vault_smart_search", "vault_smart_search",
-             {"query": "paragraph", "max_lines": 100}),
+            ("vault_search (ranked)", "vault_search",
+             {"query": "paragraph", "ranked": True, "max_lines": 100}),
             ("session_briefing", "session_briefing",
              {"project": "large-project"}),
         ]

@@ -49,7 +49,7 @@ class RelevanceTracker:
     ) -> None:
         """Record a section access, updating EMA score.
 
-        Write operations (vault_update, vault_create) get a boosted signal.
+        Write operations (vault_write) get a boosted signal.
         """
         signal = self._alpha * (_WRITE_MULTIPLIER if is_write else 1.0)
         row = self._conn.execute(

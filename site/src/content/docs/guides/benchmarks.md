@@ -58,7 +58,7 @@ Real vault (493K tokens): 5 project context queries consumed 2,925 tokens total,
 | Tool | S/N ratio | Best for |
 |---|---|---|
 | vault_search | 98.8% | Targeted queries -- minimal noise |
-| vault_smart_search | 98.4% | Ranked search results |
+| vault_search (ranked) | 98.4% | Ranked search results |
 | vault_query | 87-90% | Full section reads |
 | session_briefing | 78.5% | Cold start context assembly |
 

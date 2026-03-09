@@ -1,17 +1,27 @@
 ---
 title: Vault Tools
-description: 16 tools for querying, searching, and managing your Obsidian vault.
+description: 7 tools for querying, searching, and managing your Obsidian vault.
 ---
 
-## vault_list_projects
+## vault_list
 
-List all projects in the Obsidian vault.
+List projects or browse files within a project.
 
 ```python
-vault_list_projects()
+# List all projects
+vault_list()
+
+# Browse files in a project
+vault_list(project="my-project")
+
+# Browse a subdirectory
+vault_list(project="my-project", path="30-architecture")
+
+# Glob pattern filtering
+vault_list(project="my-project", pattern="adr-*")
 ```
 
-Returns project names, file counts, and available section shortcuts.
+Without `project`, lists all vault projects with file counts and shortcuts. With `project`, lists files and directories (directories first, then files). With `pattern`, recursively finds all matching files.
 
 ## vault_query
 
@@ -39,9 +49,10 @@ Use `project="_meta"` to access `00_meta/` (cross-project patterns).
 
 ## vault_search
 
-Full-text search across the vault.
+Full-text search across the vault with optional ranking and recent-changes mode.
 
 ```python
+# Standard keyword search
 vault_search(
     query="authentication",
     max_lines=100,
@@ -50,88 +61,82 @@ vault_search(
     tag_filter="",      # filter by frontmatter tag
     use_regex=False     # treat query as a regular expression
 )
+
+# Ranked search (relevance scoring)
+vault_search(query="deployment", ranked=True, max_results=5)
+
+# Recent changes (last N days)
+vault_search(since_days=7, project="my-project")
 ```
 
-Returns matching lines grouped by file, with metadata headers.
+**Standard mode:** Returns matching lines grouped by file, with metadata headers. When `use_regex=True`, the query is compiled as a Python regular expression (case-insensitive).
 
-When `use_regex=True`, the query is compiled as a Python regular expression (case-insensitive). Invalid regex patterns return an error message.
+**Ranked mode** (`ranked=True`): Scores results by status weight (active > draft > archived), recency, and match density. Returns top results with metadata and matching lines.
+
+**Recent mode** (`since_days > 0`): Combines git history with frontmatter `created` dates to find files changed in the last N days. Optional `project` filter.
 
 ## vault_health
 
-Health metrics for all vault projects.
+Health metrics, drift detection, and usage statistics.
 
 ```python
+# Health report for all projects
 vault_health()
+
+# Validate a specific project
+vault_health(project="my-project", checks=["frontmatter", "stale", "links"], max_issues=50)
+
+# Include usage statistics
+vault_health(include_usage=True, usage_days=30)
 ```
 
-Reports per-project: file count, total lines, stale files (>180 days by default, configurable via `HIVE_STALE_THRESHOLD_DAYS`), section coverage.
+**Health report** (default): Per-project file count, total lines, stale files (>180 days, configurable via `HIVE_STALE_THRESHOLD_DAYS`), section coverage.
 
-## vault_validate
-
-Drift detector — validate vault files for common issues.
-
-```python
-vault_validate(project="my-project", checks=["frontmatter", "stale", "links"], max_issues=50)
-```
-
-| Parameter | Default | Description |
-|---|---|---|
-| `project` | `""` (all) | Project to validate. Empty scans all projects |
-| `checks` | `[]` (all) | Which checks to run: `frontmatter`, `stale`, `links` |
-| `max_issues` | `50` | Maximum issues to report |
-
-**Checks:**
+**Validation** (`checks` parameter): Drift detector for common issues:
 - **frontmatter**: Missing or malformed YAML frontmatter, missing required fields (id, type, status), unparseable dates
 - **stale**: Active files not modified in `HIVE_STALE_THRESHOLD_DAYS` (default 180)
 - **links**: Broken `[[wikilinks]]` pointing to nonexistent files
 
 Issues are categorized as `[error]` or `[warning]` with file path and description.
 
-## vault_update
+**Usage stats** (`include_usage=True`): Tool call counts by tool and project, with estimated token savings.
 
-Write to an existing vault file with validation.
+## vault_write
+
+Create, append, or replace vault files with validation and auto git commit.
 
 ```python
-vault_update(
+# Append to an existing file
+vault_write(
     project="my-project",
     section="lessons",
-    operation="append",   # append | replace
-    content="New lesson learned..."
+    content="New lesson learned...",
+    operation="append"      # default
 )
-```
 
-- **append**: adds content to the end
-- **replace**: requires valid YAML frontmatter in the new content
-- Auto-commits to git after successful write
+# Replace an entire file (requires valid frontmatter)
+vault_write(
+    project="my-project",
+    section="context",
+    content="---\nid: my-project\ntype: project\nstatus: active\n---\n\nNew content.",
+    operation="replace"
+)
 
-## vault_create
-
-Create a new file with auto-generated frontmatter.
-
-```python
-vault_create(
+# Create a new file with auto-generated frontmatter
+vault_write(
     project="my-project",
     path="30-architecture/adr-005.md",
-    content="# ADR-005: ...",
-    doc_type="adr"    # used in generated frontmatter
+    content="# ADR-005: PostgreSQL\n\n## Context\n...",
+    operation="create",
+    doc_type="adr"          # used in generated frontmatter
 )
 ```
 
-Generates YAML frontmatter with `id`, `type`, `status: draft`, `created: today`. Auto-commits to git.
+- **append**: Adds content to the end of an existing file
+- **replace**: Replaces the entire file. Requires valid YAML frontmatter with `id`, `type`, `status`
+- **create**: Creates a new file. Auto-generates frontmatter with `id`, `type`, `status: draft`, `created: today`
 
-## vault_list_files
-
-List files and directories in a vault project.
-
-```python
-vault_list_files(
-    project="my-project",
-    path="",           # subdirectory (relative to project root)
-    pattern=""         # glob pattern for recursive filtering (e.g. 'adr-*', '*.md')
-)
-```
-
-Without `pattern`, lists the immediate contents of the directory (directories first, then files). With `pattern`, recursively finds all matching files.
+All operations auto-commit to git.
 
 ## vault_patch
 
@@ -150,9 +155,10 @@ Replaces exactly one occurrence of `old_text` with `new_text`. Rejects ambiguous
 
 ## capture_lesson
 
-Capture a lesson learned inline during a session.
+Capture lessons inline or batch-extract from text using a worker.
 
 ```python
+# Inline capture (structured, single lesson)
 capture_lesson(
     project="my-project",
     title="Root cause was stale cache",
@@ -161,90 +167,18 @@ capture_lesson(
     solution="Clear Redis cache after config changes",
     tags=["deploy", "cache"]    # optional
 )
-```
 
-Appends a structured entry to `90-lessons.md` with date, context, problem, and solution. Creates the file with frontmatter if it doesn't exist. Deduplicates by title. Auto-commits to git.
-
-**When to use:** Immediately after discovering a bug root cause, architectural insight, or debugging trick — don't wait until session end.
-
-## extract_lessons
-
-Batch-extract lessons from raw text using a worker model.
-
-```python
-extract_lessons(
+# Batch extraction (worker-powered, multiple lessons)
+capture_lesson(
     project="my-project",
     text="We found that the cache was stale after deploy...",
-    min_confidence=0.7,   # 0.0-1.0, filter low-confidence extractions
-    max_lessons=5          # cap on lessons extracted
+    min_confidence=0.7,
+    max_lessons=5
 )
 ```
 
-Sends the text to a worker model (Ollama/OpenRouter) which extracts structured lessons (title, context, problem, solution, tags, confidence). Lessons above the confidence threshold are written to `90-lessons.md` with deduplication.
+**Inline mode** (no `text`): Appends a structured entry to `90-lessons.md` with date, context, problem, and solution. Creates the file with frontmatter if it doesn't exist. Deduplicates by title. Auto-commits to git.
 
-**Why use this instead of `capture_lesson`?** `capture_lesson` requires you to structure each lesson manually. `extract_lessons` sends raw text to a cheaper model that does the structuring — saving your primary model's tokens on bulk extraction.
+**Batch mode** (`text` provided): Sends the text to a worker model (Ollama/OpenRouter) which extracts structured lessons (title, context, problem, solution, tags, confidence). Lessons above the confidence threshold are written to `90-lessons.md` with deduplication.
 
-Returns a summary: which lessons were written, which were skipped (duplicates or low confidence).
-
-## vault_summarize
-
-Smart summarization for vault files.
-
-```python
-vault_summarize(
-    project="my-project",
-    section="context",
-    path="",
-    max_summary_lines=50
-)
-```
-
-- Files under the threshold are returned directly
-- Large files return a delegation prompt for the worker to summarize
-
-## vault_smart_search
-
-Ranked search with relevance scoring.
-
-```python
-vault_smart_search(
-    query="deployment",
-    max_results=10,
-    max_lines=200
-)
-```
-
-Scores results by: status weight (active > draft > archived), recency, and match density. Returns top results with metadata and matching lines.
-
-## session_briefing
-
-One-call context load for starting a session.
-
-```python
-session_briefing(project="my-project")
-```
-
-Returns combined: active tasks, recent lessons, git log (last 10 commits), and health metrics.
-
-## vault_recent
-
-Files changed in the vault recently.
-
-```python
-vault_recent(
-    since_days=7,
-    project=""      # optional filter
-)
-```
-
-Combines git history with frontmatter `created` dates to find recent activity.
-
-## vault_usage
-
-Tool usage analytics for the current session.
-
-```python
-vault_usage(since_days=30)
-```
-
-Returns call counts by tool and project, with estimated token savings.
+**When to use:** Immediately after discovering a bug root cause, architectural insight, or debugging trick — don't wait until session end.

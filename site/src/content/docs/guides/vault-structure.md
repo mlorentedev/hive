@@ -100,7 +100,7 @@ vault_query(project="my-app", path="notes/2026-03-01.md")
 
 ## Frontmatter
 
-Hive uses YAML frontmatter for metadata. Required fields for `vault_update` with `operation="replace"`:
+Hive uses YAML frontmatter for metadata. Required fields for `vault_write` with `operation="replace"`:
 
 ```yaml
 ---
@@ -112,14 +112,14 @@ tags: [python, architecture]
 ---
 ```
 
-`vault_create` auto-generates frontmatter — you only need to provide the body content.
+`vault_write(operation="create")` auto-generates frontmatter — you only need to provide the body content.
 
 ## Git Integration
 
-All write operations (`vault_update`, `vault_create`, `vault_patch`, `capture_lesson`) auto-commit to git. This ensures:
+All write operations (`vault_write`, `vault_patch`, `capture_lesson`) auto-commit to git. This ensures:
 
 - Full history of changes
-- `vault_recent` can find recently modified files
+- `vault_search(since_days=N)` can find recently modified files
 - No manual git management needed
 
 Your vault directory must be a git repository. If it isn't, run `git init` in your vault root.

@@ -62,44 +62,30 @@ args = ["--upgrade", "hive-vault"]
 
 Then ask your assistant:
 
-> "Use vault_list_projects to see my vault"
+> "Use vault_list to see my vault"
 
 That's it. You're running.
 
 ## What You Get
 
-### 16 Vault Tools — your knowledge, on demand
+### 10 Tools — your knowledge, on demand
 
 | Tool | What it does |
 |---|---|
 | `vault_query` | Load project context, tasks, roadmap, lessons — or any file by path |
-| `vault_search` | Full-text search with metadata filters and regex support |
-| `vault_smart_search` | Ranked results with relevance scoring (status + recency + match density) |
-| `session_briefing` | One call = tasks + lessons + git log + health. Start every session here |
-| `vault_list_projects` | See all projects in your vault |
-| `vault_list_files` | Browse project structure with glob pattern filtering |
-| `vault_health` | File counts, staleness metrics, coverage gaps per project |
-| `vault_validate` | Drift detector — find broken frontmatter, stale files, broken wikilinks |
-| `vault_recent` | What changed in the last N days (via git + frontmatter) |
-| `vault_update` | Write to vault with YAML validation + auto git commit |
-| `vault_create` | Create files with auto-generated frontmatter + auto git commit |
+| `vault_search` | Full-text search with metadata filters, regex, ranked results, and recent changes |
+| `vault_list` | List projects (no args) or browse files within a project with glob filtering |
+| `vault_health` | Health metrics, drift detection (frontmatter, stale, wikilinks), and usage stats |
+| `vault_write` | Create, append, or replace vault files with YAML validation + auto git commit |
 | `vault_patch` | Surgical find-and-replace with ambiguity rejection + auto git commit |
-| `capture_lesson` | Capture a lesson inline — deduplicates, appends to `90-lessons.md` |
-| `extract_lessons` | Worker-powered batch extraction — send text, get structured lessons |
-| `vault_summarize` | Small files returned directly, large files delegated for compression |
-| `vault_usage` | Tool call analytics — which tools, which projects, how many tokens |
+| `capture_lesson` | Capture lessons inline (structured) or batch-extract from text via worker |
+| `session_briefing` | One call = tasks + lessons + git log + health. Start every session here |
+| `delegate_task` | Route tasks to cheaper models, or summarize vault files automatically |
+| `worker_status` | Budget remaining, connectivity, available models, usage stats |
 
-### 3 Worker Tools — delegate to cheaper models
+**Worker routing:** Ollama first (free) → OpenRouter free tier → OpenRouter paid ($1/mo cap) → reject.
 
-| Tool | What it does |
-|---|---|
-| `delegate_task` | Route tasks to Ollama (free, local) or OpenRouter (free/paid cloud) |
-| `list_models` | See all available models across providers |
-| `worker_status` | Budget remaining, connectivity, usage stats |
-
-**Routing:** Ollama first (free) → OpenRouter free tier → OpenRouter paid ($1/mo cap) → reject.
-
-Your primary model handles architecture. Cheaper models handle boilerplate. `extract_lessons` uses workers to batch-extract lessons from session notes — saving your primary model's tokens.
+Your primary model handles architecture. Cheaper models handle boilerplate. `capture_lesson(text=...)` uses workers to batch-extract lessons from session notes — saving your primary model's tokens.
 
 ## Before / After
 
@@ -163,8 +149,19 @@ claude mcp add -s user hive \
 | `HIVE_OPENROUTER_PAID_MODEL` | `qwen/qwen3-coder` | Paid tier model |
 | `HIVE_OPENROUTER_BUDGET` | `1.0` | Monthly budget cap (USD) |
 | `HIVE_VAULT_SCOPES` | `{"projects": "10_projects", "meta": "00_meta"}` | JSON mapping of scope names to vault subdirectories |
+| `HIVE_LOG_PATH` | `~/.local/share/hive/hive.log` | Persistent debug log (1MB rotating, 1 backup) |
 
-See [full configuration reference](https://mlorentedev.github.io/hive/configuration/) for all 15 environment variables.
+See [full configuration reference](https://mlorentedev.github.io/hive/configuration/) for all 16 environment variables including advanced tuning.
+
+### Debug Logging
+
+Hive writes warnings and errors to a persistent log file for post-mortem debugging:
+
+```
+~/.local/share/hive/hive.log
+```
+
+Check this file when tools return unexpected results or the server fails silently. The log rotates at 1MB with one backup file. Override the path with `HIVE_LOG_PATH`.
 
 ## Recommended Workflow
 
@@ -238,16 +235,17 @@ Without these instructions, your assistant uses Hive inconsistently. With them, 
 ```
 MCP Host (Claude Code, Gemini CLI, Codex CLI, Cursor, ...)
     └── hive-vault (MCP server, stdio)
-            ├── Vault Tools (16) ── Obsidian vault (Markdown + YAML frontmatter)
-            │     query, search, smart_search, list_files, patch,
-            │     update, create, capture_lesson, extract_lessons,
-            │     summarize, validate, session_briefing, recent,
-            │     usage, health, list_projects
+            ├── Vault Tools (7) ── Obsidian vault (Markdown + YAML frontmatter)
+            │     query, search, list, health, write, patch,
+            │     capture_lesson
             │
-            └── Worker Tools (3) ── Task delegation + routing:
+            ├── Session Tools (1) ── Adaptive context assembly
+            │     session_briefing
+            │
+            └── Worker Tools (2) ── Task delegation + routing:
                   delegate_task        1. Ollama (local, free)
-                  list_models          2. OpenRouter free tier
-                  worker_status        3. OpenRouter paid ($1/mo cap)
+                  worker_status        2. OpenRouter free tier
+                                       3. OpenRouter paid ($1/mo cap)
                                        4. Reject → host handles it
 ```
 
@@ -259,7 +257,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, code standards, and PR workflo
 git clone https://github.com/mlorentedev/hive.git
 cd hive
 make install   # create venv + install deps
-make check     # lint + typecheck + test (265 tests, 92% coverage)
+make check     # lint + typecheck + test (324 tests, 91% coverage)
 ```
 
 ## License

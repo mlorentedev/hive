@@ -61,9 +61,9 @@ MCP servers do **not** inherit your shell's environment variables. Every env var
 
 **Fix:** Exit and restart your AI assistant session (e.g., restart Claude Code, start a new Gemini CLI session).
 
-## vault_list_projects Returns Empty
+## vault_list Returns Empty
 
-**Symptom:** `vault_list_projects` shows no projects.
+**Symptom:** `vault_list` shows no projects.
 
 **Cause:** Either `VAULT_PATH` doesn't point to the right directory, or your vault layout doesn't match the configured scopes.
 
@@ -87,7 +87,7 @@ See [Vault Structure](/hive/guides/vault-structure/) for layout details.
 - Typo in the project name (it must match the directory name exactly)
 - The scope directory itself doesn't exist
 
-**Fix:** Run `vault_list_projects` to see what Hive can find. If your project isn't listed, check your `HIVE_VAULT_SCOPES` configuration.
+**Fix:** Run `vault_list` to see what Hive can find. If your project isn't listed, check your `HIVE_VAULT_SCOPES` configuration.
 
 ## Gemini CLI: MCP Registration Syntax
 
@@ -113,9 +113,9 @@ gemini mcp add -s user \
 - `-s user` installs at user scope (persists across projects)
 - Environment variable values are expanded immediately (not stored as references)
 
-## vault_update Rejects My Content
+## vault_write Rejects My Content
 
-**Symptom:** `vault_update` with `operation="replace"` returns a validation error.
+**Symptom:** `vault_write` with `operation="replace"` returns a validation error.
 
 **Cause:** When replacing an entire file, Hive validates that YAML frontmatter includes required fields: `id`, `type`, and `status`.
 
@@ -143,11 +143,30 @@ Or use `operation="append"` to add content without replacing frontmatter.
 
 Both use WAL mode for performance. If sizes seem excessive, you can safely delete them — Hive recreates them automatically. Budget tracking resets on deletion.
 
+## Checking the Debug Log
+
+Hive writes warnings and errors to a persistent log file for post-mortem debugging:
+
+```
+~/.local/share/hive/hive.log
+```
+
+Check this file when tools return unexpected results or the server fails silently. The log rotates at 1MB with one backup file (`hive.log.1`).
+
+To change the log location:
+
+```bash
+claude mcp add -s user hive \
+  -e HIVE_LOG_PATH=/path/to/custom.log \
+  -- uvx --upgrade hive-vault
+```
+
 ## Getting Help
 
 If your issue isn't listed here:
 
 1. Run `vault_health` to check vault connectivity and file counts
 2. Run `worker_status` to check provider connectivity and budget
-3. Check the [Configuration](/hive/configuration/) page for all environment variables
-4. Open an issue at [github.com/mlorentedev/hive](https://github.com/mlorentedev/hive/issues)
+3. Check `~/.local/share/hive/hive.log` for error details
+4. Check the [Configuration](/hive/configuration/) page for all environment variables
+5. Open an issue at [github.com/mlorentedev/hive](https://github.com/mlorentedev/hive/issues)
