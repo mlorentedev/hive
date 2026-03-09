@@ -224,6 +224,22 @@ class TestVaultSearch:
         result = await vault_mcp.call_tool("vault_search", {"query": "xyznonexistent"})
         assert "no matches" in _text(result).lower()
 
+    async def test_empty_query_rejected(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool("vault_search", {})
+        assert "query is required" in _text(result).lower()
+
+    async def test_invalid_regex_rejected(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_search", {"query": "[invalid", "use_regex": True},
+        )
+        assert "invalid regex" in _text(result).lower()
+
+    async def test_negative_since_days_rejected(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_search", {"query": "test", "since_days": -5},
+        )
+        assert "positive" in _text(result).lower()
+
     async def test_searches_across_files(self, vault_mcp: FastMCP) -> None:
         result = await vault_mcp.call_tool("vault_search", {"query": "active"})
         text = _text(result)
@@ -405,6 +421,26 @@ class TestVaultHealth:
 
 
 class TestVaultWrite:
+    async def test_append_missing_section_rejected(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_write",
+            {"project": "testproject", "operation": "append", "content": "x"},
+        )
+        assert "section" in _text(result).lower()
+
+    async def test_append_invalid_section_rejected(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_write",
+            {
+                "project": "testproject", "section": "nonexistent",
+                "operation": "append", "content": "x",
+            },
+        )
+        text = _text(result)
+        assert "not found" in text.lower() or "no file" in text.lower()
+
     async def test_append_to_existing_file(self, git_vault: Path) -> None:
         mcp = create_server(vault_path=git_vault)
         result = await mcp.call_tool(
@@ -737,6 +773,22 @@ class TestVaultWriteCreate:
             },
         )
         assert "created" in _text(result).lower()
+
+    async def test_create_missing_path_rejected(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_write",
+            {"project": "testproject", "content": "x", "doc_type": "note", "operation": "create"},
+        )
+        assert "path" in _text(result).lower()
+
+    async def test_create_missing_doc_type_rejected(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_write",
+            {"project": "testproject", "path": "new.md", "content": "x", "operation": "create"},
+        )
+        assert "doc_type" in _text(result).lower()
 
     async def test_rejects_existing_file(self, git_vault: Path) -> None:
         mcp = create_server(vault_path=git_vault)
@@ -1615,6 +1667,49 @@ class TestDelegateTaskExplicitModel:
             await worker.call_tool("delegate_task", {"prompt": "test", "model": "openrouter-free"})
         )
         assert "explicit free" in result
+
+    @pytest.mark.asyncio
+    async def test_explicit_openrouter_paid(
+        self, worker: FastMCP, openrouter: OpenRouterClient,
+    ) -> None:
+        openrouter.generate = AsyncMock(  # type: ignore[method-assign]
+            return_value=ClientResponse(
+                text="explicit paid",
+                model="qwen/qwen3-coder",
+                tokens=50,
+                cost_usd=0.001,
+                latency_ms=300,
+            )
+        )
+        result = _text(
+            await worker.call_tool("delegate_task", {"prompt": "test", "model": "openrouter"})
+        )
+        assert "explicit paid" in result
+
+    @pytest.mark.asyncio
+    async def test_explicit_custom_model(
+        self, worker: FastMCP, openrouter: OpenRouterClient,
+    ) -> None:
+        openrouter.generate = AsyncMock(  # type: ignore[method-assign]
+            return_value=ClientResponse(
+                text="custom model output",
+                model="deepseek/deepseek-v3",
+                tokens=40,
+                cost_usd=0.0005,
+                latency_ms=250,
+            )
+        )
+        result = _text(
+            await worker.call_tool(
+                "delegate_task", {"prompt": "test", "model": "deepseek/deepseek-v3"},
+            )
+        )
+        assert "custom model output" in result
+
+    @pytest.mark.asyncio
+    async def test_empty_prompt_no_project_rejected(self, worker: FastMCP) -> None:
+        result = _text(await worker.call_tool("delegate_task", {}))
+        assert "required" in result.lower()
 
 
 # ── delegate_task: records to budget tracker ────────────────────────
@@ -2637,6 +2732,16 @@ class TestVaultValidate:
         ))
         assert "Unknown check" in result
         assert "frontmatter" in result
+
+    async def test_validation_empty_vault(self, tmp_path: Path) -> None:
+        """Validation with checks on vault with no projects returns clean."""
+        scope = tmp_path / "10_projects"
+        scope.mkdir()
+        mcp = create_server(vault_path=tmp_path)
+        result = _text(await mcp.call_tool(
+            "vault_health", {"checks": ["frontmatter"]},
+        ))
+        assert "no projects" in result.lower() or "0 issues" in result.lower()
 
     async def test_healthy_vault_no_errors(self, mock_vault: Path) -> None:
         """Well-formed vault produces no error-level issues."""

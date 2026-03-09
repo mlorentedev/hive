@@ -259,9 +259,13 @@ def create_server(
             "## When to use each tool\n\n"
             "- **Start of session:** Call `session_briefing(project)` to load "
             "tasks, lessons, git activity, and health in one call.\n"
+            "- **Browsing vault structure:** Use `vault_list` to discover "
+            "projects and navigate directories. Call `vault_query` to read "
+            "their content.\n"
             "- **Reading vault files:** Use `vault_query` instead of direct "
             "filesystem access. Supports section shortcuts (context, tasks, "
-            "roadmap, lessons) and arbitrary paths.\n"
+            "roadmap, lessons) and arbitrary paths. Use `scope:project` "
+            "syntax when project names are ambiguous across scopes.\n"
             "- **Finding information:** Use `vault_search` for keyword/regex "
             "lookup with filters. Add `ranked=True` for relevance-ranked "
             "results, or `since_days=N` for recent changes.\n"
@@ -269,12 +273,21 @@ def create_server(
             "architectural decision, or useful insight emerges during work. "
             "Use `capture_lesson(text=...)` for bulk extraction from large "
             "text blocks.\n"
+            "- **Writing to vault:** Use `vault_write` to create, append, or "
+            "replace files. Use `vault_patch` for surgical find-and-replace "
+            "edits.\n"
             "- **Offloading work:** Use `delegate_task` for summarization, "
             "boilerplate generation, or analysis. Use "
-            "`delegate_task(project=...)` to summarize vault files.\n"
+            "`delegate_task(project=...)` to summarize vault files. Best for "
+            "boilerplate and format conversion, not for architecture or "
+            "security decisions.\n"
+            "- **Checking workers:** Call `worker_status` before "
+            "`delegate_task` to verify budget and model availability.\n"
             "- **Checking vault health:** Call `vault_health` after modifying "
             "vault files or periodically to detect drift. Add "
             "`include_usage=True` for usage statistics.\n\n"
+            "Use `project='_meta'` to access cross-project content "
+            "(patterns, templates).\n"
             "Read-only tools are safe to call freely. "
             "Write tools auto-commit to git."
         ),
@@ -340,7 +353,7 @@ def create_server(
                 stale.append(f.relative_to(project_dir).as_posix())
         return stale
 
-    def _health_report_text() -> str:
+    def _health_report_text(filter_project: str = "") -> str:
         """Build health report text (shared by resource and tool)."""
         stale_threshold = date.today() - timedelta(days=stale_days)
         lines = ["# Vault Health Report", ""]
@@ -354,6 +367,8 @@ def create_server(
                 continue
             projects = sorted(d for d in scope_dir.iterdir() if d.is_dir())
             for project_dir in projects:
+                if filter_project and project_dir.name != filter_project:
+                    continue
                 found_any = True
                 md_files = list(project_dir.rglob("*.md"))
                 total_lines = 0
@@ -692,15 +707,15 @@ Total estimated savings: ~C tokens
         max_list_results = 500
         if pattern:
             files = sorted(f for f in target.rglob(pattern) if f.is_file())
-            for f in files[:max_list_results]:
-                rel_f = f.relative_to(target)
-                lines.append(f"- {rel_f}")
-            if len(lines) == 2:
+            if not files:
                 return _track(
                     "vault_list",
                     f"No files matching '{pattern}' in {project}/{path}.",
                     project,
                 )
+            for f in files[:max_list_results]:
+                rel_f = f.relative_to(target)
+                lines.append(f"- {rel_f}")
         else:
             dirs = sorted(d for d in target.iterdir() if d.is_dir())
             for d in dirs:
@@ -780,6 +795,11 @@ Total estimated savings: ~C tokens
             since_days: Show recent changes (0 = disabled). Default 0.
             project: Filter to this project (recent mode only).
         """
+        if since_days < 0:
+            return _track(
+                "vault_search", "since_days must be a positive number.",
+            )
+
         # ── Recent mode ──
         if since_days > 0:
             git_paths = set(_git_recent(resolved_path, since_days))
@@ -993,7 +1013,7 @@ Total estimated savings: ~C tokens
 
         if not checks:
             # Basic health report
-            parts.append(_health_report_text())
+            parts.append(_health_report_text(filter_project=project))
         else:
             # Validation mode
             active_checks = frozenset(checks) & all_checks
@@ -1676,7 +1696,7 @@ Total estimated savings: ~C tokens
                         "capture_lesson: failed to write '%s': %s",
                         l_title, msg,
                     )
-                    skipped.append(f"{l_title} (write error)")
+                    skipped.append(f"{l_title} (write error: {msg})")
 
             if written:
                 rel = (
@@ -1874,7 +1894,7 @@ Total estimated savings: ~C tokens
         Args:
             prompt: The task description or code to process.
             context: Optional system context for the model.
-            model: Routing — 'auto', 'ollama', 'openrouter-free', or a model ID.
+            model: 'auto', 'ollama', 'openrouter-free', 'openrouter' (paid), or model ID.
             max_tokens: Maximum tokens in the response.
             max_cost_per_request: Max USD. 0 = free models only.
             project: Project slug for vault summarization mode.
@@ -1952,26 +1972,36 @@ Total estimated savings: ~C tokens
             return _track("delegate_task", "Either prompt or project is required.")
 
         # ── Worker delegation ──
+        _tn = "delegate_task"
+
         # Explicit routing
         if model == "ollama":
             resp, err = await _try_worker(prompt, max_tokens, "ollama", context)
-            return _format_response(resp) if resp else f"{err}. {_REJECT_MSG}"
+            if resp:
+                return _track(_tn, _format_response(resp))
+            return _track(_tn, f"{err}. {_REJECT_MSG}")
         if model == "openrouter-free":
             resp, err = await _try_worker(prompt, max_tokens, "openrouter", context)
-            return _format_response(resp) if resp else f"{err}. {_REJECT_MSG}"
+            if resp:
+                return _track(_tn, _format_response(resp))
+            return _track(_tn, f"{err}. {_REJECT_MSG}")
         if model == "openrouter":
             if not budget.can_spend(settings.openrouter_budget, max_cost_per_request):
-                return f"Monthly budget exhausted. {_REJECT_MSG}"
+                return _track(_tn, f"Monthly budget exhausted. {_REJECT_MSG}")
             resp, err = await _try_worker(
                 prompt, max_tokens, "openrouter", context,
                 model=settings.openrouter_paid_model,
             )
-            return _format_response(resp) if resp else f"{err}. {_REJECT_MSG}"
+            if resp:
+                return _track(_tn, _format_response(resp))
+            return _track(_tn, f"{err}. {_REJECT_MSG}")
         if model != "auto":
             resp, err = await _try_worker(
                 prompt, max_tokens, "openrouter", context, model=model,
             )
-            return _format_response(resp) if resp else f"{err}. {_REJECT_MSG}"
+            if resp:
+                return _track(_tn, _format_response(resp))
+            return _track(_tn, f"{err}. {_REJECT_MSG}")
 
         # Auto routing: Ollama → OpenRouter free → OpenRouter paid → reject
         errors: list[str] = []
@@ -1980,7 +2010,7 @@ Total estimated savings: ~C tokens
         if await ollama.is_available():
             resp, err = await _try_worker(prompt, max_tokens, "ollama", context)
             if resp is not None:
-                return _format_response(resp)
+                return _track(_tn, _format_response(resp))
             errors.append(err)
         else:
             errors.append("Ollama: offline")
@@ -1988,7 +2018,7 @@ Total estimated savings: ~C tokens
         # Tier 2: OpenRouter free
         resp, err = await _try_worker(prompt, max_tokens, "openrouter", context)
         if resp is not None:
-            return _format_response(resp)
+            return _track(_tn, _format_response(resp))
         errors.append(err)
 
         # Tier 3: OpenRouter paid (only if max_cost > 0 and budget allows)
@@ -2002,12 +2032,12 @@ Total estimated savings: ~C tokens
                 model=settings.openrouter_paid_model,
             )
             if resp is not None:
-                return _format_response(resp)
+                return _track(_tn, _format_response(resp))
             errors.append(err)
 
         # All tiers exhausted
         reasons = "; ".join(errors)
-        return f"All workers unavailable. [{reasons}]. {_REJECT_MSG}"
+        return _track(_tn, f"All workers unavailable. [{reasons}]. {_REJECT_MSG}")
 
     @mcp.tool(annotations=_READ_ONLY)
     async def worker_status(include_models: bool = True) -> str:
@@ -2057,7 +2087,7 @@ Total estimated savings: ~C tokens
                     for m in models:
                         cost = "free" if m.is_free else f"${m.cost_per_million_input:.2f}/M in"
                         lines.append(f"- **{m.id}** — {m.name}, ctx: {m.context_length}, {cost}")
-                except (ConnectionError, RuntimeError) as exc:
+                except (ConnectionError, RuntimeError, TimeoutError) as exc:
                     lines.append(f"- Error fetching models: {exc}")
             else:
                 lines.append("- No API key configured")

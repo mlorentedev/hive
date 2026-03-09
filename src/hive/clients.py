@@ -214,7 +214,11 @@ class OpenRouterClient:
             msg = f"OpenRouter models error ({resp.status_code}): {resp.text[:200]}"
             raise RuntimeError(msg)
 
-        data = resp.json()
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            msg = f"OpenRouter returned invalid JSON: {exc}"
+            raise RuntimeError(msg) from exc
         models: list[ModelInfo] = []
         for m in data.get("data", []):
             pricing = m.get("pricing", {})
