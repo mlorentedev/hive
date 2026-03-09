@@ -33,7 +33,6 @@ from hive.usage import UsageTracker
 
 _log = logging.getLogger(__name__)
 
-_VALID_OPERATIONS = {"append", "replace"}
 _REJECT_MSG = "The host should handle this task directly."
 
 _READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
@@ -204,28 +203,6 @@ def _format_response(resp: ClientResponse) -> str:
     return f"{header}\n\n{resp.text}"
 
 
-def _build_delegation_prompt(
-    meta: str, body: str, line_count: int, max_summary_lines: int
-) -> str:
-    """Build a structured prompt for delegating summarization to the worker."""
-    parts = ["## Summarization Request", ""]
-    if meta:
-        parts.append(f"**Metadata:** {meta}")
-    parts.append(f"**Source length:** {line_count} lines")
-    parts.append(f"**Target length:** {max_summary_lines} lines")
-    parts.extend([
-        "",
-        "### Suggested `delegate_task` parameters",
-        f'- task: "Summarize the following document in at most {max_summary_lines} lines, '
-        'preserving key decisions and action items."',
-        "- max_tokens: 2000",
-        "",
-        "### Document body",
-        "",
-        body,
-    ])
-    return "\n".join(parts)
-
 
 def _score_file(match_count: int, fm: Frontmatter | None, today: date) -> float:
     """Score a file for smart search ranking."""
@@ -286,16 +263,18 @@ def create_server(
             "filesystem access. Supports section shortcuts (context, tasks, "
             "roadmap, lessons) and arbitrary paths.\n"
             "- **Finding information:** Use `vault_search` for keyword/regex "
-            "lookup with filters. Use `vault_smart_search` when you need "
-            "results ranked by relevance.\n"
+            "lookup with filters. Add `ranked=True` for relevance-ranked "
+            "results, or `since_days=N` for recent changes.\n"
             "- **Recording lessons:** Call `capture_lesson` when a bug fix, "
             "architectural decision, or useful insight emerges during work. "
-            "Use `extract_lessons` for bulk extraction from large text blocks.\n"
+            "Use `capture_lesson(text=...)` for bulk extraction from large "
+            "text blocks.\n"
             "- **Offloading work:** Use `delegate_task` for summarization, "
-            "boilerplate generation, or analysis that doesn't need the host's "
-            "full capability.\n"
-            "- **Checking vault health:** Call `vault_validate` after modifying "
-            "vault files or periodically to detect drift.\n\n"
+            "boilerplate generation, or analysis. Use "
+            "`delegate_task(project=...)` to summarize vault files.\n"
+            "- **Checking vault health:** Call `vault_health` after modifying "
+            "vault files or periodically to detect drift. Add "
+            "`include_usage=True` for usage statistics.\n\n"
             "Read-only tools are safe to call freely. "
             "Write tools auto-commit to git."
         ),
@@ -307,7 +286,7 @@ def create_server(
         """Log a tool call and return the result unchanged."""
         tracker.log_call(tool, project, len(result.splitlines()))
         if project and section:
-            is_write = tool in {"vault_update", "vault_create"}
+            is_write = tool == "vault_write"
             relevance.record_access(project, section, is_write=is_write)
         return result
 
@@ -353,7 +332,10 @@ def create_server(
                 continue
             created_date = parse_date(fm.created) if fm is not None else None
             if created_date is None:
-                created_date = date.fromtimestamp(f.stat().st_mtime)
+                try:
+                    created_date = date.fromtimestamp(f.stat().st_mtime)
+                except OSError:
+                    continue
             if created_date < threshold:
                 stale.append(f.relative_to(project_dir).as_posix())
         return stale
@@ -374,11 +356,11 @@ def create_server(
             for project_dir in projects:
                 found_any = True
                 md_files = list(project_dir.rglob("*.md"))
-                total_lines = sum(
-                    len(f.read_text(encoding="utf-8").splitlines())
-                    for f in md_files
-                    if _safe_read(f) is not None
-                )
+                total_lines = 0
+                for f in md_files:
+                    content = _safe_read(f)
+                    if content is not None:
+                        total_lines += len(content.splitlines())
                 stale_files = _count_stale(project_dir, stale_threshold)
                 missing = [
                     s for s, fname in SECTION_SHORTCUTS.items()
@@ -405,7 +387,11 @@ def create_server(
         """Read file text, returning None on error."""
         try:
             return f.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        except UnicodeDecodeError:
+            _log.debug("Skipping non-UTF-8 file: %s", f)
+            return None
+        except OSError as exc:
+            _log.warning("Cannot read file %s: %s", f, exc)
             return None
 
     # ── Resources ────────────────────────────────────────────────────────
@@ -481,7 +467,7 @@ def create_server(
 - Show drafts to the user for approval before writing
 
 ### Step 4 — Append to Vault
-- `vault_update(project="{project}", section="lessons", operation="append", content=<lessons>)`
+- `vault_write(project="{project}", section="lessons", operation="append", content=<lessons>)`
 - Never modify or rewrite existing lessons — append only
 
 ### Step 5 — Report
@@ -526,13 +512,13 @@ If the task is NOT delegatable, say so and handle it directly. Stop here.
 - If budget exhausted or no models available, report and stop
 
 ### Step 3 — Context Compression
-- `vault_summarize(paths=<relevant files>)` if the task needs vault context
+- `delegate_task(project=<slug>, path=<file>)` to summarize relevant vault files
 - Strip the task to its essential instruction — remove conversational context
 - Keep prompt under 2000 tokens
 
 ### Step 4 — Delegate
-- `list_models()` to see available models and pick the appropriate tier
-- `delegate_task(prompt=<compressed task>, task_type=<type>)`
+- `worker_status()` to see available models and pick the appropriate tier
+- `delegate_task(prompt=<compressed task>)`
 - One task per call — never batch
 
 ### Step 5 — Evaluate Result
@@ -590,8 +576,8 @@ Vault Sync Plan:
 **Wait for explicit user approval before proceeding.**
 
 ### Step 5 — Apply Updates
-- Context/tasks: `vault_update(operation="replace", ...)` for factual updates
-- Lessons: `vault_update(operation="append", ...)` for new entries only
+- Context/tasks: `vault_write(operation="replace", ...)` for factual updates
+- Lessons: `vault_write(operation="append", ...)` for new entries only
 - Never delete vault content without explicit user request
 
 ### Step 6 — Verify
@@ -604,7 +590,7 @@ Vault Sync Plan:
 - Use `replace` for context and tasks (factual state)
 - Use `append` for lessons (never modify existing)
 - All content in English
-- One vault_update call per section to minimize git commits"""
+- One vault_write call per section to minimize git commits"""
 
     @mcp.prompt
     def benchmark() -> str:
@@ -616,8 +602,8 @@ Vault Sync Plan:
 
 ### Step 1 — Inventory Tool Usage
 Scan this conversation for all hive MCP tool calls:
-- `vault_query` / `vault_search` / `vault_smart_search` / `vault_summarize` calls
-- `delegate_task` / `worker_status` / `list_models` calls
+- `vault_query` / `vault_search` calls
+- `delegate_task` / `worker_status` calls
 - Count each occurrence and note what was queried
 
 ### Step 2 — Estimate On-Demand Cost
@@ -665,9 +651,65 @@ Total estimated savings: ~C tokens
     # ── Tools ───────────────────────────────────────────────────────────
 
     @mcp.tool(annotations=_READ_ONLY)
-    def vault_list_projects() -> str:
-        """List all projects available in the Obsidian vault."""
-        return _track("vault_list_projects", _list_projects_text())
+    def vault_list(
+        project: str = "",
+        path: str = "",
+        pattern: str = "",
+    ) -> str:
+        """List vault projects, or files within a project.
+
+        When called without arguments, lists all available projects.
+        When called with a project, lists files in that project directory.
+
+        Args:
+            project: Project slug. Empty = list all projects.
+            path: Subdirectory within the project. Empty = project root.
+            pattern: Glob pattern to filter files (e.g. 'adr-*', '*.md').
+        """
+        if not project:
+            return _track("vault_list", _list_projects_text())
+
+        resolved = _resolve_project_dir(resolved_path, project, scopes)
+        if resolved is None:
+            return _track("vault_list",
+                          f"Project '{project}' not found in vault.", project)
+        project_dir, _ = resolved
+
+        target = project_dir / path if path else project_dir
+        boundary_error = _check_path_boundary(target, resolved_path)
+        if boundary_error:
+            return _track("vault_list", boundary_error, project)
+        if not target.is_dir():
+            return _track("vault_list",
+                          f"Path '{path}' not found in project '{project}'.",
+                          project)
+
+        lines: list[str] = [
+            f"# Files: {project}/{path}" if path else f"# Files: {project}",
+            "",
+        ]
+
+        max_list_results = 500
+        if pattern:
+            files = sorted(f for f in target.rglob(pattern) if f.is_file())
+            for f in files[:max_list_results]:
+                rel_f = f.relative_to(target)
+                lines.append(f"- {rel_f}")
+            if len(lines) == 2:
+                return _track(
+                    "vault_list",
+                    f"No files matching '{pattern}' in {project}/{path}.",
+                    project,
+                )
+        else:
+            dirs = sorted(d for d in target.iterdir() if d.is_dir())
+            for d in dirs:
+                lines.append(f"- {d.name}/")
+            files = sorted(f for f in target.iterdir() if f.is_file())
+            for f in files:
+                lines.append(f"- {f.name}")
+
+        return _track("vault_list", "\n".join(lines), project, path)
 
     @mcp.tool(annotations=_READ_ONLY)
     def vault_query(
@@ -709,36 +751,172 @@ Total estimated savings: ~C tokens
 
     @mcp.tool(annotations=_READ_ONLY)
     def vault_search(
-        query: str,
+        query: str = "",
         max_lines: int = 500,
         type_filter: str = "",
         status_filter: str = "",
         tag_filter: str = "",
         use_regex: bool = False,
+        ranked: bool = False,
+        max_results: int = 10,
+        since_days: int = 0,
+        project: str = "",
     ) -> str:
-        """Full-text search across the vault. Use for keyword lookup or filtered queries.
+        """Search the vault: full-text, ranked, or recent changes.
 
-        Prefer vault_smart_search when relevance ranking matters.
+        Default mode: flat full-text search across all vault files.
+        Ranked mode (ranked=True): results scored by relevance.
+        Recent mode (since_days>0): files changed in the last N days.
 
         Args:
-            query: Text to search for (case-insensitive). Supports regex when use_regex=True.
+            query: Text to search for (case-insensitive).
             max_lines: Maximum output lines. Default 500.
-            type_filter: Only include files whose frontmatter type matches (e.g. 'adr').
-            status_filter: Only include files whose frontmatter status matches (e.g. 'active').
-            tag_filter: Only include files that have this tag in their frontmatter tags list.
-            use_regex: Treat query as a regular expression. Default False (literal match).
+            type_filter: Only files whose frontmatter type matches.
+            status_filter: Only files whose frontmatter status matches.
+            tag_filter: Only files that have this frontmatter tag.
+            use_regex: Treat query as regex. Default False.
+            ranked: Score results by relevance. Default False.
+            max_results: Max files when ranked. Default 10.
+            since_days: Show recent changes (0 = disabled). Default 0.
+            project: Filter to this project (recent mode only).
         """
+        # ── Recent mode ──
+        if since_days > 0:
+            git_paths = set(_git_recent(resolved_path, since_days))
+            cutoff = date.today() - timedelta(days=since_days)
+            for md_file in resolved_path.rglob("*.md"):
+                content = _safe_read(md_file)
+                if content is None:
+                    continue
+                fm = parse_frontmatter(content)
+                if fm is None:
+                    continue
+                created = parse_date(fm.created)
+                if created is not None and created >= cutoff:
+                    git_paths.add(
+                        md_file.relative_to(resolved_path).as_posix(),
+                    )
+
+            if project:
+                resolved = _resolve_project_dir(
+                    resolved_path, project, scopes,
+                )
+                if resolved is not None:
+                    prefix = (
+                        resolved[0].relative_to(resolved_path).as_posix()
+                        + "/"
+                    )
+                    git_paths = {
+                        p for p in git_paths if p.startswith(prefix)
+                    }
+                else:
+                    git_paths = set()
+
+            if not git_paths:
+                return _track(
+                    "vault_search",
+                    f"No changes found in the last {since_days} days.",
+                    project,
+                )
+
+            lines: list[str] = [
+                f"# Recent Changes (last {since_days} days)", "",
+            ]
+            for rel_path in sorted(git_paths):
+                full = resolved_path / rel_path
+                if not full.exists():
+                    lines.append(f"- {rel_path} (deleted)")
+                    continue
+                try:
+                    content = full.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    lines.append(f"- {rel_path}")
+                    continue
+                fm = parse_frontmatter(content)
+                meta = _format_metadata(fm)
+                if meta:
+                    lines.append(f"- {rel_path} [{meta}]")
+                else:
+                    lines.append(f"- {rel_path}")
+
+            output = "\n".join(lines)
+            return _track(
+                "vault_search", _truncate(output, max_lines), project,
+            )
+
+        # ── Ranked mode ──
+        if ranked:
+            if not query:
+                return _track(
+                    "vault_search", "Query is required for ranked search.",
+                )
+            query_lower = query.lower()
+            today = date.today()
+            scored: list[tuple[float, str, str, list[str]]] = []
+
+            for md_file in sorted(resolved_path.rglob("*.md")):
+                content = _safe_read(md_file)
+                if content is None:
+                    continue
+                matching = [
+                    ln.strip()
+                    for ln in content.splitlines()
+                    if query_lower in ln.lower()
+                ]
+                if not matching:
+                    continue
+                fm = parse_frontmatter(content)
+                score = _score_file(len(matching), fm, today)
+                rel = md_file.relative_to(resolved_path).as_posix()
+                meta = _format_metadata(fm)
+                scored.append((score, rel, meta, matching))
+
+            if not scored:
+                return _track(
+                    "vault_search",
+                    f"No matches found for '{query}'.",
+                )
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            scored = scored[:max_results]
+
+            results: list[str] = [
+                f"# Ranked Search: '{query}'", "",
+            ]
+            for score, rel, meta, matching in scored:
+                meta_part = f" [{meta}]" if meta else ""
+                results.append(
+                    f"### {rel} (score: {score:.1f}){meta_part}",
+                )
+                for line in matching[:5]:
+                    results.append(f"  - {line}")
+
+            output = "\n".join(results)
+            return _track(
+                "vault_search", _truncate(output, max_lines),
+            )
+
+        # ── Standard search ──
+        if not query:
+            return _track(
+                "vault_search", "Query is required for search.",
+            )
+
         if use_regex:
             if len(query) > 200:
-                return _track("vault_search",
-                              "Regex pattern too long (max 200 chars).")
+                return _track(
+                    "vault_search",
+                    "Regex pattern too long (max 200 chars).",
+                )
             try:
                 pattern = re.compile(query, re.IGNORECASE)
             except re.error as exc:
-                return _track("vault_search",
-                              f"Invalid regex '{query}': {exc}")
+                return _track(
+                    "vault_search",
+                    f"Invalid regex '{query}': {exc}",
+                )
 
-        results: list[str] = []
+        flat_results: list[str] = []
         query_lower = query.lower()
         has_filters = bool(type_filter or status_filter or tag_filter)
 
@@ -761,324 +939,391 @@ Total estimated savings: ~C tokens
 
             if use_regex:
                 matching_lines = [
-                    line.strip() for line in content.splitlines() if pattern.search(line)
+                    line.strip()
+                    for line in content.splitlines()
+                    if pattern.search(line)
                 ]
             else:
                 matching_lines = [
-                    line.strip() for line in content.splitlines()
+                    line.strip()
+                    for line in content.splitlines()
                     if query_lower in line.lower()
                 ]
             if matching_lines:
-                rel = md_file.relative_to(resolved_path)
+                file_rel = md_file.relative_to(resolved_path)
                 meta_str = _format_metadata(fm)
                 meta = f" [{meta_str}]" if meta_str else ""
-                results.append(f"### {rel}{meta}")
+                flat_results.append(f"### {file_rel}{meta}")
                 for line in matching_lines[:5]:
-                    results.append(f"  - {line}")
+                    flat_results.append(f"  - {line}")
 
-        if not results:
-            return _track("vault_search", f"No matches found for '{query}'.")
+        if not flat_results:
+            return _track(
+                "vault_search", f"No matches found for '{query}'.",
+            )
 
-        output = f"# Search: '{query}'\n\n" + "\n".join(results)
+        output = f"# Search: '{query}'\n\n" + "\n".join(flat_results)
         return _track("vault_search", _truncate(output, max_lines))
-
-    @mcp.tool(annotations=_READ_ONLY)
-    def vault_health() -> str:
-        """Return health metrics for all vault projects."""
-        return _track("vault_health", _health_report_text())
 
     all_checks = frozenset({"frontmatter", "stale", "links"})
     wikilink_re = re.compile(r"\[\[([^\]|#]+?)(?:[|#][^\]]*?)?\]\]")
 
     @mcp.tool(annotations=_READ_ONLY)
-    def vault_validate(
+    def vault_health(
         project: str = "",
         checks: list[str] = [],  # noqa: B006
         max_issues: int = 50,
+        include_usage: bool = False,
+        usage_days: int = 30,
     ) -> str:
-        """Detect vault drift — call after bulk edits or periodically for maintenance.
+        """Return vault health metrics, validation, and optional usage analytics.
 
-        Checks for: missing/incomplete frontmatter, stale active files,
-        and broken wikilinks. Returns a list of issues found.
+        Without parameters, returns a health summary for all projects.
+        When checks are specified, runs drift detection (frontmatter, stale, links).
+        When include_usage is True, appends tool usage analytics.
 
         Args:
             project: Project slug to validate. Empty = all projects.
-            checks: Which checks to run. Empty = all. Options: frontmatter, stale, links.
-            max_issues: Maximum issues to report. Default 50.
-        """
-        active_checks = frozenset(checks) & all_checks if checks else all_checks
+            checks: Validation checks to run. Empty = health summary only. Options: frontmatter, stale, links.
+            max_issues: Maximum validation issues to report. Default 50.
+            include_usage: Append vault tool usage analytics. Default False.
+            usage_days: Usage look-back window in days. Default 30.
+        """  # noqa: E501
+        parts: list[str] = []
 
-        # Collect project dirs to scan
-        project_dirs: list[tuple[Path, str]] = []
-        if project:
-            resolved = _resolve_project_dir(resolved_path, project, scopes)
-            if resolved is None:
-                return _track("vault_validate",
-                              f"Project '{project}' not found in vault.", project)
-            project_dirs.append(resolved)
+        if not checks:
+            # Basic health report
+            parts.append(_health_report_text())
         else:
-            for scope_name, dir_name in scopes.items():
-                if scope_name == "meta":
-                    continue
-                scope_dir = resolved_path / dir_name
-                if not scope_dir.is_dir():
-                    continue
-                for d in sorted(scope_dir.iterdir()):
-                    if d.is_dir():
-                        project_dirs.append((d, scope_name))
+            # Validation mode
+            active_checks = frozenset(checks) & all_checks
+            unknown = frozenset(checks) - all_checks
+            if unknown:
+                valid_names = ", ".join(sorted(all_checks))
+                return _track(
+                    "vault_health",
+                    f"Unknown check(s): {', '.join(sorted(unknown))}. "
+                    f"Valid: {valid_names}",
+                    project,
+                )
 
-        if not project_dirs:
-            return _track("vault_validate", "No projects found in vault.")
+            project_dirs: list[tuple[Path, str]] = []
+            if project:
+                resolved = _resolve_project_dir(
+                    resolved_path, project, scopes,
+                )
+                if resolved is None:
+                    return _track(
+                        "vault_health",
+                        f"Project '{project}' not found in vault.",
+                        project,
+                    )
+                project_dirs.append(resolved)
+            else:
+                for scope_name, dir_name in scopes.items():
+                    if scope_name == "meta":
+                        continue
+                    scope_dir = resolved_path / dir_name
+                    if not scope_dir.is_dir():
+                        continue
+                    for d in sorted(scope_dir.iterdir()):
+                        if d.is_dir():
+                            project_dirs.append((d, scope_name))
 
-        # Build index of all known file stems for wikilink resolution
-        all_stems: set[str] = set()
-        if "links" in active_checks:
-            for pd, _ in project_dirs:
-                for f in pd.rglob("*.md"):
-                    all_stems.add(f.stem)
+            if not project_dirs:
+                return _track(
+                    "vault_health", "No projects found in vault.",
+                )
 
-        issues: list[str] = []
-        stale_threshold = date.today() - timedelta(days=stale_days)
+            all_stems: set[str] = set()
+            if "links" in active_checks:
+                for pd, _ in project_dirs:
+                    for f in pd.rglob("*.md"):
+                        all_stems.add(f.stem)
 
-        for project_dir, _scope_name in project_dirs:
-            proj_name = project_dir.name
-            for f in sorted(project_dir.rglob("*.md")):
-                if len(issues) >= max_issues:
-                    break
-                rel = f.relative_to(project_dir).as_posix()
-                content = _safe_read(f)
-                if content is None:
-                    continue
+            issues: list[str] = []
+            stale_threshold = date.today() - timedelta(days=stale_days)
 
-                fm = parse_frontmatter(content)
-
-                # ── frontmatter checks ──
-                if "frontmatter" in active_checks:
-                    if fm is None:
+            for project_dir, _scope_name in project_dirs:
+                proj_name = project_dir.name
+                for f in sorted(project_dir.rglob("*.md")):
+                    if len(issues) >= max_issues:
+                        break
+                    rel = f.relative_to(project_dir).as_posix()
+                    content = _safe_read(f)
+                    if content is None:
                         issues.append(
                             f"[error] {proj_name}/{rel}: "
-                            "Missing or invalid frontmatter"
+                            "File unreadable (I/O or encoding error)",
                         )
                         continue
-                    missing = {"id", "type", "status"} - fm.raw.keys()
-                    if missing:
-                        issues.append(
-                            f"[error] {proj_name}/{rel}: "
-                            f"Frontmatter missing fields: "
-                            f"{', '.join(sorted(missing))}"
-                        )
-                    if fm.created and parse_date(fm.created) is None:
-                        issues.append(
-                            f"[warning] {proj_name}/{rel}: "
-                            f"Unparseable date: '{fm.created}'"
-                        )
 
-                # ── stale checks ──
-                if (
-                    "stale" in active_checks
-                    and fm is not None
-                    and fm.status not in _TERMINAL_STATUSES
-                ):
-                        created_date = parse_date(fm.created) if fm.created else None
-                        if created_date is None:
-                            try:
-                                created_date = date.fromtimestamp(f.stat().st_mtime)
-                            except OSError:
-                                continue
-                        if created_date < stale_threshold:
+                    fm = parse_frontmatter(content)
+
+                    if "frontmatter" in active_checks:
+                        if fm is None:
+                            issues.append(
+                                f"[error] {proj_name}/{rel}: "
+                                "Missing or invalid frontmatter"
+                            )
+                            continue
+                        missing = {"id", "type", "status"} - fm.raw.keys()
+                        if missing:
+                            issues.append(
+                                f"[error] {proj_name}/{rel}: "
+                                f"Frontmatter missing fields: "
+                                f"{', '.join(sorted(missing))}"
+                            )
+                        if fm.created and parse_date(fm.created) is None:
                             issues.append(
                                 f"[warning] {proj_name}/{rel}: "
-                                f"Stale (active since {created_date.isoformat()}, "
-                                f">{stale_days}d)"
+                                f"Unparseable date: '{fm.created}'"
                             )
 
-                # ── link checks ──
-                if "links" in active_checks:
-                    body = extract_body(content)
-                    for m in wikilink_re.finditer(body):
-                        target = m.group(1).strip()
-                        if target not in all_stems:
-                            issues.append(
-                                f"[warning] {proj_name}/{rel}: "
-                                f"Broken link [[{target}]]"
+                    if (
+                        "stale" in active_checks
+                        and fm is not None
+                        and fm.status not in _TERMINAL_STATUSES
+                    ):
+                            created_date = (
+                                parse_date(fm.created)
+                                if fm.created
+                                else None
                             )
-                            if len(issues) >= max_issues:
-                                break
+                            if created_date is None:
+                                try:
+                                    created_date = date.fromtimestamp(
+                                        f.stat().st_mtime,
+                                    )
+                                except OSError:
+                                    continue
+                            if created_date < stale_threshold:
+                                issues.append(
+                                    f"[warning] {proj_name}/{rel}: "
+                                    f"Stale (active since "
+                                    f"{created_date.isoformat()}, "
+                                    f">{stale_days}d)"
+                                )
 
-            if len(issues) >= max_issues:
-                break
+                    if "links" in active_checks:
+                        body = extract_body(content)
+                        for m in wikilink_re.finditer(body):
+                            target = m.group(1).strip()
+                            if target not in all_stems:
+                                issues.append(
+                                    f"[warning] {proj_name}/{rel}: "
+                                    f"Broken link [[{target}]]"
+                                )
+                                if len(issues) >= max_issues:
+                                    break
 
-        # Build output
-        if not issues:
-            scope_label = f" for '{project}'" if project else ""
-            return _track("vault_validate",
-                          f"Vault clean{scope_label}. "
-                          f"0 issues found ({', '.join(sorted(active_checks))}).")
+                if len(issues) >= max_issues:
+                    break
 
-        errors = sum(1 for i in issues if i.startswith("[error]"))
-        warnings = sum(1 for i in issues if i.startswith("[warning]"))
-        header = f"Found {len(issues)} issues ({errors} errors, {warnings} warnings)"
-        if len(issues) >= max_issues:
-            header += f" — truncated at {max_issues}, more may exist"
-        lines = [header, ""]
-        lines.extend(issues)
-        return _track("vault_validate", "\n".join(lines), project)
+            if not issues:
+                scope_label = f" for '{project}'" if project else ""
+                parts.append(
+                    f"Vault clean{scope_label}. "
+                    f"0 issues found "
+                    f"({', '.join(sorted(active_checks))})."
+                )
+            else:
+                errors = sum(
+                    1 for i in issues if i.startswith("[error]")
+                )
+                warnings = sum(
+                    1 for i in issues if i.startswith("[warning]")
+                )
+                header = (
+                    f"Found {len(issues)} issues "
+                    f"({errors} errors, {warnings} warnings)"
+                )
+                if len(issues) >= max_issues:
+                    header += (
+                        f" — truncated at {max_issues}, more may exist"
+                    )
+                validate_lines = [header, ""]
+                validate_lines.extend(issues)
+                parts.append("\n".join(validate_lines))
+
+        if include_usage:
+            stats = tracker.stats(usage_days)
+            if stats["total_calls"] == 0:
+                parts.append(
+                    f"\nNo vault tool calls recorded "
+                    f"in the last {usage_days} days."
+                )
+            else:
+                usage_parts: list[str] = [
+                    f"\n# Vault Usage (last {usage_days} days)",
+                    "",
+                    f"- Total calls: {stats['total_calls']}",
+                    f"- Total response lines: "
+                    f"{stats['total_response_lines']}",
+                    f"- Estimated tokens served: "
+                    f"~{stats['total_response_lines'] * 10}",
+                    "",
+                ]
+                if stats["by_tool"]:
+                    usage_parts.append("## By Tool")
+                    for tool_name, count in stats["by_tool"].items():
+                        usage_parts.append(f"- {tool_name}: {count} calls")
+                    usage_parts.append("")
+                if stats["by_project"]:
+                    usage_parts.append("## By Project")
+                    for proj, count in stats["by_project"].items():
+                        usage_parts.append(f"- {proj}: {count} calls")
+                parts.append("\n".join(usage_parts))
+
+        return _track("vault_health", "\n".join(parts), project)
+
+    _write_operations = frozenset({"append", "replace", "create"})
 
     @mcp.tool(annotations=_WRITE)
-    def vault_update(
+    def vault_write(
         project: str,
-        section: str,
-        operation: str,
         content: str,
+        operation: str = "append",
+        section: str = "",
+        path: str = "",
+        doc_type: str = "",
     ) -> str:
-        """Update a vault project section with auto git commit.
+        """Write to the vault: append, replace a section, or create a new file.
+
+        Modes:
+        - append/replace: Update a project section. Requires section.
+        - create: Create a new file with auto-generated frontmatter. Requires path and doc_type.
 
         Args:
-            project: Project slug (directory under 10_projects/).
-            section: Section shortcut (context, tasks, roadmap, lessons).
-            operation: 'append' to add content at end, 'replace' to overwrite file.
-            content: The markdown content to write.
-        """
-        if operation not in _VALID_OPERATIONS:
-            return _track("vault_update", (
+            project: Project slug or '_meta' for cross-project content.
+            content: Markdown content to write (body only for create mode).
+            operation: 'append', 'replace', or 'create'. Default 'append'.
+            section: Section shortcut (context, tasks, roadmap, lessons). For append/replace.
+            path: Relative path for new file. For create mode.
+            doc_type: Document type for frontmatter. For create mode.
+        """  # noqa: E501
+        if operation not in _write_operations:
+            return _track("vault_write", (
                 f"Invalid operation '{operation}'. "
-                f"Valid operations: {', '.join(sorted(_VALID_OPERATIONS))}"
+                f"Valid: {', '.join(sorted(_write_operations))}"
             ), project)
 
         resolved = _resolve_project_dir(resolved_path, project, scopes)
         if resolved is None:
-            return _track("vault_update",
-                          f"Project '{project}' not found in vault.", project)
+            return _track(
+                "vault_write",
+                f"Project '{project}' not found in vault.",
+                project,
+            )
         project_dir, _ = resolved
+
+        # ── Create mode ──
+        if operation == "create":
+            if not path:
+                return _track(
+                    "vault_write",
+                    "Path is required for create operation.",
+                    project,
+                )
+            if not doc_type:
+                return _track(
+                    "vault_write",
+                    "doc_type is required for create operation.",
+                    project,
+                )
+
+            filepath = project_dir / path
+            boundary_error = _check_path_boundary(filepath, resolved_path)
+            if boundary_error:
+                return _track("vault_write", boundary_error, project)
+            if filepath.exists():
+                return _track(
+                    "vault_write",
+                    f"File already exists: {path}. "
+                    "Use vault_write(operation='replace') to modify.",
+                    project,
+                )
+
+            frontmatter = _make_frontmatter(filepath.stem, doc_type)
+
+            try:
+                filepath.parent.mkdir(parents=True, exist_ok=True)
+                filepath.write_text(
+                    frontmatter + content, encoding="utf-8",
+                )
+            except OSError as exc:
+                return _track(
+                    "vault_write", f"File I/O error: {exc}", project,
+                )
+
+            rel = filepath.relative_to(resolved_path)
+            display = "00_meta" if project == "_meta" else project
+            _git_commit(
+                resolved_path, rel,
+                f"vault: create {display}/{path}",
+            )
+
+            return _track(
+                "vault_write",
+                f"Created {project}/{path} (type: {doc_type}).",
+                project, path,
+            )
+
+        # ── Append / Replace mode ──
+        if not section:
+            return _track(
+                "vault_write",
+                "Section is required for append/replace operations.",
+                project,
+            )
 
         filename = SECTION_SHORTCUTS.get(section)
         if filename is None:
             available = ", ".join(SECTION_SHORTCUTS)
-            return _track("vault_update",
-                          f"Section '{section}' not found. Available: {available}", project)
+            return _track(
+                "vault_write",
+                f"Section '{section}' not found. Available: {available}",
+                project,
+            )
 
         filepath = project_dir / filename
 
         if operation == "replace":
             error = validate_frontmatter(content)
             if error:
-                return _track("vault_update",
-                              f"Frontmatter validation failed: {error}", project)
+                return _track(
+                    "vault_write",
+                    f"Frontmatter validation failed: {error}",
+                    project,
+                )
 
         try:
             if operation == "append":
-                existing = filepath.read_text(encoding="utf-8") if filepath.exists() else ""
-                filepath.write_text(existing + content, encoding="utf-8")
+                existing = (
+                    filepath.read_text(encoding="utf-8")
+                    if filepath.exists()
+                    else ""
+                )
+                filepath.write_text(
+                    existing + content, encoding="utf-8",
+                )
             else:
                 filepath.write_text(content, encoding="utf-8")
         except OSError as exc:
-            return _track("vault_update",
-                          f"File I/O error: {exc}", project)
+            return _track(
+                "vault_write", f"File I/O error: {exc}", project,
+            )
 
         rel = filepath.relative_to(resolved_path)
-        _git_commit(resolved_path, rel, f"vault: update {project}/{section}")
+        _git_commit(
+            resolved_path, rel, f"vault: update {project}/{section}",
+        )
 
-        return _track("vault_update",
-                       f"Updated {project}/{section} ({operation}).",
-                       project, section)
-
-    @mcp.tool(annotations=_WRITE)
-    def vault_create(
-        project: str,
-        path: str,
-        content: str,
-        doc_type: str,
-    ) -> str:
-        """Create a new file in the vault with auto-generated frontmatter.
-
-        Args:
-            project: Project slug or '_meta' for cross-project content.
-            path: Relative path for the new file (e.g. '30-architecture/adr-002.md').
-            content: Markdown body (frontmatter will be auto-generated).
-            doc_type: Document type for frontmatter (adr, lesson, pattern, troubleshooting, etc.).
-        """
-        resolved = _resolve_project_dir(resolved_path, project, scopes)
-        if resolved is None:
-            return _track("vault_create",
-                          f"Project '{project}' not found in vault.", project)
-        project_dir, _ = resolved
-
-        filepath = project_dir / path
-        boundary_error = _check_path_boundary(filepath, resolved_path)
-        if boundary_error:
-            return _track("vault_create", boundary_error, project)
-        if filepath.exists():
-            return _track("vault_create",
-                          f"File already exists: {path}. Use vault_update to modify it.",
-                          project)
-
-        frontmatter = _make_frontmatter(filepath.stem, doc_type)
-
-        try:
-            filepath.parent.mkdir(parents=True, exist_ok=True)
-            filepath.write_text(frontmatter + content, encoding="utf-8")
-        except OSError as exc:
-            return _track("vault_create",
-                          f"File I/O error: {exc}", project)
-
-        rel = filepath.relative_to(resolved_path)
-        display_project = "00_meta" if project == "_meta" else project
-        _git_commit(resolved_path, rel, f"vault: create {display_project}/{path}")
-
-        return _track("vault_create",
-                       f"Created {project}/{path} (type: {doc_type}).",
-                       project, path)
-
-    @mcp.tool(annotations=_READ_ONLY)
-    def vault_list_files(
-        project: str,
-        path: str = "",
-        pattern: str = "",
-    ) -> str:
-        """List files and directories in a vault project.
-
-        Args:
-            project: Project slug or '_meta' for cross-project content.
-            path: Subdirectory to list (relative to project root). Empty = project root.
-            pattern: Glob pattern to filter files (e.g. 'adr-*', '*.md'). Empty = all.
-        """
-        resolved = _resolve_project_dir(resolved_path, project, scopes)
-        if resolved is None:
-            return _track("vault_list_files",
-                          f"Project '{project}' not found in vault.", project)
-        project_dir, _ = resolved
-
-        target = project_dir / path if path else project_dir
-        boundary_error = _check_path_boundary(target, resolved_path)
-        if boundary_error:
-            return _track("vault_list_files", boundary_error, project)
-        if not target.is_dir():
-            return _track("vault_list_files",
-                          f"Path '{path}' not found in project '{project}'.", project)
-
-        lines: list[str] = [f"# Files: {project}/{path}" if path else f"# Files: {project}", ""]
-
-        max_list_results = 500
-        if pattern:
-            # Recursive glob for pattern matching
-            files = sorted(f for f in target.rglob(pattern) if f.is_file())
-            for f in files[:max_list_results]:
-                rel_f = f.relative_to(target)
-                lines.append(f"- {rel_f}")
-            if len(lines) == 2:
-                return _track("vault_list_files",
-                              f"No files matching '{pattern}' in {project}/{path}.",
-                              project)
-        else:
-            # List directories first, then files
-            dirs = sorted(d for d in target.iterdir() if d.is_dir())
-            for d in dirs:
-                lines.append(f"- {d.name}/")
-            files = sorted(f for f in target.iterdir() if f.is_file())
-            for f in files:
-                lines.append(f"- {f.name}")
-
-        return _track("vault_list_files", "\n".join(lines), project, path)
+        return _track(
+            "vault_write",
+            f"Updated {project}/{section} ({operation}).",
+            project, section,
+        )
 
     @mcp.tool(annotations=_WRITE)
     def vault_patch(
@@ -1252,57 +1497,15 @@ Total estimated savings: ~C tokens
 
         return "written", f"Lesson captured: '{title}' → {project}/90-lessons.md"
 
-    @mcp.tool(annotations=_WRITE)
-    def capture_lesson(
-        project: str,
-        title: str,
-        context: str,
-        problem: str,
-        solution: str,
-        tags: list[str] = [],  # noqa: B006
-    ) -> str:
-        """Capture a lesson when a bug fix, decision, or insight worth preserving emerges.
-
-        Appends a structured lesson to the project's 90-lessons.md file.
-        Deduplicates by title to avoid recording the same lesson twice.
-
-        Args:
-            project: Project slug (directory under 10_projects/).
-            title: Short descriptive title for the lesson.
-            context: What you were doing when this came up.
-            problem: What went wrong or what decision was needed.
-            solution: What fixed it or what was decided.
-            tags: Optional list of tags (e.g. ["python", "testing"]).
-        """
-        resolved = _resolve_project_dir(resolved_path, project, scopes)
-        if resolved is None:
-            return _track("capture_lesson",
-                          f"Project '{project}' not found in vault.", project)
-        project_dir, _ = resolved
-
-        status, msg = _write_lesson(project_dir, project, title, context, problem, solution, tags)
-        if status == "error":
-            return _track("capture_lesson", msg, project)
-        if status == "skipped":
-            return _track("capture_lesson", msg, project, "lessons")
-
-        rel = (project_dir / "90-lessons.md").relative_to(resolved_path)
-        _git_commit(resolved_path, rel, f"vault: capture_lesson {project} — {title}")
-
-        return _track("capture_lesson", msg, project, "lessons")
-
     def _parse_lessons_json(raw: str) -> list[dict[str, object]]:
         """Parse JSON from worker response, stripping markdown fences."""
         text = raw.strip()
-        # Strip markdown code fences
         if text.startswith("```"):
             lines = text.splitlines()
-            # Remove first line (```json) and last line (```)
             inner = "\n".join(
                 ln for ln in lines[1:] if not ln.strip().startswith("```")
             )
             text = inner.strip()
-        # Fallback: extract first [...] block
         if not text.startswith("["):
             match = re.search(r"\[.*\]", text, re.DOTALL)
             if match:
@@ -1329,227 +1532,204 @@ Total estimated savings: ~C tokens
     max_extract_input = 8000  # chars, safe for any worker model
 
     @mcp.tool(annotations=_WRITE)
-    async def extract_lessons(
+    async def capture_lesson(
         project: str,
-        text: str,
+        title: str = "",
+        context: str = "",
+        problem: str = "",
+        solution: str = "",
+        tags: list[str] = [],  # noqa: B006
+        text: str = "",
         min_confidence: float = 0.7,
         max_lessons: int = 5,
     ) -> str:
-        """Batch-extract lessons from large text (e.g. session transcripts) via worker.
+        """Capture lessons: inline (structured fields) or batch (raw text via worker).
 
-        Sends text to a cheaper model (Ollama/OpenRouter) which extracts
-        structured lessons, then writes them to the project's 90-lessons.md.
+        Inline mode (default): provide title, context, problem, solution.
+        Batch mode: provide text to extract lessons automatically via worker.
 
         Args:
             project: Project slug (directory under 10_projects/).
-            text: Raw text to extract lessons from (session notes, debug logs, etc.).
-            min_confidence: Minimum confidence threshold (0.0-1.0). Default 0.7.
-            max_lessons: Maximum lessons to extract. Default 5.
+            title: Short descriptive title (inline mode).
+            context: What you were doing (inline mode).
+            problem: What went wrong or what decision was needed (inline mode).
+            solution: What fixed it or what was decided (inline mode).
+            tags: Optional tags (e.g. ["python", "testing"]).
+            text: Raw text to extract lessons from (batch mode).
+            min_confidence: Minimum confidence for batch extraction. Default 0.7.
+            max_lessons: Maximum lessons to extract in batch mode. Default 5.
         """
         resolved = _resolve_project_dir(resolved_path, project, scopes)
         if resolved is None:
-            return _track("extract_lessons",
-                          f"Project '{project}' not found in vault.", project)
+            return _track(
+                "capture_lesson",
+                f"Project '{project}' not found in vault.",
+                project,
+            )
         project_dir, _ = resolved
 
-        # Truncate input to safe length
-        truncated = text[:max_extract_input]
-        # Escape braces so str.format() doesn't choke on user code/JSON
-        safe_text = truncated.replace("{", "{{").replace("}", "}}")
-        prompt = extract_prompt.format(
-            max_lessons=max_lessons,
-            min_confidence=min_confidence,
-            text=safe_text,
+        # ── Batch mode (worker extraction) ──
+        if text:
+            truncated = text[:max_extract_input]
+            safe_text = truncated.replace("{", "{{").replace("}", "}}")
+            prompt = extract_prompt.format(
+                max_lessons=max_lessons,
+                min_confidence=min_confidence,
+                text=safe_text,
+            )
+
+            errors: list[str] = []
+            resp: ClientResponse | None = None
+
+            if await ollama.is_available():
+                resp, err = await _try_worker(prompt, 2000, "ollama")
+                if resp is None:
+                    errors.append(err)
+            else:
+                errors.append("Ollama: offline")
+
+            if resp is None:
+                resp, err = await _try_worker(
+                    prompt, 2000, "openrouter",
+                )
+                if resp is None:
+                    errors.append(err)
+
+            if resp is None:
+                reasons = (
+                    "; ".join(errors)
+                    if errors
+                    else "no workers configured"
+                )
+                return _track(
+                    "capture_lesson",
+                    f"All workers unavailable [{reasons}]. "
+                    "Cannot extract lessons without a worker model.",
+                    project,
+                )
+
+            try:
+                lessons_raw = _parse_lessons_json(resp.text)
+            except (json.JSONDecodeError, ValueError):
+                snippet = resp.text[:200]
+                return _track(
+                    "capture_lesson",
+                    f"Could not parse worker response as JSON: "
+                    f"{snippet}",
+                    project,
+                )
+
+            if not isinstance(lessons_raw, list):
+                return _track(
+                    "capture_lesson",
+                    "Worker returned non-array JSON.",
+                    project,
+                )
+
+            if not lessons_raw:
+                return _track(
+                    "capture_lesson",
+                    "No lessons found in text.",
+                    project,
+                )
+
+            written: list[str] = []
+            skipped: list[str] = []
+            for lesson in lessons_raw[:max_lessons]:
+                if not isinstance(lesson, dict):
+                    continue
+                raw_title = str(lesson.get("title", "")).strip()
+                l_title = raw_title.replace("\n", " ").replace("\r", " ")
+                if not l_title:
+                    continue
+                try:
+                    confidence = float(
+                        str(lesson.get("confidence", 0.5)),
+                    )
+                except (ValueError, TypeError):
+                    confidence = 0.5
+                if confidence < min_confidence:
+                    skipped.append(
+                        f"{l_title} (confidence {confidence:.1f})",
+                    )
+                    continue
+
+                l_ctx = str(lesson.get("context", "")).replace("\n", " ").replace("\r", " ")
+                l_prob = str(lesson.get("problem", "")).replace("\n", " ").replace("\r", " ")
+                l_sol = str(lesson.get("solution", "")).replace("\n", " ").replace("\r", " ")
+                raw_tags = lesson.get("tags", [])
+                l_tags = [
+                    str(t).replace("\n", " ").replace("\r", " ")
+                    for t in raw_tags
+                ] if isinstance(raw_tags, list) else []
+
+                status, msg = _write_lesson(
+                    project_dir, project,
+                    l_title, l_ctx, l_prob, l_sol, l_tags,
+                )
+                if status == "written":
+                    written.append(l_title)
+                elif status == "skipped":
+                    skipped.append(f"{l_title} (duplicate)")
+                elif status == "error":
+                    _log.warning(
+                        "capture_lesson: failed to write '%s': %s",
+                        l_title, msg,
+                    )
+                    skipped.append(f"{l_title} (write error)")
+
+            if written:
+                rel = (
+                    project_dir / "90-lessons.md"
+                ).relative_to(resolved_path)
+                _git_commit(
+                    resolved_path, rel,
+                    f"vault: capture_lesson {project} "
+                    f"— {len(written)} lessons",
+                )
+
+            parts: list[str] = []
+            if written:
+                titles = ", ".join(written)
+                parts.append(
+                    f"Extracted {len(written)} lessons: {titles}",
+                )
+            if skipped:
+                skip_details = ", ".join(skipped)
+                parts.append(f"Skipped {len(skipped)}: {skip_details}")
+            if not written and not skipped:
+                parts.append("No lessons found in text.")
+
+            summary = ". ".join(parts) + "."
+            return _track(
+                "capture_lesson", summary, project, "lessons",
+            )
+
+        # ── Inline mode ──
+        if not title:
+            return _track(
+                "capture_lesson",
+                "Title is required for inline mode. "
+                "Provide text for batch extraction.",
+                project,
+            )
+
+        status, msg = _write_lesson(
+            project_dir, project,
+            title, context, problem, solution, tags,
+        )
+        if status == "error":
+            return _track("capture_lesson", msg, project)
+        if status == "skipped":
+            return _track("capture_lesson", msg, project, "lessons")
+
+        rel = (project_dir / "90-lessons.md").relative_to(resolved_path)
+        _git_commit(
+            resolved_path, rel,
+            f"vault: capture_lesson {project} — {title}",
         )
 
-        # Send to worker via auto-routing
-        errors: list[str] = []
-        resp: ClientResponse | None = None
-
-        if await ollama.is_available():
-            resp, err = await _try_worker(prompt, 2000, "ollama")
-            if resp is None:
-                errors.append(err)
-        else:
-            errors.append("Ollama: offline")
-
-        if resp is None:
-            resp, err = await _try_worker(prompt, 2000, "openrouter")
-            if resp is None:
-                errors.append(err)
-
-        if resp is None:
-            reasons = "; ".join(errors) if errors else "no workers configured"
-            return _track("extract_lessons",
-                          f"All workers unavailable [{reasons}]. "
-                          "Cannot extract lessons without a worker model.",
-                          project)
-
-        # Parse worker response
-        try:
-            lessons_raw = _parse_lessons_json(resp.text)
-        except (json.JSONDecodeError, ValueError):
-            snippet = resp.text[:200]
-            return _track("extract_lessons",
-                          f"Could not parse worker response as JSON: {snippet}",
-                          project)
-
-        if not isinstance(lessons_raw, list):
-            return _track("extract_lessons",
-                          "Worker returned non-array JSON.", project)
-
-        if not lessons_raw:
-            return _track("extract_lessons", "No lessons found in text.", project)
-
-        # Filter, validate, and write
-        written: list[str] = []
-        skipped: list[str] = []
-        for lesson in lessons_raw[:max_lessons]:
-            if not isinstance(lesson, dict):
-                continue
-            raw_title = str(lesson.get("title", "")).strip()
-            title = raw_title.replace("\n", " ").replace("\r", " ")
-            if not title:
-                continue
-            try:
-                confidence = float(str(lesson.get("confidence", 0.5)))
-            except (ValueError, TypeError):
-                confidence = 0.5
-            if confidence < min_confidence:
-                skipped.append(f"{title} (confidence {confidence:.1f})")
-                continue
-
-            l_context = str(lesson.get("context", "")).replace("\n", " ").replace("\r", " ")
-            l_problem = str(lesson.get("problem", "")).replace("\n", " ").replace("\r", " ")
-            l_solution = str(lesson.get("solution", "")).replace("\n", " ").replace("\r", " ")
-            raw_tags = lesson.get("tags", [])
-            l_tags = [
-                str(t).replace("\n", " ").replace("\r", " ")
-                for t in raw_tags
-            ] if isinstance(raw_tags, list) else []
-
-            status, msg = _write_lesson(
-                project_dir, project, title, l_context, l_problem, l_solution, l_tags,
-            )
-            if status == "written":
-                written.append(title)
-            elif status == "skipped":
-                skipped.append(f"{title} (duplicate)")
-            elif status == "error":
-                _log.warning("extract_lessons: failed to write '%s': %s", title, msg)
-                skipped.append(f"{title} (write error)")
-
-        # Single git commit for all lessons
-        if written:
-            rel = (project_dir / "90-lessons.md").relative_to(resolved_path)
-            _git_commit(resolved_path, rel,
-                        f"vault: extract_lessons {project} — {len(written)} lessons")
-
-        # Build summary
-        parts: list[str] = []
-        if written:
-            titles = ", ".join(written)
-            parts.append(f"Extracted {len(written)} lessons: {titles}")
-        if skipped:
-            skip_details = ", ".join(skipped)
-            parts.append(f"Skipped {len(skipped)}: {skip_details}")
-        if not written and not skipped:
-            parts.append("No lessons found in text.")
-
-        summary = ". ".join(parts) + "."
-        return _track("extract_lessons", summary, project, "lessons")
-
-    @mcp.tool(annotations=_READ_ONLY)
-    def vault_summarize(
-        project: str,
-        section: str = "context",
-        path: str = "",
-        max_summary_lines: int = 20,
-    ) -> str:
-        """Get a file summary or a delegation prompt for large files.
-
-        Small files (≤50 lines) are returned directly with metadata.
-        Large files (>50 lines) return a structured prompt to pass to delegate_task.
-
-        Args:
-            project: Project slug or '_meta'.
-            section: Shortcut name. Ignored if path is set.
-            path: Relative path to a .md file. Overrides section.
-            max_summary_lines: Target summary length for delegation prompt.
-        """
-        result = _resolve_file(resolved_path, project, section, path, scopes)
-        if isinstance(result, str):
-            return _track("vault_summarize", result, project)
-        filepath = result
-
-        try:
-            content = filepath.read_text(encoding="utf-8")
-        except OSError as exc:
-            return _track("vault_summarize",
-                          f"File I/O error: {exc}", project)
-        fm = parse_frontmatter(content)
-        body = extract_body(content)
-        line_count = len(content.splitlines())
-        meta = _format_metadata(fm)
-
-        if line_count <= _SUMMARIZE_THRESHOLD:
-            header = f"**Metadata:** {meta}\n\n" if meta else ""
-            return _track("vault_summarize", f"{header}{content}", project)
-
-        return _track("vault_summarize",
-                       _build_delegation_prompt(meta, body, line_count, max_summary_lines),
-                       project)
-
-    @mcp.tool(annotations=_READ_ONLY)
-    def vault_smart_search(
-        query: str,
-        max_results: int = 10,
-        max_lines: int = 500,
-    ) -> str:
-        """Ranked full-text search — use when relevance ordering matters.
-
-        Results are scored by match density, status weight, and recency.
-        Prefer over vault_search when you need the most relevant matches first.
-
-        Args:
-            query: Text to search for (case-insensitive).
-            max_results: Maximum number of files to return. Default 10.
-            max_lines: Maximum output lines. Default 500.
-        """
-        query_lower = query.lower()
-        today = date.today()
-        scored: list[tuple[float, str, str, list[str]]] = []
-
-        for md_file in sorted(resolved_path.rglob("*.md")):
-            content = _safe_read(md_file)
-            if content is None:
-                continue
-
-            matching = [ln.strip() for ln in content.splitlines() if query_lower in ln.lower()]
-            if not matching:
-                continue
-
-            fm = parse_frontmatter(content)
-            score = _score_file(len(matching), fm, today)
-            rel = md_file.relative_to(resolved_path).as_posix()
-            meta = _format_metadata(fm)
-            scored.append((score, rel, meta, matching))
-
-        if not scored:
-            return _track("vault_smart_search", f"No matches found for '{query}'.")
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        scored = scored[:max_results]
-
-        results: list[str] = [f"# Smart Search: '{query}'", ""]
-        for score, rel, meta, matching in scored:
-            meta_part = f" [{meta}]" if meta else ""
-            results.append(f"### {rel} (score: {score:.1f}){meta_part}")
-            for line in matching[:5]:
-                results.append(f"  - {line}")
-
-        output = "\n".join(results)
-        return _track("vault_smart_search", _truncate(output, max_lines))
+        return _track("capture_lesson", msg, project, "lessons")
 
     @mcp.tool(annotations=_READ_ONLY)
     def session_briefing(project: str) -> str:
@@ -1628,100 +1808,6 @@ Total estimated savings: ~C tokens
 
         return _track("session_briefing", "\n".join(parts), project)
 
-    @mcp.tool(annotations=_READ_ONLY)
-    def vault_recent(since_days: int = 7, project: str = "", max_lines: int = 100) -> str:
-        """Show files changed in the vault in the last N days.
-
-        Combines git history with frontmatter created dates for completeness.
-
-        Args:
-            since_days: Look back window in days. Default 7.
-            project: Filter to this project only. Empty = all projects.
-        """
-        # Source 1: git-tracked changes
-        git_paths = set(_git_recent(resolved_path, since_days))
-
-        # Source 2: frontmatter created dates within window
-        cutoff = date.today() - timedelta(days=since_days)
-        for md_file in resolved_path.rglob("*.md"):
-            content = _safe_read(md_file)
-            if content is None:
-                continue
-            fm = parse_frontmatter(content)
-            if fm is None:
-                continue
-            created = parse_date(fm.created)
-            if created is not None and created >= cutoff:
-                git_paths.add(md_file.relative_to(resolved_path).as_posix())
-
-        # Filter to project if specified
-        if project:
-            resolved = _resolve_project_dir(resolved_path, project, scopes)
-            if resolved is not None:
-                prefix = resolved[0].relative_to(resolved_path).as_posix() + "/"
-                git_paths = {p for p in git_paths if p.startswith(prefix)}
-            else:
-                git_paths = set()
-
-        if not git_paths:
-            return _track("vault_recent",
-                          f"No changes found in the last {since_days} days.", project)
-
-        lines: list[str] = [f"# Recent Changes (last {since_days} days)", ""]
-        for rel_path in sorted(git_paths):
-            full = resolved_path / rel_path
-            if not full.exists():
-                lines.append(f"- {rel_path} (deleted)")
-                continue
-            try:
-                content = full.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                lines.append(f"- {rel_path}")
-                continue
-            fm = parse_frontmatter(content)
-            meta = _format_metadata(fm)
-            if meta:
-                lines.append(f"- {rel_path} [{meta}]")
-            else:
-                lines.append(f"- {rel_path}")
-
-        output = "\n".join(lines)
-        return _track("vault_recent", _truncate(output, max_lines), project)
-
-    @mcp.tool(annotations=_READ_ONLY)
-    def vault_usage(since_days: int = 30) -> str:
-        """Show vault tool usage analytics.
-
-        Reports call frequency, popular tools, popular projects, and total
-        response lines served — useful for session profiling and benchmarking.
-
-        Args:
-            since_days: Look back window in days. Default 30.
-        """
-        stats = tracker.stats(since_days)
-        if stats["total_calls"] == 0:
-            return f"No vault tool calls recorded in the last {since_days} days."
-
-        parts: list[str] = [f"# Vault Usage (last {since_days} days)", ""]
-        parts.append(f"- Total calls: {stats['total_calls']}")
-        parts.append(f"- Total response lines: {stats['total_response_lines']}")
-        parts.append(
-            f"- Estimated tokens served: ~{stats['total_response_lines'] * 10}"
-        )
-        parts.append("")
-
-        if stats["by_tool"]:
-            parts.append("## By Tool")
-            for tool_name, count in stats["by_tool"].items():
-                parts.append(f"- {tool_name}: {count} calls")
-            parts.append("")
-
-        if stats["by_project"]:
-            parts.append("## By Project")
-            for proj, count in stats["by_project"].items():
-                parts.append(f"- {proj}: {count} calls")
-
-        return "\n".join(parts)
 
     # ── Worker Tools ──────────────────────────────────────────────────
 
@@ -1769,21 +1855,103 @@ Total estimated savings: ~C tokens
 
     @mcp.tool(annotations=_WRITE)
     async def delegate_task(
-        prompt: str,
+        prompt: str = "",
         context: str = "",
         model: str = "auto",
         max_tokens: int = 2000,
         max_cost_per_request: float = 0.0,
+        project: str = "",
+        section: str = "context",
+        path: str = "",
+        max_summary_lines: int = 20,
     ) -> str:
-        """Offload work to a cheaper model — use for summarization, boilerplate, or analysis.
+        """Offload work to a cheaper model or summarize vault files.
+
+        When project is provided, reads a vault file. Small files (≤50 lines)
+        are returned directly. Large files are auto-delegated to a worker for
+        summarization — falls back to raw content if workers are unavailable.
 
         Args:
             prompt: The task description or code to process.
             context: Optional system context for the model.
             model: Routing — 'auto', 'ollama', 'openrouter-free', or a model ID.
             max_tokens: Maximum tokens in the response.
-            max_cost_per_request: Max USD to spend on this request. 0 = free models only.
+            max_cost_per_request: Max USD. 0 = free models only.
+            project: Project slug for vault summarization mode.
+            section: Shortcut name for summarization. Ignored if path is set.
+            path: Relative path to a .md file. Overrides section.
+            max_summary_lines: Target summary length for summarization.
         """
+        # ── Vault summarize mode ──
+        if project:
+            result = _resolve_file(
+                resolved_path, project, section, path, scopes,
+            )
+            if isinstance(result, str):
+                return _track("delegate_task", result, project)
+            filepath = result
+
+            try:
+                file_content = filepath.read_text(encoding="utf-8")
+            except OSError as exc:
+                return _track(
+                    "delegate_task", f"File I/O error: {exc}", project,
+                )
+            fm = parse_frontmatter(file_content)
+            body = extract_body(file_content)
+            line_count = len(file_content.splitlines())
+            meta = _format_metadata(fm)
+            header = f"**Metadata:** {meta}\n\n" if meta else ""
+
+            if line_count <= _SUMMARIZE_THRESHOLD:
+                return _track(
+                    "delegate_task", f"{header}{file_content}", project,
+                )
+
+            # Large file: try auto-delegation (free tiers only)
+            summary_prompt = (
+                f"Summarize the following document in at most "
+                f"{max_summary_lines} lines, preserving key decisions "
+                f"and action items.\n\n{body}"
+            )
+            summary_ctx = f"Document metadata: {meta}" if meta else ""
+            summary_resp: ClientResponse | None = None
+            summary_errors: list[str] = []
+            if await ollama.is_available():
+                summary_resp, err = await _try_worker(
+                    summary_prompt, max_tokens, "ollama", summary_ctx,
+                )
+                if err:
+                    summary_errors.append(err)
+            else:
+                summary_errors.append("Ollama: offline")
+            if summary_resp is None:
+                summary_resp, err = await _try_worker(
+                    summary_prompt, max_tokens, "openrouter", summary_ctx,
+                )
+                if err:
+                    summary_errors.append(err)
+            if summary_resp is not None:
+                return _track(
+                    "delegate_task",
+                    f"{header}{_format_response(summary_resp)}",
+                    project,
+                )
+            # Workers unavailable — return raw content with notice
+            reasons = "; ".join(summary_errors) if summary_errors else "no workers configured"
+            _log.warning("delegate_task summarize fallback for %s: %s", project, reasons)
+            fallback_notice = (
+                f"**Note:** Summarization failed ({reasons}). "
+                "Returning raw content.\n\n"
+            )
+            return _track(
+                "delegate_task", f"{header}{fallback_notice}{file_content}", project,
+            )
+
+        if not prompt:
+            return _track("delegate_task", "Either prompt or project is required.")
+
+        # ── Worker delegation ──
         # Explicit routing
         if model == "ollama":
             resp, err = await _try_worker(prompt, max_tokens, "ollama", context)
@@ -1842,35 +2010,12 @@ Total estimated savings: ~C tokens
         return f"All workers unavailable. [{reasons}]. {_REJECT_MSG}"
 
     @mcp.tool(annotations=_READ_ONLY)
-    async def list_models() -> str:
-        """List available models across all providers."""
-        lines = ["# Available Models", ""]
+    async def worker_status(include_models: bool = True) -> str:
+        """Show worker health: budget, connectivity, available models, and usage stats.
 
-        # Ollama
-        ollama_status = "online" if await ollama.is_available() else "offline / unavailable"
-        lines.append(f"## Ollama ({ollama_status})")
-        if "online" in ollama_status:
-            lines.append(f"- **{ollama.model}** — local, free, no token limit")
-        lines.append("")
-
-        # OpenRouter
-        lines.append("## OpenRouter")
-        if openrouter is not None:
-            try:
-                models = await openrouter.list_models()
-                for m in models:
-                    cost_label = "free" if m.is_free else f"${m.cost_per_million_input:.2f}/M in"
-                    lines.append(f"- **{m.id}** — {m.name}, ctx: {m.context_length}, {cost_label}")
-            except (ConnectionError, RuntimeError) as exc:
-                lines.append(f"- Error fetching models: {exc}")
-        else:
-            lines.append("- No API key configured")
-
-        return "\n".join(lines)
-
-    @mcp.tool(annotations=_READ_ONLY)
-    async def worker_status() -> str:
-        """Show worker health: budget, connectivity, usage stats."""
+        Args:
+            include_models: Include available model list from all providers. Default True.
+        """
         stats = budget.month_stats(settings.openrouter_budget)
         ollama_up = await ollama.is_available()
 
@@ -1895,6 +2040,27 @@ Total estimated savings: ~C tokens
                     f"- **{model_name}**: {model_stats['count']} requests, "
                     f"${model_stats['total_cost']:.4f}, avg {model_stats['avg_latency_ms']}ms"
                 )
+            lines.append("")
+
+        if include_models:
+            lines.append("## Available Models")
+            lines.append("")
+            ollama_status = "online" if ollama_up else "offline / unavailable"
+            lines.append(f"### Ollama ({ollama_status})")
+            if ollama_up:
+                lines.append(f"- **{ollama.model}** — local, free, no token limit")
+            lines.append("")
+            lines.append("### OpenRouter")
+            if openrouter is not None:
+                try:
+                    models = await openrouter.list_models()
+                    for m in models:
+                        cost = "free" if m.is_free else f"${m.cost_per_million_input:.2f}/M in"
+                        lines.append(f"- **{m.id}** — {m.name}, ctx: {m.context_length}, {cost}")
+                except (ConnectionError, RuntimeError) as exc:
+                    lines.append(f"- Error fetching models: {exc}")
+            else:
+                lines.append("- No API key configured")
 
         return "\n".join(lines)
 

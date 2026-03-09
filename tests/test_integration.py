@@ -22,7 +22,7 @@ class TestWorkflowListThenQuery:
     async def test_discover_and_read(self, mock_vault: Path) -> None:
         mcp = create_server(vault_path=mock_vault)
 
-        projects = _text(await mcp.call_tool("vault_list_projects", {}))
+        projects = _text(await mcp.call_tool("vault_list", {}))
         assert "testproject" in projects
 
         context = _text(await mcp.call_tool("vault_query", {"project": "testproject"}))
@@ -37,12 +37,13 @@ class TestWorkflowCreateThenQuery:
 
         create_result = _text(
             await mcp.call_tool(
-                "vault_create",
+                "vault_write",
                 {
                     "project": "testproject",
                     "path": "40-runbooks/deploy-guide.md",
                     "content": "# Deploy Guide\n\nStep 1: push to main.\n",
                     "doc_type": "runbook",
+                    "operation": "create",
                 },
             )
         )
@@ -65,7 +66,7 @@ class TestWorkflowUpdateThenSearch:
         mcp = create_server(vault_path=git_vault)
 
         await mcp.call_tool(
-            "vault_update",
+            "vault_write",
             {
                 "project": "testproject",
                 "section": "lessons",
@@ -88,12 +89,13 @@ class TestWorkflowHealthAfterChanges:
         health_before = _text(await mcp.call_tool("vault_health", {}))
 
         await mcp.call_tool(
-            "vault_create",
+            "vault_write",
             {
                 "project": "testproject",
                 "path": "new-doc.md",
                 "content": "# New Document\n",
                 "doc_type": "lesson",
+                "operation": "create",
             },
         )
 

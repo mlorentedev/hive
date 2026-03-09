@@ -42,7 +42,7 @@ When you need the most relevant results, not just keyword matches:
 > "Find the most relevant docs about deployment"
 
 ```python
-vault_smart_search(query="deployment", max_results=5)
+vault_search(query="deployment", ranked=True, max_results=5)
 ```
 
 Results are ranked by: active > draft > archived, recent > old, and match density. The most useful documents surface first.
@@ -54,7 +54,7 @@ After solving a tricky bug or making an architecture decision:
 > "Append this lesson to the vault: Always use WAL mode for SQLite in async contexts"
 
 ```python
-vault_update(
+vault_write(
     project="my-project",
     section="lessons",
     operation="append",
@@ -71,10 +71,11 @@ Start a new ADR, runbook, or any document:
 > "Create an ADR for choosing PostgreSQL over MySQL"
 
 ```python
-vault_create(
+vault_write(
     project="my-project",
     path="30-architecture/adr-005-postgresql.md",
     content="# ADR-005: PostgreSQL over MySQL\n\n## Context\n...",
+    operation="create",
     doc_type="adr"
 )
 ```
@@ -91,7 +92,7 @@ When you discover something important mid-task, capture it immediately without b
 capture_lesson(
     project="my-project",
     title="YAML frontmatter validation",
-    context="Writing a vault_update tool that modifies project files",
+    context="Writing a vault_write tool that modifies project files",
     problem="Missing required fields (id, type, status) cause silent failures in downstream tools like vault_search and session_briefing",
     solution="Always validate frontmatter before vault writes — reject if required fields are missing",
     tags=["yaml", "vault", "validation"]
@@ -109,7 +110,7 @@ After a long debugging session or architecture discussion, extract multiple less
 > "Extract lessons from these session notes about the database migration"
 
 ```python
-extract_lessons(
+capture_lesson(
     project="my-project",
     text="We discovered the migration failed because...[paste session notes]...",
     min_confidence=0.7,
@@ -119,9 +120,9 @@ extract_lessons(
 
 This sends the text to a worker model (Ollama or OpenRouter) which identifies decisions, bug root causes, and pattern choices — then writes them to `90-lessons.md`. Your primary model saves tokens by not processing the raw text itself.
 
-**When to use `capture_lesson` vs `extract_lessons`:**
-- `capture_lesson`: You know the exact lesson — structured input, single lesson
-- `extract_lessons`: You have raw text and want the worker to find lessons — batch extraction
+**When to use inline vs batch:**
+- **Inline** (`capture_lesson` with title/problem/solution): You know the exact lesson — structured input, single lesson
+- **Batch** (`capture_lesson` with `text=...`): You have raw text and want the worker to find lessons — batch extraction
 
 ## Delegating Trivial Tasks
 
@@ -169,7 +170,7 @@ Find broken frontmatter, stale docs, and dead links before they cause problems:
 > "Validate my vault for issues"
 
 ```python
-vault_validate(project="my-project")
+vault_health(project="my-project", checks=["frontmatter", "stale", "links"])
 ```
 
 Returns categorized issues: missing frontmatter fields, files that haven't been updated in 180+ days, and `[[wikilinks]]` pointing to nonexistent files. Run it after shipping a feature to catch documentation that drifted from reality.
@@ -177,7 +178,7 @@ Returns categorized issues: missing frontmatter fields, files that haven't been 
 You can also target specific checks:
 
 ```python
-vault_validate(checks=["stale"])  # Only flag stale files across all projects
+vault_health(checks=["stale"])  # Only flag stale files across all projects
 ```
 
 ## Monitoring Token Savings
@@ -186,7 +187,7 @@ Curious how much Hive is saving you?
 
 > "Run a benchmark"
 
-The `benchmark` prompt checks `vault_usage` and estimates how many tokens would have been consumed by static context loading vs. on-demand queries.
+The `benchmark` prompt checks `vault_health(include_usage=True)` and estimates how many tokens would have been consumed by static context loading vs. on-demand queries.
 
 ## Checking Recent Vault Changes
 
@@ -195,7 +196,7 @@ See what's been updated in your vault recently:
 > "Show vault changes from the last 7 days"
 
 ```python
-vault_recent(since_days=7, project="my-project")
+vault_search(since_days=7, project="my-project")
 ```
 
 Combines git history with frontmatter dates to surface all recent activity.

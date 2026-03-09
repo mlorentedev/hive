@@ -1,29 +1,43 @@
 ---
 title: Worker Tools
-description: 3 tools for delegating tasks to cheaper models with automatic routing.
+description: 2 tools for delegating tasks to cheaper models with automatic routing.
 ---
 
 ## delegate_task
 
-Route a task to a cheaper model with automatic tier selection.
+Route a task to a cheaper model, or summarize vault files automatically.
 
 ```python
+# Task delegation
 delegate_task(
     prompt="Explain this regex: ^(?:[a-z0-9]+\.)*[a-z0-9]+$",
     context="",              # optional context to include
     max_cost_per_request=0,  # 0 = free models only
     model=""                 # explicit model override
 )
+
+# Vault file summarization
+delegate_task(
+    project="my-project",
+    section="context",       # or use path="..."
+    max_summary_lines=20     # target summary length
+)
 ```
 
-### Routing Tiers
+### Task Delegation
 
-When no explicit model is specified, tasks are routed through tiers in order:
+When `prompt` is provided, tasks are routed through tiers in order:
 
 1. **Ollama** (local) — Free. Best for trivial tasks. Falls through if unavailable.
 2. **OpenRouter free** — Free tier models (e.g., Qwen3 Coder 480B). Real code work.
 3. **OpenRouter paid** — Only when `max_cost_per_request > 0` and monthly budget allows. Model configurable via `HIVE_OPENROUTER_PAID_MODEL`.
 4. **Reject** — Returns error so the host handles the task directly.
+
+### Vault Summarization
+
+When `project` is provided, reads a vault file:
+- **Small files** (≤50 lines): returned directly with metadata
+- **Large files** (>50 lines): auto-delegated to a worker for summarization. Falls back to raw content if workers are unavailable.
 
 ### Explicit Model Selection
 
@@ -48,22 +62,16 @@ Each response includes a metadata footer:
 [model: qwen2.5-coder:7b | provider: ollama | cost: $0.00 | latency: 2.1s]
 ```
 
-## list_models
-
-List available models across all providers.
-
-```python
-list_models()
-```
-
-Shows configured models for Ollama and OpenRouter, with connectivity status.
-
 ## worker_status
 
-Show worker health and budget information.
+Show worker health, budget, and available models.
 
 ```python
+# Full status with model listing
 worker_status()
+
+# Status without model listing
+worker_status(include_models=False)
 ```
 
 Returns:
@@ -71,3 +79,4 @@ Returns:
 - Ollama connectivity status
 - OpenRouter connectivity status
 - Request counts and cost breakdown
+- Available models across all providers (when `include_models=True`)

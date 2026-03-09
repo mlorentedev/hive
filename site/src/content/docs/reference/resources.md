@@ -61,5 +61,5 @@ Tools are **actions** — they accept parameters, support filtering, and can wri
 |---|---|
 | Load project context | `hive://projects/{project}/context` resource |
 | Search across vault | `vault_search` tool |
-| Update a file | `vault_update` tool |
-| List projects | `hive://projects` resource OR `vault_list_projects` tool |
+| Update a file | `vault_write` tool |
+| List projects | `hive://projects` resource OR `vault_list` tool |
