@@ -1,0 +1,15 @@
+.venv/
+.git/
+.github/
+.claude/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+site/
+tests/
+docs/
+*.md
+!README.md
+!pyproject.toml
