@@ -13,18 +13,23 @@ description: System architecture and module map.
                        │ MCP (stdio)
 ┌──────────────────────▼──────────────────────────┐
 │                 Hive MCP Server                  │
-│              (src/hive/server.py)                │
+│                                                  │
+│  server.py (registration + resources + prompts)  │
+│  _context.py (ServerContext shared state)        │
 │                                                  │
 │  ┌─────────────┐  ┌────────────┐  ┌──────────┐  │
 │  │ Vault Tools  │  │Worker Tools│  │Resources │  │
-│  │ (7 tools)    │  │ (2 tools)  │  │(5 URIs)  │  │
-│  └──────┬──────┘  └─────┬──────┘  └──────────┘  │
-│         │               │                        │
-│  ┌──────▼──────┐  ┌─────▼──────┐                 │
-│  │ frontmatter │  │  clients   │                 │
-│  │  budget     │  │  budget    │                 │
-│  │  usage      │  │  config    │                 │
-│  └─────────────┘  └────────────┘                 │
+│  │ _vault_read  │  │ _workers   │  │(5 URIs)  │  │
+│  │ _vault_write │  │ (2 tools)  │  └──────────┘  │
+│  │ _vault_health│  └─────┬──────┘                │
+│  │ (8 tools)    │        │                       │
+│  └──────┬──────┘  ┌─────▼──────┐                 │
+│         │         │  clients   │                 │
+│  ┌──────▼──────┐  │  budget    │                 │
+│  │ _helpers    │  │  config    │                 │
+│  │ frontmatter │  └────────────┘                 │
+│  │ usage       │                                 │
+│  └─────────────┘                                 │
 └──────────────────────────────────────────────────┘
          │                    │
     ┌────▼────┐    ┌─────────▼──────────┐
@@ -37,19 +42,25 @@ description: System architecture and module map.
 
 | Module | Role |
 |---|---|
-| `server.py` | Unified FastMCP server — all tools, resources, prompts |
+| `server.py` | Thin registration layer — resources, prompts, `create_server()` |
+| `_context.py` | `ServerContext` dataclass — shared state for all tool handlers |
+| `_helpers.py` | Pure functions — path resolution, formatting, git ops, tracking |
+| `_vault_read.py` | Read tools — `vault_list`, `vault_query`, `vault_search`, `session_briefing` |
+| `_vault_write.py` | Write tools — `vault_write`, `vault_patch` |
+| `_vault_health.py` | Health tools — `vault_health`, health report builder |
+| `_workers.py` | Worker tools — `capture_lesson`, `delegate_task`, `worker_status` |
 | `config.py` | pydantic-settings configuration with `HIVE_` env prefix |
 | `frontmatter.py` | YAML frontmatter parsing, validation, and generation |
 | `clients.py` | Async HTTP clients for Ollama and OpenRouter |
 | `budget.py` | SQLite budget tracker with WAL mode ($1/mo default cap) |
+| `relevance.py` | EMA-based section relevance scoring for adaptive context |
 | `usage.py` | Tool call analytics and token estimation |
-| `__init__.py` | Package marker |
 
 ## Key Design Decisions
 
-### Single Server
+### Single Server, Modular Internals
 
-Vault and worker functionality are served from a single FastMCP instance. This simplifies MCP registration (one server instead of two) and allows tools to share state (e.g., usage tracking).
+Vault and worker functionality are served from a single FastMCP instance. Internally, tools are organized into domain modules (`_vault_read`, `_vault_write`, `_vault_health`, `_workers`) that register themselves via `register_*(mcp, ctx)` functions. Shared state lives in a `ServerContext` dataclass (`_context.py`), and pure utility functions live in `_helpers.py`.
 
 ### Dependency Injection
 

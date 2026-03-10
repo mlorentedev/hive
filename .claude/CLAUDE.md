@@ -4,7 +4,8 @@
 
 ## Architecture
 
-- **Hive MCP Server** (`src/hive/server.py`): On-demand Obsidian vault access + worker delegation to Ollama/Qwen
+- **Hive MCP Server**: On-demand Obsidian vault access + worker delegation to Ollama/Qwen
+- Modular: `server.py` (registration) + `_context.py` (state) + `_helpers.py` (pure functions) + domain modules (`_vault_read`, `_vault_write`, `_vault_health`, `_workers`)
 
 See ADR: `~/Projects/knowledge/10_projects/hive/30-architecture/adr-001-orchestration-model.md`
 
@@ -24,7 +25,13 @@ See ADR: `~/Projects/knowledge/10_projects/hive/30-architecture/adr-001-orchestr
 
 | Path | Role |
 |---|---|
-| `src/hive/server.py` | Unified Hive MCP server (vault + worker, 10 tools) |
+| `src/hive/server.py` | Thin registration layer — resources, prompts, create_server() |
+| `src/hive/_context.py` | ServerContext dataclass — shared state for tool handlers |
+| `src/hive/_helpers.py` | Pure functions — path resolution, formatting, git ops, tracking |
+| `src/hive/_vault_read.py` | vault_list, vault_query, vault_search, session_briefing |
+| `src/hive/_vault_write.py` | vault_write, vault_patch |
+| `src/hive/_vault_health.py` | vault_health, health report builder |
+| `src/hive/_workers.py` | capture_lesson, delegate_task, worker_status |
 | `src/hive/config.py` | Configuration (vault path, Ollama endpoint, OpenRouter key) |
 | `tests/` | pytest suite |
 | `~/Projects/knowledge/` | Obsidian vault (source of truth) |
@@ -49,6 +56,8 @@ See ADR: `~/Projects/knowledge/10_projects/hive/30-architecture/adr-001-orchestr
 |---|---|
 | `src/hive/budget.py` | SQLite budget tracker ($1/mo default cap, WAL mode) |
 | `src/hive/clients.py` | Async HTTP clients (Ollama + OpenRouter) |
+| `src/hive/relevance.py` | EMA-based section relevance scoring |
+| `src/hive/frontmatter.py` | YAML frontmatter parsing, validation, generation |
 
 ## Worker Routing
 
