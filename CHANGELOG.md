@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/mlorentedev/hive/compare/v1.10.0...v1.11.0) (2026-03-10)
+
+
+### Features
+
+* **site:** add Spanish i18n and landing copy ([#49](https://github.com/mlorentedev/hive/issues/49)) ([988a619](https://github.com/mlorentedev/hive/commit/988a6195181db8c336ed6a3697bf7089821d33aa))
+
 ## [1.10.0](https://github.com/mlorentedev/hive/compare/v1.9.1...v1.10.0) (2026-03-10)
 
 
