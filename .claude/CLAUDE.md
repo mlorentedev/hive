@@ -66,6 +66,15 @@ See ADR: `~/Projects/knowledge/10_projects/hive/30-architecture/adr-001-orchestr
 3. OpenRouter paid (Qwen3 Coder) → if `max_cost_per_request > 0` and budget allows
 4. Reject → return error, Claude handles it
 
+## Documentation Site (i18n)
+
+- Site: `site/` — Astro + Starlight, bilingual (EN/ES)
+- English docs: `site/src/content/docs/` (root locale)
+- Spanish docs: `site/src/content/docs/es/`
+- **Rule**: When adding or modifying any doc page, always update BOTH languages. Create/edit the English version first, then mirror the change in the corresponding `es/` file.
+- Sidebar labels with translations are in `site/astro.config.mjs`
+- Build: `cd site && npm run build`
+
 ## Verification Commands
 
 All commands go through the Makefile:

@@ -10,6 +10,17 @@ export default defineConfig({
 		starlight({
 			title: 'Hive',
 			customCss: ['./src/styles/custom.css'],
+			defaultLocale: 'root',
+			locales: {
+				root: {
+					label: 'EN',
+					lang: 'en',
+				},
+				es: {
+					label: 'ES',
+					lang: 'es',
+				},
+			},
 			head: [
 				{ tag: 'meta', attrs: { name: 'theme-color', content: '#0e7490' } },
 				{
@@ -30,31 +41,42 @@ export default defineConfig({
 			],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/mlorentedev/hive' }],
 			sidebar: [
-				{ label: 'Getting Started', slug: 'getting-started' },
-				{ label: 'Configuration', slug: 'configuration' },
+				{
+					label: 'Getting Started',
+					translations: { es: 'Primeros Pasos' },
+					slug: 'getting-started',
+				},
+				{
+					label: 'Configuration',
+					translations: { es: 'Configuración' },
+					slug: 'configuration',
+				},
 				{
 					label: 'Tools',
+					translations: { es: 'Herramientas' },
 					items: [
-						{ label: 'Vault Tools', slug: 'tools/vault' },
-						{ label: 'Worker Tools', slug: 'tools/worker' },
+						{ label: 'Vault Tools', translations: { es: 'Herramientas de Vault' }, slug: 'tools/vault' },
+						{ label: 'Worker Tools', translations: { es: 'Herramientas de Worker' }, slug: 'tools/worker' },
 					],
 				},
 				{
 					label: 'Guides',
+					translations: { es: 'Guías' },
 					items: [
-						{ label: 'Use Cases', slug: 'guides/use-cases' },
-						{ label: 'Vault Structure', slug: 'guides/vault-structure' },
-						{ label: 'Worker Routing', slug: 'guides/worker-routing' },
+						{ label: 'Use Cases', translations: { es: 'Casos de Uso' }, slug: 'guides/use-cases' },
+						{ label: 'Vault Structure', translations: { es: 'Estructura del Vault' }, slug: 'guides/vault-structure' },
+						{ label: 'Worker Routing', translations: { es: 'Enrutamiento de Workers' }, slug: 'guides/worker-routing' },
 						{ label: 'Prompts', slug: 'guides/prompts' },
 						{ label: 'Benchmarks', slug: 'guides/benchmarks' },
-						{ label: 'Troubleshooting', slug: 'guides/troubleshooting' },
+						{ label: 'Troubleshooting', translations: { es: 'Solución de Problemas' }, slug: 'guides/troubleshooting' },
 					],
 				},
 				{
 					label: 'Reference',
+					translations: { es: 'Referencia' },
 					items: [
-						{ label: 'Resources', slug: 'reference/resources' },
-						{ label: 'Architecture', slug: 'reference/architecture' },
+						{ label: 'Resources', translations: { es: 'Recursos' }, slug: 'reference/resources' },
+						{ label: 'Architecture', translations: { es: 'Arquitectura' }, slug: 'reference/architecture' },
 					],
 				},
 			],

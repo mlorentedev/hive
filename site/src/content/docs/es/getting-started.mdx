@@ -1,0 +1,184 @@
+---
+title: Primeros Pasos
+description: Instala y configura Hive en menos de un minuto.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+## Requisitos Previos
+
+- Un cliente compatible con MCP — [Claude Code](https://docs.anthropic.com/en/docs/build-with-claude/claude-code/overview), [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [GitHub Copilot](https://code.visualstudio.com/docs/copilot/chat/mcp-servers), [Cursor](https://cursor.com/), [Windsurf](https://windsurf.com/), o cualquier otro host MCP
+- Un vault de [Obsidian](https://obsidian.md/) (o cualquier directorio de archivos Markdown) — consulta [Estructura del Vault](/hive/es/guides/vault-structure/) para ver el layout esperado
+- **Opcional para delegación de tareas:**
+  - [Ollama](https://ollama.com/download) ejecutándose localmente — descarga un modelo con `ollama pull qwen2.5-coder:7b`
+  - Cuenta en [OpenRouter](https://openrouter.ai/) — crea una API key en [openrouter.ai/keys](https://openrouter.ai/keys) (tier gratuito disponible)
+
+## Instalación
+
+Un solo comando. Sin clonar, sin venv, sin archivos de configuración.
+
+:::tip[Usa scope de usuario]
+Registra siempre Hive a nivel de **usuario** (no de proyecto) para que funcione en todos tus proyectos. Ese es el objetivo — un vault, todos los proyectos.
+- **Claude Code:** flag `-s user`
+- **Gemini CLI:** flag `-s user`
+- **Codex CLI / Copilot:** los archivos de config ya son a nivel de usuario (`~/.codex/config.toml`) o se pueden agregar a la configuración de usuario de VS Code
+:::
+
+<Tabs syncKey="client">
+  <TabItem label="Claude Code">
+    ```bash
+    claude mcp add -s user hive -- uvx --upgrade hive-vault
+    ```
+  </TabItem>
+  <TabItem label="Codex CLI">
+    Agrega a `~/.codex/config.toml`:
+    ```toml
+    [mcp_servers.hive-vault]
+    command = "uvx"
+    args = ["--upgrade", "hive-vault"]
+    ```
+  </TabItem>
+  <TabItem label="Gemini CLI">
+    ```bash
+    gemini mcp add -s user hive-vault uvx -- --upgrade hive-vault
+    ```
+  </TabItem>
+  <TabItem label="Copilot (VS Code)">
+    Agrega a `.vscode/mcp.json` en tu proyecto:
+    ```json
+    {
+      "servers": {
+        "hive-vault": {
+          "command": "uvx",
+          "args": ["--upgrade", "hive-vault"]
+        }
+      }
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+El flag `--upgrade` asegura que siempre obtengas la última versión de PyPI al iniciar cada sesión. `uvx` gestiona el entorno Python automáticamente.
+
+## Primera Consulta
+
+Una vez registrado, tu asistente de IA puede usar las herramientas de Hive. Prueba preguntando:
+
+> "Usa vault_list para ver mi vault"
+
+El asistente llamará a `vault_list()` y listará todos los proyectos con recuento de archivos y atajos disponibles.
+
+## Configurar Ruta del Vault
+
+Por defecto, Hive busca tu vault en `~/Projects/knowledge`. Para cambiarlo:
+
+<Tabs syncKey="client">
+  <TabItem label="Claude Code">
+    ```bash
+    claude mcp add -s user hive -e VAULT_PATH=/ruta/a/tu/vault -- uvx --upgrade hive-vault
+    ```
+  </TabItem>
+  <TabItem label="Codex CLI">
+    ```toml
+    [mcp_servers.hive-vault]
+    command = "uvx"
+    args = ["--upgrade", "hive-vault"]
+
+    [mcp_servers.hive-vault.env]
+    VAULT_PATH = "/ruta/a/tu/vault"
+    ```
+  </TabItem>
+  <TabItem label="Gemini CLI">
+    ```bash
+    gemini mcp add -s user -e VAULT_PATH=/ruta/a/tu/vault hive-vault uvx -- --upgrade hive-vault
+    ```
+  </TabItem>
+  <TabItem label="Copilot (VS Code)">
+    ```json
+    {
+      "servers": {
+        "hive-vault": {
+          "command": "uvx",
+          "args": ["--upgrade", "hive-vault"],
+          "env": {
+            "VAULT_PATH": "/ruta/a/tu/vault"
+          }
+        }
+      }
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+## Configurar Worker (Opcional)
+
+Para habilitar la delegación de tareas a modelos más baratos:
+
+<Tabs syncKey="client">
+  <TabItem label="Claude Code">
+    ```bash
+    claude mcp add -s user hive \
+      -e VAULT_PATH=/ruta/a/tu/vault \
+      -e HIVE_OLLAMA_ENDPOINT=http://tu-ollama:11434 \
+      -e OPENROUTER_API_KEY=sk-or-... \
+      -- uvx --upgrade hive-vault
+    ```
+  </TabItem>
+  <TabItem label="Codex CLI">
+    ```toml
+    [mcp_servers.hive-vault]
+    command = "uvx"
+    args = ["--upgrade", "hive-vault"]
+
+    [mcp_servers.hive-vault.env]
+    VAULT_PATH = "/ruta/a/tu/vault"
+    HIVE_OLLAMA_ENDPOINT = "http://tu-ollama:11434"
+    OPENROUTER_API_KEY = "sk-or-..."
+    ```
+  </TabItem>
+  <TabItem label="Gemini CLI">
+    ```bash
+    gemini mcp add -s user \
+      -e VAULT_PATH=/ruta/a/tu/vault \
+      -e HIVE_OLLAMA_ENDPOINT=http://tu-ollama:11434 \
+      -e OPENROUTER_API_KEY=sk-or-... \
+      hive-vault uvx -- --upgrade hive-vault
+    ```
+  </TabItem>
+  <TabItem label="Copilot (VS Code)">
+    ```json
+    {
+      "servers": {
+        "hive-vault": {
+          "command": "uvx",
+          "args": ["--upgrade", "hive-vault"],
+          "env": {
+            "VAULT_PATH": "/ruta/a/tu/vault",
+            "HIVE_OLLAMA_ENDPOINT": "http://tu-ollama:11434",
+            "OPENROUTER_API_KEY": "sk-or-..."
+          }
+        }
+      }
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+Consulta [Configuración](/hive/es/configuration/) para ver todas las variables de entorno.
+
+## Verificar
+
+Ejecuta un chequeo de salud:
+
+> "Usa vault_health para comprobar mi vault"
+
+Deberías ver recuentos de proyectos, archivos y métricas de obsolescencia para cada proyecto en tu vault.
+
+## Siguientes Pasos
+
+- [Casos de Uso](/hive/es/guides/use-cases/) — flujos de trabajo reales con Hive
+- [Configuración](/hive/es/configuration/) — referencia completa de variables de entorno
+- [Herramientas de Vault](/hive/es/tools/vault/) — todas las herramientas de vault
+- [Herramientas de Worker](/hive/es/tools/worker/) — delegación de tareas y enrutamiento
+- [Estructura del Vault](/hive/es/guides/vault-structure/) — cómo organizar tu vault
+- [Solución de Problemas](/hive/es/guides/troubleshooting/) — problemas comunes y soluciones

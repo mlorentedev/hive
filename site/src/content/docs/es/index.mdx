@@ -1,0 +1,104 @@
+---
+title: Acceso bajo demanda a tu vault de Obsidian para asistentes de IA
+description: Servidor MCP que conecta asistentes de IA con vaults de Obsidian — consulta contexto, busca decisiones, captura lecciones. 67–82% de reducción de tokens.
+template: splash
+hero:
+  tagline: Acceso bajo demanda a tu vault de Obsidian + delegación de tareas para cualquier cliente MCP.
+  actions:
+    - text: Primeros Pasos
+      link: /hive/es/getting-started/
+      icon: right-arrow
+    - text: Ver en GitHub
+      link: https://github.com/mlorentedev/hive
+      variant: minimal
+      icon: external
+---
+
+import { Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
+
+## ¿Por qué Hive?
+
+Cada sesión empieza de cero.
+
+Tu asistente de IA no recuerda que elegiste PostgreSQL sobre MySQL el mes pasado. Ni que tu pipeline de deploy tiene una peculiaridad con la caché de Redis. Acabas repitiéndote, pegando el mismo contexto, metiendo todo en un CLAUDE.md gigante que consume miles de tokens antes de hacer una sola pregunta.
+
+Hive soluciona esto.
+
+Mantienes una carpeta de archivos Markdown — decisiones de proyecto, notas de arquitectura, lecciones aprendidas, listas de tareas. Hive permite a tu asistente consultarlos bajo demanda. Solo lo relevante, cuando es relevante.
+
+Pero el valor real no es la memoria por proyecto.
+
+Son las prácticas compartidas. Defines tus estándares de código, patrones de arquitectura y checklists de revisión una sola vez. Cada proyecto — side projects personales, tu trabajo del día a día, los repos de tu equipo — sigue el mismo playbook. Esa consistencia se acumula. Y es lo que realmente te hace más rápido.
+
+Una cosa más: no tiene que ser un vault de Obsidian. Cualquier carpeta con archivos `.md` funciona. **Tu conocimiento vive en archivos planos que tú controlas, no encerrado dentro de una herramienta.**
+
+## Características
+
+<CardGrid>
+  <Card title="10 Herramientas" icon="puzzle">
+    Consulta, busca, escribe, parchea y lista contenido del vault. Delega tareas a modelos más baratos. Monitoriza salud y presupuesto.
+  </Card>
+  <Card title="5 Recursos" icon="document">
+    Recursos MCP para proyectos, métricas de salud, contexto, tareas y lecciones — consumibles directamente por clientes de IA.
+  </Card>
+  <Card title="4 Prompts" icon="pencil">
+    Protocolos integrados para retrospectivas, delegación, sincronización de vault y benchmarking.
+  </Card>
+  <Card title="Enrutamiento de Workers" icon="rocket">
+    Selección automática de tier: Ollama local, OpenRouter gratuito, OpenRouter de pago, o rechazar. Tope de $1/mes.
+  </Card>
+</CardGrid>
+
+## Instalación Rápida
+
+<Tabs syncKey="client">
+  <TabItem label="Claude Code">
+    ```bash
+    claude mcp add -s user hive -- uvx --upgrade hive-vault
+    ```
+  </TabItem>
+  <TabItem label="Codex CLI">
+    Añade a `~/.codex/config.toml`:
+    ```toml
+    [mcp_servers.hive-vault]
+    command = "uvx"
+    args = ["--upgrade", "hive-vault"]
+    ```
+  </TabItem>
+  <TabItem label="Gemini CLI">
+    ```bash
+    gemini mcp add -s user hive-vault uvx -- --upgrade hive-vault
+    ```
+  </TabItem>
+  <TabItem label="Copilot (VS Code)">
+    Añade a `.vscode/mcp.json`:
+    ```json
+    {
+      "servers": {
+        "hive-vault": {
+          "command": "uvx",
+          "args": ["--upgrade", "hive-vault"]
+        }
+      }
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+Sin clonar, sin venv, sin configuración. [Saber más →](/hive/es/getting-started/)
+
+## Flujo de Trabajo Recomendado
+
+La configuración de mayor valor:
+
+1. **[Obsidian](https://obsidian.md/)** — base de conocimiento local-first, nativa en Markdown, 1M+ de comunidad
+2. **[Obsidian Git](https://github.com/Vinzent03/obsidian-git)** — auto-commit de cambios del vault en un horario programado
+3. **Hive** — conecta tu vault con cualquier asistente de IA vía MCP
+
+Tu asistente escribe en el vault → Obsidian Git hace auto-commit → en la siguiente sesión, todo está ahí. Sin sincronización manual.
+
+> Hive funciona con cualquier directorio de Markdown — Obsidian es recomendado, no obligatorio.
+
+## Guías
+
+- [Benchmarks](/hive/es/guides/benchmarks/) — datos de ahorro de tokens y calibración de `max_lines`.
