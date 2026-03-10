@@ -18,7 +18,7 @@ description: System architecture and module map.
 │  _context.py (ServerContext shared state)        │
 │                                                  │
 │  ┌─────────────┐  ┌────────────┐  ┌──────────┐  │
-│  │ Vault Tools  │  │Worker Tools│  │Resources │  │
+│  │ Vault+Session│  │Worker Tools│  │Resources │  │
 │  │ _vault_read  │  │ _workers   │  │(5 URIs)  │  │
 │  │ _vault_write │  │ (2 tools)  │  └──────────┘  │
 │  │ _vault_health│  └─────┬──────┘                │

@@ -18,9 +18,19 @@ import { Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
 
 ## Why Hive?
 
-AI coding assistants load context statically. A typical project instructions file grows to 800+ lines. Most is irrelevant to the current task. Every session pays the full token cost.
+Every session starts from scratch.
 
-Hive replaces static context with **on-demand vault queries** via the [Model Context Protocol](https://modelcontextprotocol.io/). **67–82% token reduction** on targeted queries.
+Your AI assistant doesn't remember that you chose PostgreSQL over MySQL last month. Or that your deploy pipeline has a quirk with Redis cache. You end up repeating yourself, pasting the same context, stuffing everything into a giant CLAUDE.md that eats thousands of tokens before you even ask a question.
+
+Hive fixes this.
+
+You keep a folder of Markdown files — project decisions, architecture notes, lessons learned, task lists. Hive lets your assistant query them on demand. Only what's relevant, when it's relevant.
+
+But the real power isn't per-project memory.
+
+It's the shared practices. You define your coding standards, architecture patterns, and review checklists once. Every project — personal side projects, your day job, your team's repos — follows the same playbook. That consistency compounds. And it's what actually makes you faster.
+
+One more thing: this doesn't have to be an Obsidian vault. Any folder with `.md` files works. **Your knowledge lives in plain files you control, not locked inside a tool.**
 
 ## Features
 
