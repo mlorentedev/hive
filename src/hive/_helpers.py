@@ -1,0 +1,337 @@
+"""Shared helpers — path resolution, formatting, git ops, tracking."""
+
+from __future__ import annotations
+
+import logging
+import re
+import subprocess
+from datetime import date
+from typing import TYPE_CHECKING
+
+from mcp.types import ToolAnnotations
+
+from hive.frontmatter import parse_date, parse_frontmatter
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from hive._context import ServerContext
+    from hive.clients import ClientResponse
+    from hive.frontmatter import Frontmatter
+
+_log = logging.getLogger(__name__)
+
+_REJECT_MSG = "The host should handle this task directly."
+
+_READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
+_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False)
+
+SECTION_SHORTCUTS: dict[str, str] = {
+    "context": "00-context.md",
+    "tasks": "11-tasks.md",
+    "roadmap": "10-roadmap.md",
+    "lessons": "90-lessons.md",
+}
+
+_DEFAULT_SCOPES: dict[str, str] = {"projects": "10_projects", "meta": "00_meta"}
+
+_SUMMARIZE_THRESHOLD = 50
+
+_STATUS_WEIGHTS: dict[str, float] = {
+    "active": 3.0,
+    "draft": 2.0,
+}
+
+_RECENCY_DAYS_SCALE = 365
+
+
+# ── Path resolution ────────────────────────────────────────────────────
+
+
+def _parse_project_ref(project: str) -> tuple[str | None, str]:
+    """Split 'scope:project' into (scope, project). Plain 'project' → (None, project)."""
+    if ":" in project:
+        scope, _, slug = project.partition(":")
+        return scope, slug
+    return None, project
+
+
+def _resolve_project_dir(
+    vault: Path, project: str, scopes: dict[str, str] | None = None,
+) -> tuple[Path, str] | None:
+    """Resolve a project slug to (directory, scope_name).
+
+    - ``_meta`` maps to the meta scope root (backward compat).
+    - ``scope:project`` targets a specific scope.
+    - Plain ``project`` auto-scans all scopes, first match wins.
+
+    Returns None if the project is not found or escapes the vault boundary.
+    """
+    scopes = scopes or _DEFAULT_SCOPES
+
+    # _meta special case → meta scope root
+    if project == "_meta":
+        meta_dir_name = scopes.get("meta", "00_meta")
+        d = vault / meta_dir_name
+        if not d.is_dir():
+            return None
+        if _check_path_boundary(d, vault) is not None:
+            return None
+        return (d, "meta")
+
+    explicit_scope, slug = _parse_project_ref(project)
+
+    if explicit_scope is not None:
+        dir_name = scopes.get(explicit_scope)
+        if dir_name is None:
+            return None
+        d = vault / dir_name / slug
+        if not d.is_dir():
+            return None
+        if _check_path_boundary(d, vault) is not None:
+            return None
+        return (d, explicit_scope)
+
+    # Auto-scan: iterate scopes, first match wins, skip missing dirs
+    for scope_name, dir_name in scopes.items():
+        if scope_name == "meta":
+            continue  # meta is not a project container
+        scope_dir = vault / dir_name
+        if not scope_dir.is_dir():
+            continue
+        d = scope_dir / slug
+        if d.is_dir() and _check_path_boundary(d, vault) is None:
+            return (d, scope_name)
+
+    return None
+
+
+def _check_path_boundary(filepath: Path, boundary: Path) -> str | None:
+    """Return an error string if filepath escapes boundary, else None."""
+    try:
+        filepath.resolve().relative_to(boundary.resolve())
+    except ValueError:
+        return "Path escapes vault boundary. Use a relative path within the project."
+    return None
+
+
+def _resolve_file(
+    vault: Path,
+    project: str,
+    section: str,
+    path: str,
+    scopes: dict[str, str] | None = None,
+) -> Path | str:
+    """Resolve a vault file from project + section/path. Returns Path or error string."""
+    result = _resolve_project_dir(vault, project, scopes)
+    if result is None:
+        return f"Project '{project}' not found in vault."
+    project_dir, _ = result
+
+    if path:
+        filepath = project_dir / path
+        boundary_error = _check_path_boundary(filepath, vault)
+        if boundary_error:
+            return boundary_error
+    else:
+        filename = SECTION_SHORTCUTS.get(section)
+        if filename is None:
+            available = ", ".join(SECTION_SHORTCUTS)
+            return f"Section '{section}' not found. Available shortcuts: {available}"
+        # Convention-first: try bare name (e.g. context.md) before legacy (00-context.md)
+        bare = project_dir / f"{section}.md"
+        filepath = bare if bare.exists() else project_dir / filename
+
+    if not filepath.exists():
+        target = path or section
+        return f"'{target}' not found in project '{project}'."
+
+    return filepath
+
+
+# ── Text formatting ────────────────────────────────────────────────────
+
+
+def _truncate(text: str, max_lines: int) -> str:
+    """Truncate text to max_lines, appending a notice if truncated."""
+    if max_lines <= 0:
+        return text
+    lines = text.splitlines()
+    if len(lines) <= max_lines:
+        return text
+    remaining = len(lines) - max_lines
+    return "\n".join(lines[:max_lines]) + f"\n\n[... truncated, {remaining} more lines]"
+
+
+def _make_frontmatter(doc_id: str, doc_type: str) -> str:
+    """Generate YAML frontmatter block with sanitized id and type."""
+    safe_id = re.sub(r"[^\w\-.]", "_", doc_id)
+    safe_type = re.sub(r"[^\w\-.]", "_", doc_type)
+    return (
+        f"---\n"
+        f"id: {safe_id}\n"
+        f"type: {safe_type}\n"
+        f"status: active\n"
+        f'created: "{date.today().isoformat()}"\n'
+        f"---\n\n"
+    )
+
+
+def _format_metadata(fm: Frontmatter | None) -> str:
+    """Format frontmatter as a one-line metadata summary."""
+    if fm is None:
+        return ""
+    tags = ", ".join(fm.tags) if fm.tags else "none"
+    return f"type={fm.type}, status={fm.status}, tags=[{tags}], created={fm.created}"
+
+
+def _format_response(resp: ClientResponse) -> str:
+    """Format a model response with metadata footer."""
+    cost_str = f"${resp.cost_usd:.4f}" if resp.cost_usd > 0 else "$0.00"
+    latency_str = f"{resp.latency_ms / 1000:.1f}s"
+    header = (
+        f"## Worker Response (model: {resp.model}, {resp.tokens} tokens, {cost_str}, {latency_str})"
+    )
+    return f"{header}\n\n{resp.text}"
+
+
+def _score_file(match_count: int, fm: Frontmatter | None, today: date) -> float:
+    """Score a file for smart search ranking."""
+    status_weight = 1.0
+    recency_bonus = 0.0
+
+    if fm is not None:
+        status_weight = _STATUS_WEIGHTS.get(fm.status, 1.0)
+        created = parse_date(fm.created)
+        if created is not None:
+            days_ago = (today - created).days
+            recency_bonus = max(0.0, 1.0 - days_ago / _RECENCY_DAYS_SCALE)
+
+    return match_count * status_weight + recency_bonus
+
+
+# ── File I/O ───────────────────────────────────────────────────────────
+
+
+def _safe_read(f: Path) -> str | None:
+    """Read file text, returning None on error."""
+    try:
+        return f.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        _log.debug("Skipping non-UTF-8 file: %s", f)
+        return None
+    except OSError as exc:
+        _log.warning("Cannot read file %s: %s", f, exc)
+        return None
+
+
+# ── Tracking ───────────────────────────────────────────────────────────
+
+
+def track(
+    ctx: ServerContext, tool: str, result: str, project: str = "", section: str = "",
+) -> str:
+    """Log a tool call and return the result unchanged."""
+    ctx.tracker.log_call(tool, project, len(result.splitlines()))
+    if project and section:
+        is_write = tool == "vault_write"
+        ctx.relevance.record_access(project, section, is_write=is_write)
+    return result
+
+
+# ── Git operations ─────────────────────────────────────────────────────
+
+
+def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
+    """Stage a file and commit it in the vault git repo.
+
+    This is a best-effort side-effect: failures are logged but never
+    propagated, so a git problem cannot crash the MCP server or prevent
+    the tool response from reaching the client.
+    """
+    safe_msg = message.replace("\n", " ").replace("\r", " ")
+    try:
+        subprocess.run(
+            ["git", "add", str(rel_path)],
+            cwd=vault_path,
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", safe_msg],
+            cwd=vault_path,
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError as exc:
+        _log.warning("git commit failed for %s: %s", rel_path, exc)
+    except subprocess.TimeoutExpired as exc:
+        _log.warning("git commit timed out for %s: %s", rel_path, exc)
+    except Exception as exc:
+        _log.warning("git commit unexpected error for %s: %s", rel_path, exc)
+
+
+def _git_log(vault_path: Path, n: int) -> str:
+    """Return last n git log entries, or empty string on failure."""
+    try:
+        result = subprocess.run(
+            ["git", "log", "--oneline", f"-{n}"],
+            cwd=vault_path,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except Exception:
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _git_recent(vault_path: Path, since_days: int) -> list[str]:
+    """Return vault-relative .md paths changed in the last N days via git."""
+    try:
+        result = subprocess.run(
+            ["git", "log", f"--since={since_days} days ago",
+             "--name-only", "--pretty=format:"],
+            cwd=vault_path,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except Exception:
+        return []
+    if result.returncode != 0:
+        return []
+    return sorted({
+        line.strip() for line in result.stdout.splitlines()
+        if line.strip().endswith(".md")
+    })
+
+
+# ── Stale detection ───────────────────────────────────────────────────
+
+
+def count_stale(
+    project_dir: Path, threshold: date,
+) -> list[str]:
+    """Return list of stale file paths in a project directory."""
+    from hive.frontmatter import _TERMINAL_STATUSES
+
+    stale: list[str] = []
+    for f in project_dir.rglob("*.md"):
+        content = _safe_read(f)
+        if content is None:
+            continue
+        fm = parse_frontmatter(content)
+        if fm is not None and fm.status in _TERMINAL_STATUSES:
+            continue
+        created_date = parse_date(fm.created) if fm is not None else None
+        if created_date is None:
+            try:
+                created_date = date.fromtimestamp(f.stat().st_mtime)
+            except OSError:
+                continue
+        if created_date < threshold:
+            stale.append(f.relative_to(project_dir).as_posix())
+    return stale

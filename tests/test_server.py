@@ -2279,7 +2279,7 @@ class TestGitCommitResilience:
 
         mcp = create_server(vault_path=git_vault)
 
-        with patch("hive.server.subprocess.run", side_effect=OSError("git not found")):
+        with patch("hive._helpers.subprocess.run", side_effect=OSError("git not found")):
             result = _text(await mcp.call_tool(
                 "vault_patch",
                 {
@@ -2301,7 +2301,7 @@ class TestGitCommitResilience:
 
         mcp = create_server(vault_path=git_vault)
 
-        with patch("hive.server.subprocess.run", side_effect=RuntimeError("unexpected")):
+        with patch("hive._helpers.subprocess.run", side_effect=RuntimeError("unexpected")):
             result = _text(await mcp.call_tool(
                 "vault_write",
                 {
@@ -2321,7 +2321,7 @@ class TestGitCommitResilience:
         mcp = create_server(vault_path=git_vault)
 
         # First call: git fails
-        with patch("hive.server.subprocess.run", side_effect=OSError("git not found")):
+        with patch("hive._helpers.subprocess.run", side_effect=OSError("git not found")):
             await mcp.call_tool(
                 "vault_patch",
                 {
@@ -2348,7 +2348,7 @@ class TestGitReadResilience:
 
         mcp = create_server(vault_path=git_vault)
 
-        with patch("hive.server.subprocess.run", side_effect=OSError("git not found")):
+        with patch("hive._helpers.subprocess.run", side_effect=OSError("git not found")):
             result = _text(await mcp.call_tool(
                 "session_briefing", {"project": "testproject"},
             ))
@@ -2361,7 +2361,7 @@ class TestGitReadResilience:
 
         mcp = create_server(vault_path=git_vault)
 
-        with patch("hive.server.subprocess.run", side_effect=OSError("git not found")):
+        with patch("hive._helpers.subprocess.run", side_effect=OSError("git not found")):
             result = _text(await mcp.call_tool(
                 "vault_search", {"since_days": 7},
             ))
