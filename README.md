@@ -257,7 +257,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, code standards, and PR workflo
 git clone https://github.com/mlorentedev/hive.git
 cd hive
 make install   # create venv + install deps
-make check     # lint + typecheck + test (324 tests, 91% coverage)
+make check     # lint + typecheck + test (337 tests, 92% coverage)
 ```
 
 ## License
