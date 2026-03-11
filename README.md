@@ -6,6 +6,10 @@
 [![Docs](https://img.shields.io/badge/docs-hive-blue)](https://mlorentedev.github.io/hive/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+<a href="https://glama.ai/mcp/servers/mlorentedev/hive">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/mlorentedev/hive/badge" />
+</a>
+
 <!-- mcp-name: io.github.mlorentedev/hive-vault -->
 
 **Your AI coding assistant forgets everything between sessions. Hive fixes that.**
