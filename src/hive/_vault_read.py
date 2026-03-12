@@ -20,7 +20,7 @@ from hive._helpers import (
     count_stale,
     track,
 )
-from hive.frontmatter import parse_date, parse_frontmatter
+from hive.frontmatter import extract_body, parse_date, parse_frontmatter
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -273,9 +273,10 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
                 content = _safe_read(md_file)
                 if content is None:
                     continue
+                body = extract_body(content)
                 matching = [
                     ln.strip()
-                    for ln in content.splitlines()
+                    for ln in body.splitlines()
                     if query_lower in ln.lower()
                 ]
                 if not matching:
@@ -352,16 +353,17 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
                 if tag_filter and tag_filter not in fm.tags:
                     continue
 
+            body = extract_body(content)
             if use_regex:
                 matching_lines = [
                     line.strip()
-                    for line in content.splitlines()
+                    for line in body.splitlines()
                     if rx_pattern.search(line)
                 ]
             else:
                 matching_lines = [
                     line.strip()
-                    for line in content.splitlines()
+                    for line in body.splitlines()
                     if query_lower in line.lower()
                 ]
             if matching_lines:
@@ -408,8 +410,8 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             task_content = _safe_read(task_result)
             if task_content is not None:
                 ctx.relevance.record_access(project, "tasks")
-                body = _truncate(task_content, 50)
-                sections["tasks"] = f"## Active Tasks\n{body}"
+                task_body = _truncate(extract_body(task_content), 50)
+                sections["tasks"] = f"## Active Tasks\n{task_body}"
 
         # Lessons
         lessons_result = _resolve_file(
@@ -419,8 +421,8 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             lessons_content = _safe_read(lessons_result)
             if lessons_content is not None:
                 ctx.relevance.record_access(project, "lessons")
-                lines = lessons_content.splitlines()
-                tail = lines[-30:] if len(lines) > 30 else lines
+                lesson_lines = extract_body(lessons_content).splitlines()
+                tail = lesson_lines[-30:] if len(lesson_lines) > 30 else lesson_lines
                 sections["lessons"] = "## Recent Lessons\n" + "\n".join(tail)
 
         # Git activity (always shown, not ranked)

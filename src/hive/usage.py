@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,14 @@ class UsageTracker:
             (tool, project, response_lines),
         )
         self._conn.commit()
+
+    def close(self) -> None:
+        """Close the database connection."""
+        self._conn.close()
+
+    def __del__(self) -> None:
+        with contextlib.suppress(Exception):
+            self._conn.close()
 
     def stats(self, since_days: int = 30) -> dict[str, Any]:
         """Aggregate usage stats for the last N days."""

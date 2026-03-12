@@ -377,6 +377,7 @@ Total estimated savings: ~C tokens
     register_workers(mcp, ctx)
 
     mcp._usage_tracker = tracker  # type: ignore[attr-defined]
+    mcp._hive_ctx = ctx  # type: ignore[attr-defined]
 
     return mcp
 

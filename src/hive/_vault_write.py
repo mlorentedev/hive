@@ -10,6 +10,7 @@ from hive._helpers import (
     _check_path_boundary,
     _git_commit,
     _make_frontmatter,
+    _match_and_replace,
     _resolve_project_dir,
     track,
 )
@@ -258,27 +259,15 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     f"{label}Each patch must have 'old_text' and 'new_text' keys.",
                     project,
                 )
-            old = patch["old_text"]
-            new = patch["new_text"]
-            count = working.count(old)
-
-            if count == 0:
+            ok, result = _match_and_replace(
+                working, patch["old_text"], patch["new_text"],
+            )
+            if not ok:
                 label = f"patch {i}: " if len(patch_list) > 1 else ""
                 return track(
-                    ctx, "vault_patch",
-                    f"{label}old_text not found in file '{path}'.",
-                    project,
+                    ctx, "vault_patch", f"{label}{result}", project,
                 )
-            if count > 1:
-                label = f"patch {i}: " if len(patch_list) > 1 else ""
-                return track(
-                    ctx, "vault_patch",
-                    f"{label}Ambiguous: old_text appears {count} times "
-                    f"in '{path}'. "
-                    "Provide more context to make the match unique.",
-                    project,
-                )
-            working = working.replace(old, new, 1)
+            working = result
 
         try:
             filepath.write_text(working, encoding="utf-8")
