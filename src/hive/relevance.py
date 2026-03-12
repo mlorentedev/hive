@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import random
 import sqlite3
 from pathlib import Path
@@ -43,6 +44,14 @@ class RelevanceTracker:
         self._alpha = alpha
         self._decay_factor = decay_factor
         self._epsilon = epsilon
+
+    def close(self) -> None:
+        """Close the database connection."""
+        self._conn.close()
+
+    def __del__(self) -> None:
+        with contextlib.suppress(Exception):
+            self._conn.close()
 
     def record_access(
         self, project: str, section: str, *, is_write: bool = False,

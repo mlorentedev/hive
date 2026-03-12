@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import logging
 import re
 import subprocess
@@ -10,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from mcp.types import ToolAnnotations
 
-from hive.frontmatter import parse_date, parse_frontmatter
+from hive.frontmatter import extract_body, parse_date, parse_frontmatter
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -147,6 +148,75 @@ def _resolve_file(
         return f"'{target}' not found in project '{project}'."
 
     return filepath
+
+
+# ── Match and replace ──────────────────────────────────────────────────
+
+
+def _normalize_ws(text: str) -> str:
+    """Strip trailing whitespace per line."""
+    return "\n".join(line.rstrip() for line in text.splitlines())
+
+
+def _match_and_replace(
+    content: str,
+    old_text: str,
+    new_text: str,
+) -> tuple[bool, str]:
+    """Cascading match-and-replace: exact → body-only → whitespace-normalized.
+
+    Returns ``(True, new_content)`` on success, ``(False, error_message)``
+    on failure.
+    """
+    # ── Pass 1: Exact match on full content ──
+    count = content.count(old_text)
+    if count == 1:
+        return True, content.replace(old_text, new_text, 1)
+    if count > 1:
+        return False, f"Ambiguous: old_text appears {count} times."
+
+    # ── Pass 2: Exact match on body (post-frontmatter) ──
+    body = extract_body(content)
+    frontmatter = content[: len(content) - len(body)] if body != content else ""
+
+    count = body.count(old_text)
+    if count == 1:
+        return True, frontmatter + body.replace(old_text, new_text, 1)
+    if count > 1:
+        return False, f"Ambiguous: old_text appears {count} times."
+
+    # ── Pass 3: Whitespace-normalized match on body ──
+    norm_body = _normalize_ws(body)
+    norm_old = _normalize_ws(old_text)
+
+    if norm_old:
+        count = norm_body.count(norm_old)
+        if count == 1:
+            return True, frontmatter + norm_body.replace(norm_old, new_text, 1)
+        if count > 1:
+            return (
+                False,
+                f"Ambiguous: old_text appears {count} times"
+                " (after whitespace normalization).",
+            )
+
+    # ── Diagnostic: similarity hint ──
+    best_ratio = 0.0
+    search_in = norm_body or body
+    if norm_old:
+        matcher = difflib.SequenceMatcher(None, norm_old, "")
+        lines = search_in.splitlines()
+        n_old = max(len(norm_old.splitlines()), 1)
+        for i in range(max(1, len(lines) - n_old + 2)):
+            chunk = "\n".join(lines[i : i + n_old])
+            matcher.set_seq2(chunk)
+            ratio = matcher.ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+
+    pct = int(best_ratio * 100)
+    hint = f" Best match: {pct}% similar." if pct > 40 else ""
+    return False, f"old_text not found.{hint}"
 
 
 # ── Text formatting ────────────────────────────────────────────────────

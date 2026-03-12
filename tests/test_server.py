@@ -12,6 +12,7 @@ from hive.clients import ClientResponse, ModelInfo
 from hive.server import create_server
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from pathlib import Path
 
     from fastmcp import FastMCP
@@ -32,10 +33,18 @@ def _resource_text(result: ResourceResult) -> str:
     return str(result.contents[0].content)
 
 
+def _close_server(mcp: FastMCP) -> None:
+    ctx = getattr(mcp, "_hive_ctx", None)
+    if ctx is not None:
+        ctx.close()
+
+
 @pytest.fixture
-def vault_mcp(mock_vault: Path) -> FastMCP:
+def vault_mcp(mock_vault: Path) -> Generator[FastMCP, None, None]:
     """Create a vault server backed by mock_vault."""
-    return create_server(vault_path=mock_vault)
+    mcp = create_server(vault_path=mock_vault)
+    yield mcp
+    _close_server(mcp)
 
 
 # ── vault_list ──────────────────────────────────────────────
@@ -241,7 +250,7 @@ class TestVaultSearch:
         assert "positive" in _text(result).lower()
 
     async def test_searches_across_files(self, vault_mcp: FastMCP) -> None:
-        result = await vault_mcp.call_tool("vault_search", {"query": "active"})
+        result = await vault_mcp.call_tool("vault_search", {"query": "Test"})
         text = _text(result)
         assert "00-context.md" in text
         assert "11-tasks.md" in text
@@ -251,7 +260,7 @@ class TestVaultSearch:
         assert "Some lesson" in _text(result)
 
     async def test_max_lines_limits_output(self, vault_mcp: FastMCP) -> None:
-        result = await vault_mcp.call_tool("vault_search", {"query": "active", "max_lines": 5})
+        result = await vault_mcp.call_tool("vault_search", {"query": "Test", "max_lines": 5})
         text = _text(result)
         assert "truncated" in text.lower()
         content_lines = text.split("[...")[0].strip().splitlines()
@@ -1053,7 +1062,7 @@ class TestVaultSearchRanked:
 
     async def test_max_lines_truncates(self, vault_mcp: FastMCP) -> None:
         result = await vault_mcp.call_tool(
-            "vault_search", {"query": "active", "ranked": True, "max_lines": 5}
+            "vault_search", {"query": "Test", "ranked": True, "max_lines": 5}
         )
         text = _text(result)
         assert "truncated" in text.lower()
@@ -2268,6 +2277,113 @@ class TestVaultPatch:
         )
         count_after = int(after.stdout.strip())
         assert count_after == count_before + 1
+
+
+class TestVaultPatchTolerantMatching:
+    """Tests for tolerant matching in vault_patch (Issue #52)."""
+
+    async def test_patch_tolerates_trailing_whitespace(
+        self, git_vault: Path,
+    ) -> None:
+        """Multi-line old_text with trailing whitespace differences."""
+        tasks = git_vault / "10_projects" / "testproject" / "11-tasks.md"
+        # Write a table with trailing spaces on each line
+        raw = tasks.read_text()
+        raw = raw.replace(
+            "- [ ] Task one\n- [x] Task two",
+            "| A | B |   \n|---|---|  \n| 1 | 2 |   ",
+        )
+        tasks.write_text(raw)
+        import subprocess
+        subprocess.run(
+            ["git", "add", "."], cwd=git_vault, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "ws"], cwd=git_vault, capture_output=True,
+        )
+
+        mcp = create_server(vault_path=git_vault)
+        # LLM stripped trailing spaces from multi-line text
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "old_text": "| A | B |\n|---|---|\n| 1 | 2 |",
+                "new_text": "| A | B | C |\n|---|---|---|\n| 1 | 2 | 3 |",
+            },
+        ))
+        assert "1 patch" in result.lower()
+
+    async def test_patch_not_found_shows_similarity(
+        self, git_vault: Path,
+    ) -> None:
+        """Close miss includes similarity % in error."""
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "old_text": "- [ ] Task ones",
+                "new_text": "- [x] Task one",
+            },
+        ))
+        assert "not found" in result.lower()
+        assert "%" in result
+
+    async def test_patch_roundtrip_query_then_patch(
+        self, git_vault: Path,
+    ) -> None:
+        """Real workflow: vault_query output used as vault_patch old_text."""
+        mcp = create_server(vault_path=git_vault)
+        query_result = _text(await mcp.call_tool(
+            "vault_query",
+            {"project": "testproject", "section": "tasks"},
+        ))
+        assert "- [ ] Task one" in query_result
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "old_text": "- [ ] Task one",
+                "new_text": "- [x] Task one (completed)",
+            },
+        ))
+        assert "1 patch" in result.lower()
+
+    async def test_patch_body_only_match_when_frontmatter_overlaps(
+        self, git_vault: Path,
+    ) -> None:
+        """old_text matches body uniquely even if ambiguous in full file."""
+        tasks = git_vault / "10_projects" / "testproject" / "11-tasks.md"
+        # "active" is in the frontmatter status AND we add it to body
+        raw = tasks.read_text()
+        raw = raw.replace("- [ ] Task one", "- [ ] active task")
+        tasks.write_text(raw)
+        import subprocess
+        subprocess.run(
+            ["git", "add", "."], cwd=git_vault, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "ov"], cwd=git_vault, capture_output=True,
+        )
+
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "old_text": "- [ ] active task",
+                "new_text": "- [x] active task (done)",
+            },
+        ))
+        assert "1 patch" in result.lower()
+        content = tasks.read_text()
+        assert content.startswith("---")
+        assert "- [x] active task (done)" in content
 
 
 class TestGitCommitResilience:

@@ -1,12 +1,18 @@
 """Shared test fixtures for Hive test suite."""
 
+from __future__ import annotations
+
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from hive.budget import BudgetTracker
 from hive.clients import OllamaClient, OpenRouterClient
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+    from pathlib import Path
 
 
 @pytest.fixture
@@ -154,9 +160,11 @@ def git_vault(mock_vault: Path) -> Path:
 
 
 @pytest.fixture
-def budget() -> BudgetTracker:
+def budget() -> Generator[BudgetTracker, None, None]:
     """In-memory budget tracker for worker tests."""
-    return BudgetTracker(db_path=":memory:")
+    bt = BudgetTracker(db_path=":memory:")
+    yield bt
+    bt.close()
 
 
 @pytest.fixture

@@ -28,3 +28,9 @@ class ServerContext:
     stale_days: int
     openrouter_budget: float
     openrouter_paid_model: str
+
+    def close(self) -> None:
+        """Close all database connections held by this context."""
+        self.tracker.close()
+        self.budget.close()
+        self.relevance.close()

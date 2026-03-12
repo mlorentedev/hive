@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -64,6 +65,14 @@ class BudgetTracker:
     def can_spend(self, budget: float, amount: float) -> bool:
         """Check if spending `amount` would stay within budget."""
         return self.month_remaining(budget) >= amount
+
+    def close(self) -> None:
+        """Close the database connection."""
+        self._conn.close()
+
+    def __del__(self) -> None:
+        with contextlib.suppress(Exception):
+            self._conn.close()
 
     def month_stats(self, budget: float) -> dict[str, Any]:
         """Aggregate stats for the current month."""
