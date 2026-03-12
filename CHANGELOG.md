@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1](https://github.com/mlorentedev/hive/compare/v1.11.0...v1.11.1) (2026-03-12)
+
+
+### Bug Fixes
+
+* **vault_patch:** tolerant matching for read→patch workflow ([#53](https://github.com/mlorentedev/hive/issues/53)) ([bb9b9a7](https://github.com/mlorentedev/hive/commit/bb9b9a773e194cf9d6db4d9613137eb9b0926f18)), closes [#52](https://github.com/mlorentedev/hive/issues/52)
+
 ## [1.11.0](https://github.com/mlorentedev/hive/compare/v1.10.0...v1.11.0) (2026-03-10)
 
 
