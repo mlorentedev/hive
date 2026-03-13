@@ -3,6 +3,26 @@ title: Solución de Problemas
 description: Problemas comunes y soluciones para el servidor MCP Hive.
 ---
 
+## Vault No Encontrado
+
+**Síntoma:** Las herramientas de vault (vault_list, vault_query, etc.) devuelven "Vault not found at /home/user/Projects/knowledge" con instrucciones de configuración.
+
+**Causa:** La ruta del vault no se configuró al registrar el servidor MCP. Hive usa `~/Projects/knowledge` por defecto, que puede no existir en tu máquina.
+
+**Solución:** Re-registra el servidor MCP con `VAULT_PATH` apuntando a tu vault de Obsidian:
+
+```bash
+# Claude Code
+claude mcp add -s user hive -e VAULT_PATH=$HOME/mi-vault -- uvx --upgrade hive-vault
+
+# Gemini CLI
+gemini mcp add -s user -e VAULT_PATH=$HOME/mi-vault hive-vault uvx -- --upgrade hive-vault
+```
+
+Se aceptan tanto `VAULT_PATH` como `HIVE_VAULT_PATH`. Si ambas están definidas, `HIVE_VAULT_PATH` tiene prioridad.
+
+**Nota:** El servidor arranca incluso sin una ruta de vault válida — las herramientas de worker (`worker_status`, `delegate_task`) siguen funcionando. Solo las herramientas específicas de vault requieren una ruta válida.
+
 ## Hive No Disponible en Otros Proyectos
 
 **Síntoma:** Instalaste Hive en un proyecto pero no aparece al iniciar sesión en otro proyecto.

@@ -12,6 +12,7 @@ from hive._helpers import (
     _make_frontmatter,
     _match_and_replace,
     _resolve_project_dir,
+    _vault_guard,
     track,
 )
 from hive.frontmatter import validate_frontmatter
@@ -50,6 +51,10 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             path: Relative path for new file. For create mode.
             doc_type: Document type for frontmatter. For create mode.
         """  # noqa: E501
+        guard = _vault_guard(ctx)
+        if guard:
+            return track(ctx, "vault_write", guard, project)
+
         if operation not in _WRITE_OPERATIONS:
             return track(ctx, "vault_write", (
                 f"Invalid operation '{operation}'. "
@@ -198,6 +203,10 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             new_text: Replacement text (single mode). Empty = not set.
             patches: List of {old_text, new_text} dicts (multi mode).
         """
+        guard = _vault_guard(ctx)
+        if guard:
+            return track(ctx, "vault_patch", guard, project)
+
         has_single = bool(old_text) or bool(new_text)
         has_multi = len(patches) > 0
 

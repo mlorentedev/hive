@@ -70,7 +70,9 @@ El asistente llamará a `vault_list()` y listará todos los proyectos con recuen
 
 ## Configurar Ruta del Vault
 
-Por defecto, Hive busca tu vault en `~/Projects/knowledge`. Para cambiarlo:
+Por defecto, Hive busca tu vault en `~/Projects/knowledge`. Si esta ruta no existe, las herramientas de vault devolverán un error con instrucciones de configuración — el servidor sigue arrancando, así que las herramientas de worker permanecen disponibles.
+
+Para apuntar Hive a tu vault:
 
 <Tabs syncKey="client">
   <TabItem label="Claude Code">

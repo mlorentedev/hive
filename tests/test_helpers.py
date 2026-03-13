@@ -1,8 +1,14 @@
-"""Tests for _match_and_replace cascading logic."""
+"""Tests for helper functions — _match_and_replace and _vault_guard."""
 
 from __future__ import annotations
 
-from hive._helpers import _match_and_replace
+from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
+
+from hive._helpers import _match_and_replace, _vault_guard
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _FM = "---\nid: test\ntype: note\nstatus: active\n---\n\n"
 
@@ -91,3 +97,34 @@ class TestMatchAndReplace:
         assert ok
         assert new_content.startswith("---")
         assert "Goodbye world" in new_content
+
+
+class TestVaultGuard:
+    """Tests for _vault_guard — returns error when vault dir missing."""
+
+    def test_returns_empty_when_vault_exists(self, mock_vault: Path) -> None:
+        ctx = MagicMock()
+        ctx.vault = mock_vault
+        assert _vault_guard(ctx) == ""
+
+    def test_returns_error_when_vault_missing(self, tmp_path: Path) -> None:
+        ctx = MagicMock()
+        ctx.vault = tmp_path / "nonexistent"
+        result = _vault_guard(ctx)
+        assert "Vault not found" in result
+        assert "nonexistent" in result
+
+    def test_error_includes_setup_instructions(self, tmp_path: Path) -> None:
+        ctx = MagicMock()
+        ctx.vault = tmp_path / "nonexistent"
+        result = _vault_guard(ctx)
+        assert "VAULT_PATH" in result
+        assert "claude mcp add" in result
+        assert "gemini mcp add" in result
+
+    def test_returns_error_when_vault_is_file(self, tmp_path: Path) -> None:
+        fake = tmp_path / "not-a-dir"
+        fake.write_text("oops")
+        ctx = MagicMock()
+        ctx.vault = fake
+        assert "Vault not found" in _vault_guard(ctx)

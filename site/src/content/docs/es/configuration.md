@@ -9,7 +9,7 @@ Toda la configuración se realiza mediante variables de entorno, pasadas al regi
 
 | Variable | Valor por defecto | Descripción |
 |---|---|---|
-| `VAULT_PATH` | `~/Projects/knowledge` | Ruta a tu vault de Obsidian |
+| `VAULT_PATH` | `~/Projects/knowledge` | Ruta a tu vault de Obsidian. También aceptado como `HIVE_VAULT_PATH`. |
 | `HIVE_OLLAMA_ENDPOINT` | `http://localhost:11434` | Endpoint de la API de Ollama |
 | `HIVE_OLLAMA_MODEL` | `qwen2.5-coder:7b` | Modelo de Ollama por defecto |
 | `HIVE_OPENROUTER_API_KEY` | — | API key de OpenRouter |

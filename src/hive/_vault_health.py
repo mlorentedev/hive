@@ -11,6 +11,7 @@ from hive._helpers import (
     SECTION_SHORTCUTS,
     _resolve_project_dir,
     _safe_read,
+    _vault_guard,
     count_stale,
     track,
 )
@@ -102,6 +103,10 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
             include_usage: Append vault tool usage analytics. Default False.
             usage_days: Usage look-back window in days. Default 30.
         """  # noqa: E501
+        guard = _vault_guard(ctx)
+        if guard:
+            return track(ctx, "vault_health", guard, project)
+
         parts: list[str] = []
 
         if not checks:

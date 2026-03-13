@@ -28,11 +28,13 @@ Hive is an [MCP](https://modelcontextprotocol.io/) server that connects your AI 
 
 ```bash
 # Claude Code
-claude mcp add -s user hive -- uvx --upgrade hive-vault
+claude mcp add -s user hive -e VAULT_PATH=$HOME/path/to/vault -- uvx --upgrade hive-vault
 
 # Gemini CLI
-gemini mcp add -s user hive-vault uvx -- --upgrade hive-vault
+gemini mcp add -s user -e VAULT_PATH=$HOME/path/to/vault hive-vault uvx -- --upgrade hive-vault
 ```
+
+> Set `VAULT_PATH` to your Obsidian vault directory. Default: `~/Projects/knowledge`.
 
 For Codex CLI, GitHub Copilot, Cursor, Windsurf, and other clients, see [Getting Started](https://mlorentedev.github.io/hive/getting-started/).
 

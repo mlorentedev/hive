@@ -379,6 +379,14 @@ Total estimated savings: ~C tokens
     mcp._usage_tracker = tracker  # type: ignore[attr-defined]
     mcp._hive_ctx = ctx  # type: ignore[attr-defined]
 
+    if not resolved_path.is_dir():
+        _log = logging.getLogger("hive")
+        _log.warning(
+            "Vault path does not exist: %s — vault tools will return "
+            "an error until VAULT_PATH is configured correctly.",
+            resolved_path,
+        )
+
     return mcp
 
 

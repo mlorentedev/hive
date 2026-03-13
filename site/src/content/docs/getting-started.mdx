@@ -70,7 +70,9 @@ The assistant will call `vault_list()` and list all projects with file counts an
 
 ## Configure Vault Path
 
-By default, Hive looks for your vault at `~/Projects/knowledge`. To change it:
+By default, Hive looks for your vault at `~/Projects/knowledge`. If this path doesn't exist, vault tools will return a helpful error with setup instructions — the server still starts, so worker tools remain available.
+
+To point Hive to your vault:
 
 <Tabs syncKey="client">
   <TabItem label="Claude Code">

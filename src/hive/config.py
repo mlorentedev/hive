@@ -9,7 +9,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class HiveSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="HIVE_")
 
-    vault_path: Path = Path.home() / "Projects" / "knowledge"
+    vault_path: Path = Field(
+        default=Path.home() / "Projects" / "knowledge",
+        validation_alias=AliasChoices("HIVE_VAULT_PATH", "VAULT_PATH"),
+    )
     ollama_endpoint: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5-coder:7b"
     openrouter_api_key: str | None = Field(

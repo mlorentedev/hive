@@ -47,6 +47,71 @@ def vault_mcp(mock_vault: Path) -> Generator[FastMCP, None, None]:
     _close_server(mcp)
 
 
+# ── vault not found (missing vault path) ──────────────────────
+
+
+class TestVaultNotFound:
+    """All vault tools return a helpful error when vault path does not exist."""
+
+    @pytest.fixture
+    def missing_vault_mcp(self, tmp_path: Path) -> Generator[FastMCP, None, None]:
+        mcp = create_server(vault_path=tmp_path / "nonexistent")
+        yield mcp
+        _close_server(mcp)
+
+    async def test_vault_list(self, missing_vault_mcp: FastMCP) -> None:
+        result = await missing_vault_mcp.call_tool("vault_list", {})
+        text = _text(result)
+        assert "Vault not found" in text
+        assert "VAULT_PATH" in text
+
+    async def test_vault_query(self, missing_vault_mcp: FastMCP) -> None:
+        result = await missing_vault_mcp.call_tool(
+            "vault_query", {"project": "test"},
+        )
+        assert "Vault not found" in _text(result)
+
+    async def test_vault_search(self, missing_vault_mcp: FastMCP) -> None:
+        result = await missing_vault_mcp.call_tool(
+            "vault_search", {"query": "hello"},
+        )
+        assert "Vault not found" in _text(result)
+
+    async def test_session_briefing(self, missing_vault_mcp: FastMCP) -> None:
+        result = await missing_vault_mcp.call_tool(
+            "session_briefing", {"project": "test"},
+        )
+        assert "Vault not found" in _text(result)
+
+    async def test_vault_write(self, missing_vault_mcp: FastMCP) -> None:
+        result = await missing_vault_mcp.call_tool(
+            "vault_write", {"project": "test", "content": "hello"},
+        )
+        assert "Vault not found" in _text(result)
+
+    async def test_vault_patch(self, missing_vault_mcp: FastMCP) -> None:
+        result = await missing_vault_mcp.call_tool(
+            "vault_patch", {
+                "project": "test", "path": "f.md",
+                "old_text": "a", "new_text": "b",
+            },
+        )
+        assert "Vault not found" in _text(result)
+
+    async def test_vault_health(self, missing_vault_mcp: FastMCP) -> None:
+        result = await missing_vault_mcp.call_tool("vault_health", {})
+        assert "Vault not found" in _text(result)
+
+    async def test_capture_lesson(self, missing_vault_mcp: FastMCP) -> None:
+        result = await missing_vault_mcp.call_tool(
+            "capture_lesson", {
+                "project": "test", "title": "t",
+                "context": "c", "problem": "p", "solution": "s",
+            },
+        )
+        assert "Vault not found" in _text(result)
+
+
 # ── vault_list ──────────────────────────────────────────────
 
 
