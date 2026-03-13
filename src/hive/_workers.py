@@ -75,7 +75,7 @@ def _write_lesson(
     if lessons_file.exists():
         try:
             existing = lessons_file.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             return "error", f"File I/O error: {exc}"
 
     if f"] {title}\n" in existing:
@@ -411,7 +411,7 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
 
             try:
                 file_content = filepath.read_text(encoding="utf-8")
-            except OSError as exc:
+            except (OSError, UnicodeDecodeError) as exc:
                 return track(
                     ctx, "delegate_task", f"File I/O error: {exc}", project,
                 )

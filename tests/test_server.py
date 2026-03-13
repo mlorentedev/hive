@@ -142,6 +142,68 @@ class TestVaultListProjects:
         assert "testproject" in _text(result)
         assert "another" in _text(result)
 
+    async def test_glob_pattern_rejects_dotdot(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_list",
+            {"project": "testproject", "pattern": "../../etc/*.md"},
+        )
+        assert "must not contain" in _text(result).lower()
+
+    async def test_glob_pattern_valid(self, vault_mcp: FastMCP) -> None:
+        result = await vault_mcp.call_tool(
+            "vault_list",
+            {"project": "testproject", "pattern": "*.md"},
+        )
+        text = _text(result)
+        assert "00-context.md" in text
+
+
+# ── unicode / encoding errors ────────────────────────────────────────
+
+
+class TestUnicodeDecodeErrors:
+    """Tools return error message instead of crashing on non-UTF-8 files."""
+
+    async def test_vault_query_non_utf8(self, mock_vault: Path) -> None:
+        bad = mock_vault / "10_projects" / "testproject" / "bad.md"
+        bad.write_bytes(b"\xff\xfe invalid utf-8")
+        mcp = create_server(vault_path=mock_vault)
+        result = await mcp.call_tool(
+            "vault_query", {"project": "testproject", "path": "bad.md"},
+        )
+        text = _text(result)
+        assert "error" in text.lower() or "I/O" in text
+
+    async def test_vault_patch_non_utf8(self, git_vault: Path) -> None:
+        bad = git_vault / "10_projects" / "testproject" / "bad.md"
+        bad.write_bytes(b"\xff\xfe invalid utf-8")
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_patch", {
+                "project": "testproject", "path": "bad.md",
+                "old_text": "a", "new_text": "b",
+            },
+        )
+        text = _text(result)
+        assert "error" in text.lower() or "I/O" in text
+
+    async def test_vault_write_append_non_utf8(
+        self, git_vault: Path,
+    ) -> None:
+        bad = git_vault / "10_projects" / "testproject" / "90-lessons.md"
+        bad.write_bytes(b"\xff\xfe invalid utf-8")
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_write", {
+                "project": "testproject",
+                "content": "\nnew content\n",
+                "section": "lessons",
+                "operation": "append",
+            },
+        )
+        text = _text(result)
+        assert "error" in text.lower() or "I/O" in text
+
 
 # ── vault_query ──────────────────────────────────────────────────────
 
