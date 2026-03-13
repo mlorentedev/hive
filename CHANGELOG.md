@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.2](https://github.com/mlorentedev/hive/compare/v1.11.1...v1.11.2) (2026-03-13)
+
+
+### Bug Fixes
+
+* **config:** accept VAULT_PATH env var and validate vault existence ([#55](https://github.com/mlorentedev/hive/issues/55)) ([ff21fbd](https://github.com/mlorentedev/hive/commit/ff21fbd834936febc635919964fe18783599c916))
+
 ## [1.11.1](https://github.com/mlorentedev/hive/compare/v1.11.0...v1.11.1) (2026-03-12)
 
 
