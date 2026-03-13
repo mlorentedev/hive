@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +31,8 @@ class BudgetTracker:
         if db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
-        self._conn = sqlite3.connect(db_path)
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
         if db_path != ":memory:":
             self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
@@ -44,31 +46,40 @@ class BudgetTracker:
         task_type: str = "general",
     ) -> None:
         """Insert a completed request into the tracking table."""
-        self._conn.execute(
-            "INSERT INTO requests (model, cost_usd, tokens, latency_ms, task_type) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (model, cost_usd, tokens, latency_ms, task_type),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO requests (model, cost_usd, tokens, latency_ms, task_type) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (model, cost_usd, tokens, latency_ms, task_type),
+            )
+            self._conn.commit()
 
-    def month_spent(self) -> float:
-        """Total USD spent in the current month."""
+    def _month_spent(self) -> float:
+        """Internal — caller MUST hold self._lock."""
         row = self._conn.execute(
             f"SELECT COALESCE(SUM(cost_usd), 0.0) FROM requests {_MONTH_CLAUSE}"
         ).fetchone()
         return float(row[0]) if row else 0.0
 
+    def month_spent(self) -> float:
+        """Total USD spent in the current month."""
+        with self._lock:
+            return self._month_spent()
+
     def month_remaining(self, budget: float) -> float:
         """How much budget remains this month."""
-        return budget - self.month_spent()
+        with self._lock:
+            return budget - self._month_spent()
 
     def can_spend(self, budget: float, amount: float) -> bool:
         """Check if spending `amount` would stay within budget."""
-        return self.month_remaining(budget) >= amount
+        with self._lock:
+            return (budget - self._month_spent()) >= amount
 
     def close(self) -> None:
         """Close the database connection."""
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
 
     def __del__(self) -> None:
         with contextlib.suppress(Exception):
@@ -76,23 +87,24 @@ class BudgetTracker:
 
     def month_stats(self, budget: float) -> dict[str, Any]:
         """Aggregate stats for the current month."""
-        spent = self.month_spent()
-        count_row = self._conn.execute(
-            f"SELECT COUNT(*) FROM requests {_MONTH_CLAUSE}"
-        ).fetchone()
-        request_count = count_row[0] if count_row else 0
+        with self._lock:
+            spent = self._month_spent()
+            count_row = self._conn.execute(
+                f"SELECT COUNT(*) FROM requests {_MONTH_CLAUSE}"
+            ).fetchone()
+            request_count = count_row[0] if count_row else 0
 
-        by_model: dict[str, dict[str, Any]] = {}
-        rows = self._conn.execute(
-            "SELECT model, COUNT(*), SUM(cost_usd), AVG(latency_ms) "
-            f"FROM requests {_MONTH_CLAUSE} GROUP BY model"
-        ).fetchall()
-        for model, cnt, total_cost, avg_latency in rows:
-            by_model[model] = {
-                "count": cnt,
-                "total_cost": total_cost,
-                "avg_latency_ms": int(avg_latency),
-            }
+            by_model: dict[str, dict[str, Any]] = {}
+            rows = self._conn.execute(
+                "SELECT model, COUNT(*), SUM(cost_usd), AVG(latency_ms) "
+                f"FROM requests {_MONTH_CLAUSE} GROUP BY model"
+            ).fetchall()
+            for model, cnt, total_cost, avg_latency in rows:
+                by_model[model] = {
+                    "count": cnt,
+                    "total_cost": total_cost,
+                    "avg_latency_ms": int(avg_latency),
+                }
 
         return {
             "spent": spent,

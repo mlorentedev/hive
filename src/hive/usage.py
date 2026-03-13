@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ class UsageTracker:
         if db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
+        self._lock = threading.Lock()
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         if db_path != ":memory:":
             self._conn.execute("PRAGMA journal_mode=WAL")
@@ -38,15 +40,17 @@ class UsageTracker:
         response_lines: int = 0,
     ) -> None:
         """Record a vault tool call."""
-        self._conn.execute(
-            "INSERT INTO tool_calls (tool, project, response_lines) VALUES (?, ?, ?)",
-            (tool, project, response_lines),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO tool_calls (tool, project, response_lines) VALUES (?, ?, ?)",
+                (tool, project, response_lines),
+            )
+            self._conn.commit()
 
     def close(self) -> None:
         """Close the database connection."""
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
 
     def __del__(self) -> None:
         with contextlib.suppress(Exception):
@@ -57,39 +61,40 @@ class UsageTracker:
         since_clause = "WHERE date >= date('now', ? || ' days')"
         since_param = str(-since_days)
 
-        total_row = self._conn.execute(
-            f"SELECT COUNT(*) FROM tool_calls {since_clause}",
-            (since_param,),
-        ).fetchone()
-        total_calls = total_row[0] if total_row else 0
+        with self._lock:
+            total_row = self._conn.execute(
+                f"SELECT COUNT(*) FROM tool_calls {since_clause}",
+                (since_param,),
+            ).fetchone()
+            total_calls = total_row[0] if total_row else 0
 
-        by_tool: dict[str, int] = {}
-        rows = self._conn.execute(
-            "SELECT tool, COUNT(*) FROM tool_calls "
-            f"{since_clause} "
-            "GROUP BY tool ORDER BY COUNT(*) DESC",
-            (since_param,),
-        ).fetchall()
-        for tool, count in rows:
-            by_tool[tool] = count
+            by_tool: dict[str, int] = {}
+            rows = self._conn.execute(
+                "SELECT tool, COUNT(*) FROM tool_calls "
+                f"{since_clause} "
+                "GROUP BY tool ORDER BY COUNT(*) DESC",
+                (since_param,),
+            ).fetchall()
+            for tool, count in rows:
+                by_tool[tool] = count
 
-        by_project: dict[str, int] = {}
-        rows = self._conn.execute(
-            "SELECT project, COUNT(*) FROM tool_calls "
-            f"{since_clause} "
-            "AND project != '' "
-            "GROUP BY project ORDER BY COUNT(*) DESC",
-            (since_param,),
-        ).fetchall()
-        for project, count in rows:
-            by_project[project] = count
+            by_project: dict[str, int] = {}
+            rows = self._conn.execute(
+                "SELECT project, COUNT(*) FROM tool_calls "
+                f"{since_clause} "
+                "AND project != '' "
+                "GROUP BY project ORDER BY COUNT(*) DESC",
+                (since_param,),
+            ).fetchall()
+            for project, count in rows:
+                by_project[project] = count
 
-        total_lines_row = self._conn.execute(
-            "SELECT COALESCE(SUM(response_lines), 0) FROM tool_calls "
-            f"{since_clause}",
-            (since_param,),
-        ).fetchone()
-        total_lines = total_lines_row[0] if total_lines_row else 0
+            total_lines_row = self._conn.execute(
+                "SELECT COALESCE(SUM(response_lines), 0) FROM tool_calls "
+                f"{since_clause}",
+                (since_param,),
+            ).fetchone()
+            total_lines = total_lines_row[0] if total_lines_row else 0
 
         return {
             "total_calls": total_calls,

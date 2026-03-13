@@ -6,6 +6,7 @@ import difflib
 import logging
 import re
 import subprocess
+import threading
 from datetime import date
 from typing import TYPE_CHECKING
 
@@ -333,6 +334,8 @@ def track(
 
 # ── Git operations ─────────────────────────────────────────────────────
 
+_GIT_LOCK = threading.Lock()
+
 
 def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
     """Stage a file and commit it in the vault git repo.
@@ -340,29 +343,33 @@ def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
     This is a best-effort side-effect: failures are logged but never
     propagated, so a git problem cannot crash the MCP server or prevent
     the tool response from reaching the client.
+
+    Serialized via ``_GIT_LOCK`` to prevent concurrent git-add/commit
+    from interleaving and corrupting the index.
     """
     safe_msg = message.replace("\n", " ").replace("\r", " ")
-    try:
-        subprocess.run(
-            ["git", "add", str(rel_path)],
-            cwd=vault_path,
-            capture_output=True,
-            check=True,
-            timeout=30,
-        )
-        subprocess.run(
-            ["git", "commit", "-m", safe_msg],
-            cwd=vault_path,
-            capture_output=True,
-            check=True,
-            timeout=30,
-        )
-    except subprocess.CalledProcessError as exc:
-        _log.warning("git commit failed for %s: %s", rel_path, exc)
-    except subprocess.TimeoutExpired as exc:
-        _log.warning("git commit timed out for %s: %s", rel_path, exc)
-    except Exception as exc:
-        _log.warning("git commit unexpected error for %s: %s", rel_path, exc)
+    with _GIT_LOCK:
+        try:
+            subprocess.run(
+                ["git", "add", str(rel_path)],
+                cwd=vault_path,
+                capture_output=True,
+                check=True,
+                timeout=30,
+            )
+            subprocess.run(
+                ["git", "commit", "-m", safe_msg],
+                cwd=vault_path,
+                capture_output=True,
+                check=True,
+                timeout=30,
+            )
+        except subprocess.CalledProcessError as exc:
+            _log.warning("git commit failed for %s: %s", rel_path, exc)
+        except subprocess.TimeoutExpired as exc:
+            _log.warning("git commit timed out for %s: %s", rel_path, exc)
+        except Exception as exc:
+            _log.warning("git commit unexpected error for %s: %s", rel_path, exc)
 
 
 def _git_log(vault_path: Path, n: int) -> str:

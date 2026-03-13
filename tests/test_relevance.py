@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from hive.relevance import RelevanceTracker
 
 
@@ -154,3 +156,67 @@ class TestFileDB:
         t2 = RelevanceTracker(str(db))
         score2 = t2.get_scores("hive")["tasks"]
         assert score2 == score1
+
+
+class TestThreadSafety:
+    """Concurrent access must not raise SQLITE_MISUSE."""
+
+    def test_concurrent_record_access(self, tmp_path: object) -> None:
+        from pathlib import Path
+
+        db = Path(str(tmp_path)) / "concurrent.db"
+        t = RelevanceTracker(str(db))
+        errors: list[Exception] = []
+        n_threads = 8
+        n_ops = 50
+
+        def worker(thread_id: int) -> None:
+            try:
+                for i in range(n_ops):
+                    t.record_access(f"project-{thread_id}", f"section-{i}")
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=worker, args=(i,))
+            for i in range(n_threads)
+        ]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+
+        assert errors == [], f"Thread errors: {errors}"
+
+    def test_concurrent_record_and_read(self, tmp_path: object) -> None:
+        from pathlib import Path
+
+        db = Path(str(tmp_path)) / "mixed.db"
+        t = RelevanceTracker(str(db))
+        errors: list[Exception] = []
+
+        def writer() -> None:
+            try:
+                for i in range(50):
+                    t.record_access("hive", f"section-{i}")
+            except Exception as exc:
+                errors.append(exc)
+
+        def reader() -> None:
+            try:
+                for _ in range(50):
+                    t.top_sections("hive", n=5)
+                    t.get_scores("hive")
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [
+            *[threading.Thread(target=writer) for _ in range(4)],
+            *[threading.Thread(target=reader) for _ in range(4)],
+        ]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+
+        assert errors == [], f"Thread errors: {errors}"
