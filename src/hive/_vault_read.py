@@ -17,6 +17,7 @@ from hive._helpers import (
     _safe_read,
     _score_file,
     _truncate,
+    _vault_guard,
     count_stale,
     track,
 )
@@ -74,6 +75,10 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             path: Subdirectory within the project. Empty = project root.
             pattern: Glob pattern to filter files (e.g. 'adr-*', '*.md').
         """
+        guard = _vault_guard(ctx)
+        if guard:
+            return track(ctx, "vault_list", guard)
+
         if not project:
             return track(ctx, "vault_list", list_projects_text(ctx))
 
@@ -138,6 +143,10 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             max_lines: Maximum lines to return. 0 = unlimited.
             include_metadata: Prepend a structured metadata line from YAML frontmatter.
         """
+        guard = _vault_guard(ctx)
+        if guard:
+            return track(ctx, "vault_query", guard, project)
+
         resolved_section = path or section
         result = _resolve_file(ctx.vault, project, section, path, ctx.scopes)
         if isinstance(result, str):
@@ -190,6 +199,10 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             since_days: Show recent changes (0 = disabled). Default 0.
             project: Filter to this project (recent mode only).
         """
+        guard = _vault_guard(ctx)
+        if guard:
+            return track(ctx, "vault_search", guard)
+
         if since_days < 0:
             return track(
                 ctx, "vault_search", "since_days must be a positive number.",
@@ -392,6 +405,10 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         Args:
             project: Project slug (directory under 10_projects/).
         """
+        guard = _vault_guard(ctx)
+        if guard:
+            return track(ctx, "session_briefing", guard, project)
+
         resolved = _resolve_project_dir(ctx.vault, project, ctx.scopes)
         if resolved is None:
             return track(ctx, "session_briefing",

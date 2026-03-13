@@ -36,6 +36,28 @@ SECTION_SHORTCUTS: dict[str, str] = {
 
 _DEFAULT_SCOPES: dict[str, str] = {"projects": "10_projects", "meta": "00_meta"}
 
+_VAULT_NOT_FOUND_MSG = (
+    "Vault not found at {path}.\n\n"
+    "Set the vault path when registering the MCP server:\n\n"
+    "  Claude Code:\n"
+    "    claude mcp add -s user hive "
+    "-e VAULT_PATH=$HOME/your-vault "
+    "-- uvx --upgrade hive-vault\n\n"
+    "  Gemini CLI:\n"
+    "    gemini mcp add -s user "
+    "-e VAULT_PATH=$HOME/your-vault "
+    "hive-vault uvx -- --upgrade hive-vault\n\n"
+    "See https://mlorentedev.github.io/hive/configuration/"
+)
+
+
+def _vault_guard(ctx: ServerContext) -> str:
+    """Return an error message if vault is not available, or empty string if OK."""
+    if ctx.vault.is_dir():
+        return ""
+    return _VAULT_NOT_FOUND_MSG.format(path=ctx.vault)
+
+
 _SUMMARIZE_THRESHOLD = 50
 
 _STATUS_WEIGHTS: dict[str, float] = {

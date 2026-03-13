@@ -19,6 +19,7 @@ from hive._helpers import (
     _make_frontmatter,
     _resolve_file,
     _resolve_project_dir,
+    _vault_guard,
     track,
 )
 from hive.frontmatter import extract_body, parse_frontmatter
@@ -194,6 +195,10 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
             min_confidence: Minimum confidence for batch extraction. Default 0.7.
             max_lessons: Maximum lessons to extract in batch mode. Default 5.
         """
+        guard = _vault_guard(ctx)
+        if guard:
+            return track(ctx, "capture_lesson", guard, project)
+
         resolved = _resolve_project_dir(ctx.vault, project, ctx.scopes)
         if resolved is None:
             return track(

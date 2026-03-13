@@ -3,6 +3,26 @@ title: Troubleshooting
 description: Common issues and fixes for Hive MCP server.
 ---
 
+## Vault Not Found
+
+**Symptom:** Vault tools (vault_list, vault_query, etc.) return "Vault not found at /home/user/Projects/knowledge" with setup instructions.
+
+**Cause:** The vault path was not configured when registering the MCP server. Hive defaults to `~/Projects/knowledge`, which may not exist on your machine.
+
+**Fix:** Re-register the MCP server with `VAULT_PATH` pointing to your Obsidian vault:
+
+```bash
+# Claude Code
+claude mcp add -s user hive -e VAULT_PATH=$HOME/my-vault -- uvx --upgrade hive-vault
+
+# Gemini CLI
+gemini mcp add -s user -e VAULT_PATH=$HOME/my-vault hive-vault uvx -- --upgrade hive-vault
+```
+
+Both `VAULT_PATH` and `HIVE_VAULT_PATH` are accepted. If both are set, `HIVE_VAULT_PATH` takes precedence.
+
+**Note:** The server starts even without a valid vault path — worker tools (`worker_status`, `delegate_task`) still work. Only vault-specific tools require a valid path.
+
 ## Hive Not Available in Other Projects
 
 **Symptom:** You installed Hive in one project but it doesn't appear when starting a session in a different project.

@@ -53,6 +53,16 @@ class TestEnvOverride:
         monkeypatch.setenv("HIVE_VAULT_PATH", "/tmp/vault")
         assert HiveSettings().vault_path == Path("/tmp/vault")
 
+    def test_vault_path_without_prefix(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("HIVE_VAULT_PATH", raising=False)
+        monkeypatch.setenv("VAULT_PATH", "/tmp/bare-vault")
+        assert HiveSettings().vault_path == Path("/tmp/bare-vault")
+
+    def test_hive_vault_path_takes_precedence(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("VAULT_PATH", "/tmp/bare")
+        monkeypatch.setenv("HIVE_VAULT_PATH", "/tmp/prefixed")
+        assert HiveSettings().vault_path == Path("/tmp/prefixed")
+
 
 class TestVaultScopes:
     def test_default_scopes(self) -> None:
