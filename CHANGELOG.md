@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.3](https://github.com/mlorentedev/hive/compare/v1.11.2...v1.11.3) (2026-03-13)
+
+
+### Bug Fixes
+
+* harden vault tools against encoding errors and path traversal ([#57](https://github.com/mlorentedev/hive/issues/57)) ([edcd3c0](https://github.com/mlorentedev/hive/commit/edcd3c087bb253ea2ba0af8c5e895f98eb4d213f))
+
 ## [1.11.2](https://github.com/mlorentedev/hive/compare/v1.11.1...v1.11.2) (2026-03-13)
 
 
