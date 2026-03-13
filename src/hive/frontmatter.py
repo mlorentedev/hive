@@ -27,6 +27,7 @@ class Frontmatter:
 
 def parse_frontmatter(text: str) -> Frontmatter | None:
     """Tolerant frontmatter parser. Returns None if no valid frontmatter found."""
+    text = text.lstrip("\r\n \ufeff")
     if not text.startswith("---"):
         return None
 
@@ -60,6 +61,7 @@ def parse_frontmatter(text: str) -> Frontmatter | None:
 
 def validate_frontmatter(content: str) -> str | None:
     """Strict validation for writes. Returns error message or None if valid."""
+    content = content.lstrip("\r\n \ufeff")
     if not content.startswith("---"):
         return "Content must start with YAML frontmatter (---)."
 
@@ -84,6 +86,7 @@ def validate_frontmatter(content: str) -> str | None:
 
 def extract_body(text: str) -> str:
     """Return markdown body without frontmatter."""
+    text = text.lstrip("\r\n \ufeff")
     if not text.startswith("---"):
         return text
 

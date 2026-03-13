@@ -76,6 +76,24 @@ class TestParseFrontmatter:
         assert fm is not None
         assert fm.tags == []
 
+    def test_leading_carriage_return(self) -> None:
+        text = "\r---\nid: x\ntype: y\nstatus: z\n---\nBody\n"
+        fm = parse_frontmatter(text)
+        assert fm is not None
+        assert fm.id == "x"
+
+    def test_leading_bom(self) -> None:
+        text = "\ufeff---\nid: x\ntype: y\nstatus: z\n---\nBody\n"
+        fm = parse_frontmatter(text)
+        assert fm is not None
+        assert fm.id == "x"
+
+    def test_leading_whitespace(self) -> None:
+        text = "  \n---\nid: x\ntype: y\nstatus: z\n---\nBody\n"
+        fm = parse_frontmatter(text)
+        assert fm is not None
+        assert fm.id == "x"
+
 
 # ── validate_frontmatter ────────────────────────────────────────────
 
@@ -112,6 +130,14 @@ class TestValidateFrontmatter:
         assert "type" in err
         assert "status" in err
 
+    def test_leading_carriage_return(self) -> None:
+        content = "\r---\nid: x\ntype: adr\nstatus: active\n---\n\n# ADR\n"
+        assert validate_frontmatter(content) is None
+
+    def test_leading_bom(self) -> None:
+        content = "\ufeff---\nid: x\ntype: adr\nstatus: active\n---\n\n# ADR\n"
+        assert validate_frontmatter(content) is None
+
 
 # ── extract_body ────────────────────────────────────────────────────
 
@@ -128,6 +154,10 @@ class TestExtractBody:
     def test_malformed_returns_all(self) -> None:
         text = "---\nid: x\n"
         assert extract_body(text) == text
+
+    def test_leading_carriage_return(self) -> None:
+        text = "\r---\nid: x\ntype: y\nstatus: z\n---\n\n# Title\nBody.\n"
+        assert extract_body(text) == "# Title\nBody.\n"
 
 
 # ── parse_date ──────────────────────────────────────────────────────
