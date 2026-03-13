@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.4](https://github.com/mlorentedev/hive/compare/v1.11.3...v1.11.4) (2026-03-13)
+
+
+### Bug Fixes
+
+* thread-safe SQLite trackers and vault write serialization ([#60](https://github.com/mlorentedev/hive/issues/60)) ([c11b7e2](https://github.com/mlorentedev/hive/commit/c11b7e2779166fb856532ab04e56195a0f71b9bd))
+
 ## [1.11.3](https://github.com/mlorentedev/hive/compare/v1.11.2...v1.11.3) (2026-03-13)
 
 
