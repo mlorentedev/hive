@@ -72,4 +72,4 @@ Todas las escrituras al vault hacen auto-commit a git. Esto proporciona historia
 
 ### Controles de Presupuesto
 
-La delegación de workers usa una base de datos SQLite con modo WAL y `threading.Lock` explícito para acceso concurrente thread-safe. Los topes mensuales y límites por petición previenen sobrecostes. Ver [ADR-004](/es/reference/decisions/) para el modelo de threading.
+La delegación de workers usa una base de datos SQLite con modo WAL y `threading.Lock` explícito para acceso concurrente thread-safe. Los topes mensuales y límites por petición previenen sobrecostes.

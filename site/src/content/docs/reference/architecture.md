@@ -72,4 +72,4 @@ All vault writes auto-commit to git. This provides full history and enables `vau
 
 ### Budget Controls
 
-Worker delegation uses a SQLite database with WAL mode and explicit `threading.Lock` for thread-safe concurrent access. Monthly caps and per-request limits prevent cost overruns. See [ADR-004](/reference/decisions/) for the threading model.
+Worker delegation uses a SQLite database with WAL mode and explicit `threading.Lock` for thread-safe concurrent access. Monthly caps and per-request limits prevent cost overruns.
