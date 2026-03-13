@@ -37,7 +37,7 @@ delegate_task(prompt, context, max_cost_per_request)
 - **Tope mensual**: `HIVE_OPENROUTER_BUDGET` (por defecto: $1.00)
 - **Tope por petición**: parámetro `max_cost_per_request` en `delegate_task`
 - **Modelo de pago**: `HIVE_OPENROUTER_PAID_MODEL` (por defecto: `qwen/qwen3-coder`)
-- El tracking de presupuesto usa SQLite con modo WAL para acceso concurrente
+- El tracking de presupuesto usa SQLite con modo WAL y locking thread-safe para acceso concurrente
 
 ## Cuándo Delegar
 

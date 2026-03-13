@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import random
 import sqlite3
+import threading
 from pathlib import Path
 
 _SCHEMA = """\
@@ -37,6 +38,7 @@ class RelevanceTracker:
     ) -> None:
         if db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         if db_path != ":memory:":
             self._conn.execute("PRAGMA journal_mode=WAL")
@@ -47,7 +49,8 @@ class RelevanceTracker:
 
     def close(self) -> None:
         """Close the database connection."""
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
 
     def __del__(self) -> None:
         with contextlib.suppress(Exception):
@@ -61,44 +64,51 @@ class RelevanceTracker:
         Write operations (vault_write) get a boosted signal.
         """
         signal = self._alpha * (_WRITE_MULTIPLIER if is_write else 1.0)
-        row = self._conn.execute(
-            "SELECT score FROM section_scores WHERE project = ? AND section = ?",
-            (project, section),
-        ).fetchone()
-        if row is None:
-            self._conn.execute(
-                "INSERT INTO section_scores (project, section, score, access_count) "
-                "VALUES (?, ?, ?, 1)",
-                (project, section, signal),
-            )
-        else:
-            old_score: float = row[0]
-            new_score = signal + (1 - self._alpha) * old_score
-            self._conn.execute(
-                "UPDATE section_scores SET score = ?, access_count = access_count + 1, "
-                "last_accessed = datetime('now') WHERE project = ? AND section = ?",
-                (new_score, project, section),
-            )
-        self._conn.commit()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT score FROM section_scores WHERE project = ? AND section = ?",
+                (project, section),
+            ).fetchone()
+            if row is None:
+                self._conn.execute(
+                    "INSERT INTO section_scores (project, section, score, access_count) "
+                    "VALUES (?, ?, ?, 1)",
+                    (project, section, signal),
+                )
+            else:
+                old_score: float = row[0]
+                new_score = signal + (1 - self._alpha) * old_score
+                self._conn.execute(
+                    "UPDATE section_scores SET score = ?, access_count = access_count + 1, "
+                    "last_accessed = datetime('now') WHERE project = ? AND section = ?",
+                    (new_score, project, section),
+                )
+            self._conn.commit()
 
     def apply_decay(self) -> None:
         """Apply decay factor to all scores. Prune near-zero entries."""
-        self._conn.execute(
-            "UPDATE section_scores SET score = score * ?", (self._decay_factor,),
-        )
-        self._conn.execute(
-            "DELETE FROM section_scores WHERE score < ?", (_PRUNE_THRESHOLD,),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE section_scores SET score = score * ?", (self._decay_factor,),
+            )
+            self._conn.execute(
+                "DELETE FROM section_scores WHERE score < ?", (_PRUNE_THRESHOLD,),
+            )
+            self._conn.commit()
 
-    def top_sections(self, project: str, n: int = 5) -> list[str]:
-        """Return top-N sections by score for a project."""
+    def _top_sections(self, project: str, n: int = 5) -> list[str]:
+        """Internal — caller MUST hold self._lock."""
         rows = self._conn.execute(
             "SELECT section FROM section_scores "
             "WHERE project = ? ORDER BY score DESC LIMIT ?",
             (project, n),
         ).fetchall()
         return [row[0] for row in rows]
+
+    def top_sections(self, project: str, n: int = 5) -> list[str]:
+        """Return top-N sections by score for a project."""
+        with self._lock:
+            return self._top_sections(project, n)
 
     def top_sections_with_exploration(
         self,
@@ -109,7 +119,8 @@ class RelevanceTracker:
     ) -> list[str]:
         """Top-N sections with epsilon-greedy exploration from recent vault changes."""
         eps = epsilon if epsilon is not None else self._epsilon
-        top = self.top_sections(project, n)
+        with self._lock:
+            top = self._top_sections(project, n)
         if not recent_sections or eps <= 0:
             return top
 
@@ -124,9 +135,10 @@ class RelevanceTracker:
 
     def get_scores(self, project: str) -> dict[str, float]:
         """Get all section scores for a project, sorted by score descending."""
-        rows = self._conn.execute(
-            "SELECT section, score FROM section_scores "
-            "WHERE project = ? ORDER BY score DESC",
-            (project,),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT section, score FROM section_scores "
+                "WHERE project = ? ORDER BY score DESC",
+                (project,),
+            ).fetchall()
         return {section: score for section, score in rows}

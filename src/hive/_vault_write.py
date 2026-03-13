@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING
 
 from hive._helpers import (
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
     from hive._context import ServerContext
 
 _WRITE_OPERATIONS = frozenset({"append", "replace", "create"})
+_WRITE_LOCK = threading.Lock()
 
 
 def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
@@ -89,32 +91,34 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             boundary_error = _check_path_boundary(filepath, ctx.vault)
             if boundary_error:
                 return track(ctx, "vault_write", boundary_error, project)
-            if filepath.exists():
-                return track(
-                    ctx, "vault_write",
-                    f"File already exists: {path}. "
-                    "Use vault_write(operation='replace') to modify.",
-                    project,
-                )
 
             frontmatter = _make_frontmatter(filepath.stem, doc_type)
 
-            try:
-                filepath.parent.mkdir(parents=True, exist_ok=True)
-                filepath.write_text(
-                    frontmatter + content, encoding="utf-8",
-                )
-            except OSError as exc:
-                return track(
-                    ctx, "vault_write", f"File I/O error: {exc}", project,
-                )
+            with _WRITE_LOCK:
+                if filepath.exists():
+                    return track(
+                        ctx, "vault_write",
+                        f"File already exists: {path}. "
+                        "Use vault_write(operation='replace') to modify.",
+                        project,
+                    )
 
-            rel = filepath.relative_to(ctx.vault)
-            display = "00_meta" if project == "_meta" else project
-            _git_commit(
-                ctx.vault, rel,
-                f"vault: create {display}/{path}",
-            )
+                try:
+                    filepath.parent.mkdir(parents=True, exist_ok=True)
+                    filepath.write_text(
+                        frontmatter + content, encoding="utf-8",
+                    )
+                except OSError as exc:
+                    return track(
+                        ctx, "vault_write", f"File I/O error: {exc}", project,
+                    )
+
+                rel = filepath.relative_to(ctx.vault)
+                display = "00_meta" if project == "_meta" else project
+                _git_commit(
+                    ctx.vault, rel,
+                    f"vault: create {display}/{path}",
+                )
 
             return track(
                 ctx, "vault_write",
@@ -150,27 +154,28 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     project,
                 )
 
-        try:
-            if operation == "append":
-                existing = (
-                    filepath.read_text(encoding="utf-8")
-                    if filepath.exists()
-                    else ""
+        with _WRITE_LOCK:
+            try:
+                if operation == "append":
+                    existing = (
+                        filepath.read_text(encoding="utf-8")
+                        if filepath.exists()
+                        else ""
+                    )
+                    filepath.write_text(
+                        existing + content, encoding="utf-8",
+                    )
+                else:
+                    filepath.write_text(content, encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                return track(
+                    ctx, "vault_write", f"File I/O error: {exc}", project,
                 )
-                filepath.write_text(
-                    existing + content, encoding="utf-8",
-                )
-            else:
-                filepath.write_text(content, encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            return track(
-                ctx, "vault_write", f"File I/O error: {exc}", project,
-            )
 
-        rel = filepath.relative_to(ctx.vault)
-        _git_commit(
-            ctx.vault, rel, f"vault: update {project}/{section}",
-        )
+            rel = filepath.relative_to(ctx.vault)
+            _git_commit(
+                ctx.vault, rel, f"vault: update {project}/{section}",
+            )
 
         return track(
             ctx, "vault_write",
@@ -252,41 +257,42 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                          f"File '{path}' not found in project '{project}'.",
                          project)
 
-        try:
-            content = filepath.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            return track(ctx, "vault_patch",
-                         f"File I/O error reading '{path}': {exc}", project)
+        with _WRITE_LOCK:
+            try:
+                content = filepath.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                return track(ctx, "vault_patch",
+                             f"File I/O error reading '{path}': {exc}", project)
 
-        # Validate and apply all patches on a working copy first
-        working = content
-        for i, patch in enumerate(patch_list, 1):
-            if "old_text" not in patch or "new_text" not in patch:
-                label = f"patch {i}: " if len(patch_list) > 1 else ""
-                return track(
-                    ctx, "vault_patch",
-                    f"{label}Each patch must have 'old_text' and 'new_text' keys.",
-                    project,
+            # Validate and apply all patches on a working copy first
+            working = content
+            for i, patch in enumerate(patch_list, 1):
+                if "old_text" not in patch or "new_text" not in patch:
+                    label = f"patch {i}: " if len(patch_list) > 1 else ""
+                    return track(
+                        ctx, "vault_patch",
+                        f"{label}Each patch must have 'old_text' and 'new_text' keys.",
+                        project,
+                    )
+                ok, result = _match_and_replace(
+                    working, patch["old_text"], patch["new_text"],
                 )
-            ok, result = _match_and_replace(
-                working, patch["old_text"], patch["new_text"],
-            )
-            if not ok:
-                label = f"patch {i}: " if len(patch_list) > 1 else ""
-                return track(
-                    ctx, "vault_patch", f"{label}{result}", project,
-                )
-            working = result
+                if not ok:
+                    label = f"patch {i}: " if len(patch_list) > 1 else ""
+                    return track(
+                        ctx, "vault_patch", f"{label}{result}", project,
+                    )
+                working = result
 
-        try:
-            filepath.write_text(working, encoding="utf-8")
-        except OSError as exc:
-            return track(ctx, "vault_patch",
-                         f"File I/O error writing '{path}': {exc}", project)
+            try:
+                filepath.write_text(working, encoding="utf-8")
+            except OSError as exc:
+                return track(ctx, "vault_patch",
+                             f"File I/O error writing '{path}': {exc}", project)
 
-        rel = filepath.relative_to(ctx.vault)
-        n = len(patch_list)
-        _git_commit(ctx.vault, rel, f"vault: patch {project}/{path}")
+            rel = filepath.relative_to(ctx.vault)
+            n = len(patch_list)
+            _git_commit(ctx.vault, rel, f"vault: patch {project}/{path}")
 
         noun = "patch" if n == 1 else "patches"
         return track(ctx, "vault_patch",

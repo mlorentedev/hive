@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from hive.budget import BudgetTracker
@@ -138,3 +140,71 @@ class TestFileDB:
         # Verify data persists across instances
         tracker2 = BudgetTracker(db_path=str(db_file))
         assert tracker2.month_spent() == pytest.approx(0.5)
+
+
+class TestThreadSafety:
+    """Concurrent access must not raise SQLITE_MISUSE."""
+
+    def test_concurrent_record_request(self, tmp_path: object) -> None:
+        from pathlib import Path
+
+        db = Path(str(tmp_path)) / "concurrent.db"
+        tracker = BudgetTracker(db_path=str(db))
+        errors: list[Exception] = []
+        n_threads = 8
+        n_ops = 50
+
+        def worker() -> None:
+            try:
+                for i in range(n_ops):
+                    tracker.record_request(
+                        f"model-{i}", cost_usd=0.01, tokens=10,
+                        latency_ms=10, task_type="test",
+                    )
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == [], f"Thread errors: {errors}"
+        assert tracker.month_spent() == pytest.approx(n_threads * n_ops * 0.01)
+
+    def test_concurrent_record_and_read(self, tmp_path: object) -> None:
+        from pathlib import Path
+
+        db = Path(str(tmp_path)) / "mixed.db"
+        tracker = BudgetTracker(db_path=str(db))
+        errors: list[Exception] = []
+
+        def writer() -> None:
+            try:
+                for _ in range(50):
+                    tracker.record_request(
+                        "m", cost_usd=0.01, tokens=10,
+                        latency_ms=10, task_type="test",
+                    )
+            except Exception as exc:
+                errors.append(exc)
+
+        def reader() -> None:
+            try:
+                for _ in range(50):
+                    tracker.month_stats(budget=5.0)
+                    tracker.can_spend(budget=5.0, amount=0.01)
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [
+            *[threading.Thread(target=writer) for _ in range(4)],
+            *[threading.Thread(target=reader) for _ in range(4)],
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == [], f"Thread errors: {errors}"
