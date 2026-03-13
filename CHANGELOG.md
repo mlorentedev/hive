@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.5](https://github.com/mlorentedev/hive/compare/v1.11.4...v1.11.5) (2026-03-13)
+
+
+### Bug Fixes
+
+* **site:** remove broken ADR-004 links in architecture docs ([c87f5bf](https://github.com/mlorentedev/hive/commit/c87f5bfa9e63b1b5ec224c6becf3be0734c39d88))
+
 ## [1.11.4](https://github.com/mlorentedev/hive/compare/v1.11.3...v1.11.4) (2026-03-13)
 
 
