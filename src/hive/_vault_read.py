@@ -39,14 +39,20 @@ def list_projects_text(ctx: ServerContext) -> str:
         scope_dir = ctx.vault / dir_name
         if not scope_dir.is_dir():
             continue
-        projects = sorted(d for d in scope_dir.iterdir() if d.is_dir())
+        try:
+            projects = sorted(d for d in scope_dir.iterdir() if d.is_dir())
+        except OSError:
+            continue
         for project_dir in projects:
             found_any = True
             sections = [
                 s for s, filename in SECTION_SHORTCUTS.items()
                 if (project_dir / filename).exists()
             ]
-            md_count = len(list(project_dir.rglob("*.md")))
+            try:
+                md_count = len(list(project_dir.rglob("*.md")))
+            except OSError:
+                md_count = 0
             lines.append(
                 f"- **{scope_name}/{project_dir.name}** — {md_count} files, "
                 f"shortcuts: {', '.join(sections) or 'none'}"
@@ -106,7 +112,24 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
 
         max_list_results = 500
         if pattern:
-            files = sorted(f for f in target.rglob(pattern) if f.is_file())
+            if ".." in pattern:
+                return track(
+                    ctx, "vault_list",
+                    "Pattern must not contain '..'.",
+                    project,
+                )
+            try:
+                files = sorted(
+                    f for f in target.rglob(pattern)
+                    if f.is_file()
+                    and _check_path_boundary(f, ctx.vault) is None
+                )
+            except OSError:
+                return track(
+                    ctx, "vault_list",
+                    f"Error reading directory for pattern '{pattern}'.",
+                    project,
+                )
             if not files:
                 return track(
                     ctx, "vault_list",
@@ -117,12 +140,20 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
                 rel_f = f.relative_to(target)
                 lines.append(f"- {rel_f}")
         else:
-            dirs = sorted(d for d in target.iterdir() if d.is_dir())
-            for d in dirs:
-                lines.append(f"- {d.name}/")
-            files = sorted(f for f in target.iterdir() if f.is_file())
-            for f in files:
-                lines.append(f"- {f.name}")
+            try:
+                entries = sorted(target.iterdir())
+            except OSError:
+                return track(
+                    ctx, "vault_list",
+                    f"Error reading directory '{path or project}'.",
+                    project,
+                )
+            for d in entries:
+                if d.is_dir():
+                    lines.append(f"- {d.name}/")
+            for f in entries:
+                if f.is_file():
+                    lines.append(f"- {f.name}")
 
         return track(ctx, "vault_list", "\n".join(lines), project, path)
 
@@ -155,7 +186,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
 
         try:
             content = filepath.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             return track(ctx, "vault_query",
                          f"File I/O error: {exc}", project, resolved_section)
 

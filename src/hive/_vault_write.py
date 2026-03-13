@@ -162,7 +162,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 )
             else:
                 filepath.write_text(content, encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             return track(
                 ctx, "vault_write", f"File I/O error: {exc}", project,
             )
@@ -254,7 +254,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
         try:
             content = filepath.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             return track(ctx, "vault_patch",
                          f"File I/O error reading '{path}': {exc}", project)
 

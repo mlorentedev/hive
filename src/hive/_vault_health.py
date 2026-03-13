@@ -45,12 +45,18 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
         scope_dir = ctx.vault / dir_name
         if not scope_dir.is_dir():
             continue
-        projects = sorted(d for d in scope_dir.iterdir() if d.is_dir())
+        try:
+            projects = sorted(d for d in scope_dir.iterdir() if d.is_dir())
+        except OSError:
+            continue
         for project_dir in projects:
             if filter_project and project_dir.name != filter_project:
                 continue
             found_any = True
-            md_files = list(project_dir.rglob("*.md"))
+            try:
+                md_files = list(project_dir.rglob("*.md"))
+            except OSError:
+                md_files = []
             total_lines = 0
             for f in md_files:
                 content = _safe_read(f)
