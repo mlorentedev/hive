@@ -101,11 +101,18 @@ class TestNewDefaults:
         assert HiveSettings().stale_threshold_days == 90
 
     def test_http_timeout_default(self) -> None:
-        assert HiveSettings().http_timeout == 120.0
+        assert HiveSettings().http_timeout == 60.0
 
     def test_http_timeout_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("HIVE_HTTP_TIMEOUT", "60")
-        assert HiveSettings().http_timeout == 60.0
+        monkeypatch.setenv("HIVE_HTTP_TIMEOUT", "30")
+        assert HiveSettings().http_timeout == 30.0
+
+    def test_tool_timeout_default(self) -> None:
+        assert HiveSettings().tool_timeout == 60.0
+
+    def test_tool_timeout_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HIVE_TOOL_TIMEOUT", "30")
+        assert HiveSettings().tool_timeout == 30.0
 
     def test_relevance_alpha_default(self) -> None:
         assert HiveSettings().relevance_alpha == 0.3

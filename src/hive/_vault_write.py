@@ -6,6 +6,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from hive._helpers import (
+    _LOCK_TIMEOUT,
     _WRITE,
     SECTION_SHORTCUTS,
     _check_path_boundary,
@@ -94,7 +95,13 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
             frontmatter = _make_frontmatter(filepath.stem, doc_type)
 
-            with _WRITE_LOCK:
+            if not _WRITE_LOCK.acquire(timeout=_LOCK_TIMEOUT):
+                return track(
+                    ctx, "vault_write",
+                    "Server busy — write lock timeout. Retry shortly.",
+                    project,
+                )
+            try:
                 if filepath.exists():
                     return track(
                         ctx, "vault_write",
@@ -119,6 +126,8 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     ctx.vault, rel,
                     f"vault: create {display}/{path}",
                 )
+            finally:
+                _WRITE_LOCK.release()
 
             return track(
                 ctx, "vault_write",
@@ -154,7 +163,13 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     project,
                 )
 
-        with _WRITE_LOCK:
+        if not _WRITE_LOCK.acquire(timeout=_LOCK_TIMEOUT):
+            return track(
+                ctx, "vault_write",
+                "Server busy — write lock timeout. Retry shortly.",
+                project,
+            )
+        try:
             try:
                 if operation == "append":
                     existing = (
@@ -176,6 +191,8 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             _git_commit(
                 ctx.vault, rel, f"vault: update {project}/{section}",
             )
+        finally:
+            _WRITE_LOCK.release()
 
         return track(
             ctx, "vault_write",
@@ -257,7 +274,13 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                          f"File '{path}' not found in project '{project}'.",
                          project)
 
-        with _WRITE_LOCK:
+        if not _WRITE_LOCK.acquire(timeout=_LOCK_TIMEOUT):
+            return track(
+                ctx, "vault_patch",
+                "Server busy — write lock timeout. Retry shortly.",
+                project,
+            )
+        try:
             try:
                 content = filepath.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as exc:
@@ -293,6 +316,8 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             rel = filepath.relative_to(ctx.vault)
             n = len(patch_list)
             _git_commit(ctx.vault, rel, f"vault: patch {project}/{path}")
+        finally:
+            _WRITE_LOCK.release()
 
         noun = "patch" if n == 1 else "patches"
         return track(ctx, "vault_patch",

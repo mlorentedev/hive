@@ -20,6 +20,7 @@ from hive._helpers import (
     _resolve_file,
     _resolve_project_dir,
     _vault_guard,
+    tool_span,
     track,
 )
 from hive.frontmatter import extract_body, parse_frontmatter
@@ -199,177 +200,189 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
         if guard:
             return track(ctx, "capture_lesson", guard, project)
 
-        resolved = _resolve_project_dir(ctx.vault, project, ctx.scopes)
-        if resolved is None:
-            return track(
-                ctx, "capture_lesson",
-                f"Project '{project}' not found in vault.",
-                project,
-            )
-        project_dir, _ = resolved
-
-        # ── Batch mode (worker extraction) ──
-        if text:
-            truncated = text[:_MAX_EXTRACT_INPUT]
-            safe_text = truncated.replace("{", "{{").replace("}", "}}")
-            prompt = _EXTRACT_PROMPT.format(
-                max_lessons=max_lessons,
-                min_confidence=min_confidence,
-                text=safe_text,
-            )
-
-            errors: list[str] = []
-            resp: ClientResponse | None = None
-
-            if await ctx.ollama.is_available():
-                resp, err = await _try_worker(prompt, 2000, "ollama")
-                if resp is None:
-                    errors.append(err)
-            else:
-                errors.append("Ollama: offline")
-
-            if resp is None:
-                resp, err = await _try_worker(
-                    prompt, 2000, "openrouter",
-                )
-                if resp is None:
-                    errors.append(err)
-
-            if resp is None:
-                reasons = (
-                    "; ".join(errors)
-                    if errors
-                    else "no workers configured"
-                )
-                return track(
-                    ctx, "capture_lesson",
-                    f"All workers unavailable [{reasons}]. "
-                    "Cannot extract lessons without a worker model.",
-                    project,
-                )
-
-            try:
-                lessons_raw = _parse_lessons_json(resp.text)
-            except (json.JSONDecodeError, ValueError):
-                snippet = resp.text[:200]
-                return track(
-                    ctx, "capture_lesson",
-                    f"Could not parse worker response as JSON: "
-                    f"{snippet}",
-                    project,
-                )
-
-            if not isinstance(lessons_raw, list):
-                return track(
-                    ctx, "capture_lesson",
-                    "Worker returned non-array JSON.",
-                    project,
-                )
-
-            if not lessons_raw:
-                return track(
-                    ctx, "capture_lesson",
-                    "No lessons found in text.",
-                    project,
-                )
-
-            written: list[str] = []
-            skipped: list[str] = []
-            for lesson in lessons_raw[:max_lessons]:
-                if not isinstance(lesson, dict):
-                    continue
-                raw_title = str(lesson.get("title", "")).strip()
-                l_title = raw_title.replace("\n", " ").replace("\r", " ")
-                if not l_title:
-                    continue
-                try:
-                    confidence = float(
-                        str(lesson.get("confidence", 0.5)),
+        try:
+            async with tool_span("capture_lesson", ctx.tool_timeout):
+                resolved = _resolve_project_dir(ctx.vault, project, ctx.scopes)
+                if resolved is None:
+                    return track(
+                        ctx, "capture_lesson",
+                        f"Project '{project}' not found in vault.",
+                        project,
                     )
-                except (ValueError, TypeError):
-                    confidence = 0.5
-                if confidence < min_confidence:
-                    skipped.append(
-                        f"{l_title} (confidence {confidence:.1f})",
-                    )
-                    continue
+                project_dir, _ = resolved
 
-                l_ctx = str(lesson.get("context", "")).replace("\n", " ").replace("\r", " ")
-                l_prob = str(lesson.get("problem", "")).replace("\n", " ").replace("\r", " ")
-                l_sol = str(lesson.get("solution", "")).replace("\n", " ").replace("\r", " ")
-                raw_tags = lesson.get("tags", [])
-                l_tags = [
-                    str(t).replace("\n", " ").replace("\r", " ")
-                    for t in raw_tags
-                ] if isinstance(raw_tags, list) else []
+                # ── Batch mode (worker extraction) ──
+                if text:
+                    truncated = text[:_MAX_EXTRACT_INPUT]
+                    safe_text = truncated.replace("{", "{{").replace("}", "}}")
+                    prompt = _EXTRACT_PROMPT.format(
+                        max_lessons=max_lessons,
+                        min_confidence=min_confidence,
+                        text=safe_text,
+                    )
+
+                    errors: list[str] = []
+                    resp: ClientResponse | None = None
+
+                    if await ctx.ollama.is_available():
+                        resp, err = await _try_worker(prompt, 2000, "ollama")
+                        if resp is None:
+                            errors.append(err)
+                    else:
+                        errors.append("Ollama: offline")
+
+                    if resp is None:
+                        resp, err = await _try_worker(
+                            prompt, 2000, "openrouter",
+                        )
+                        if resp is None:
+                            errors.append(err)
+
+                    if resp is None:
+                        reasons = (
+                            "; ".join(errors)
+                            if errors
+                            else "no workers configured"
+                        )
+                        return track(
+                            ctx, "capture_lesson",
+                            f"All workers unavailable [{reasons}]. "
+                            "Cannot extract lessons without a worker model.",
+                            project,
+                        )
+
+                    try:
+                        lessons_raw = _parse_lessons_json(resp.text)
+                    except (json.JSONDecodeError, ValueError):
+                        snippet = resp.text[:200]
+                        return track(
+                            ctx, "capture_lesson",
+                            f"Could not parse worker response as JSON: "
+                            f"{snippet}",
+                            project,
+                        )
+
+                    if not isinstance(lessons_raw, list):
+                        return track(
+                            ctx, "capture_lesson",
+                            "Worker returned non-array JSON.",
+                            project,
+                        )
+
+                    if not lessons_raw:
+                        return track(
+                            ctx, "capture_lesson",
+                            "No lessons found in text.",
+                            project,
+                        )
+
+                    written: list[str] = []
+                    skipped: list[str] = []
+                    for lesson in lessons_raw[:max_lessons]:
+                        if not isinstance(lesson, dict):
+                            continue
+                        raw_title = str(lesson.get("title", "")).strip()
+                        l_title = raw_title.replace("\n", " ").replace("\r", " ")
+                        if not l_title:
+                            continue
+                        try:
+                            confidence = float(
+                                str(lesson.get("confidence", 0.5)),
+                            )
+                        except (ValueError, TypeError):
+                            confidence = 0.5
+                        if confidence < min_confidence:
+                            skipped.append(
+                                f"{l_title} (confidence {confidence:.1f})",
+                            )
+                            continue
+
+                        l_ctx = str(lesson.get("context", ""))
+                        l_ctx = l_ctx.replace("\n", " ").replace("\r", " ")
+                        l_prob = str(lesson.get("problem", ""))
+                        l_prob = l_prob.replace("\n", " ").replace("\r", " ")
+                        l_sol = str(lesson.get("solution", ""))
+                        l_sol = l_sol.replace("\n", " ").replace("\r", " ")
+                        raw_tags = lesson.get("tags", [])
+                        l_tags = [
+                            str(t).replace("\n", " ").replace("\r", " ")
+                            for t in raw_tags
+                        ] if isinstance(raw_tags, list) else []
+
+                        status, msg = _write_lesson(
+                            project_dir, project,
+                            l_title, l_ctx, l_prob, l_sol, l_tags,
+                        )
+                        if status == "written":
+                            written.append(l_title)
+                        elif status == "skipped":
+                            skipped.append(f"{l_title} (duplicate)")
+                        elif status == "error":
+                            _log.warning(
+                                "capture_lesson: failed to write '%s': %s",
+                                l_title, msg,
+                            )
+                            skipped.append(f"{l_title} (write error: {msg})")
+
+                    if written:
+                        rel = (
+                            project_dir / "90-lessons.md"
+                        ).relative_to(ctx.vault)
+                        _git_commit(
+                            ctx.vault, rel,
+                            f"vault: capture_lesson {project} "
+                            f"— {len(written)} lessons",
+                        )
+
+                    parts: list[str] = []
+                    if written:
+                        titles = ", ".join(written)
+                        parts.append(
+                            f"Extracted {len(written)} lessons: {titles}",
+                        )
+                    if skipped:
+                        skip_details = ", ".join(skipped)
+                        parts.append(f"Skipped {len(skipped)}: {skip_details}")
+                    if not written and not skipped:
+                        parts.append("No lessons found in text.")
+
+                    summary = ". ".join(parts) + "."
+                    return track(
+                        ctx, "capture_lesson", summary, project, "lessons",
+                    )
+
+                # ── Inline mode ──
+                if not title:
+                    return track(
+                        ctx, "capture_lesson",
+                        "Title is required for inline mode. "
+                        "Provide text for batch extraction.",
+                        project,
+                    )
 
                 status, msg = _write_lesson(
                     project_dir, project,
-                    l_title, l_ctx, l_prob, l_sol, l_tags,
+                    title, context, problem, solution, tags,
                 )
-                if status == "written":
-                    written.append(l_title)
-                elif status == "skipped":
-                    skipped.append(f"{l_title} (duplicate)")
-                elif status == "error":
-                    _log.warning(
-                        "capture_lesson: failed to write '%s': %s",
-                        l_title, msg,
-                    )
-                    skipped.append(f"{l_title} (write error: {msg})")
+                if status == "error":
+                    return track(ctx, "capture_lesson", msg, project)
+                if status == "skipped":
+                    return track(ctx, "capture_lesson", msg, project, "lessons")
 
-            if written:
-                rel = (
-                    project_dir / "90-lessons.md"
-                ).relative_to(ctx.vault)
+                rel = (project_dir / "90-lessons.md").relative_to(ctx.vault)
                 _git_commit(
                     ctx.vault, rel,
-                    f"vault: capture_lesson {project} "
-                    f"— {len(written)} lessons",
+                    f"vault: capture_lesson {project} — {title}",
                 )
 
-            parts: list[str] = []
-            if written:
-                titles = ", ".join(written)
-                parts.append(
-                    f"Extracted {len(written)} lessons: {titles}",
-                )
-            if skipped:
-                skip_details = ", ".join(skipped)
-                parts.append(f"Skipped {len(skipped)}: {skip_details}")
-            if not written and not skipped:
-                parts.append("No lessons found in text.")
-
-            summary = ". ".join(parts) + "."
-            return track(
-                ctx, "capture_lesson", summary, project, "lessons",
-            )
-
-        # ── Inline mode ──
-        if not title:
+                return track(ctx, "capture_lesson", msg, project, "lessons")
+        except TimeoutError:
             return track(
                 ctx, "capture_lesson",
-                "Title is required for inline mode. "
-                "Provide text for batch extraction.",
+                f"Tool timed out after {ctx.tool_timeout:.0f}s. "
+                "Worker may be slow or unresponsive.",
                 project,
             )
-
-        status, msg = _write_lesson(
-            project_dir, project,
-            title, context, problem, solution, tags,
-        )
-        if status == "error":
-            return track(ctx, "capture_lesson", msg, project)
-        if status == "skipped":
-            return track(ctx, "capture_lesson", msg, project, "lessons")
-
-        rel = (project_dir / "90-lessons.md").relative_to(ctx.vault)
-        _git_commit(
-            ctx.vault, rel,
-            f"vault: capture_lesson {project} — {title}",
-        )
-
-        return track(ctx, "capture_lesson", msg, project, "lessons")
 
     @mcp.tool(annotations=_WRITE)
     async def delegate_task(
@@ -400,142 +413,156 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
             path: Relative path to a .md file. Overrides section.
             max_summary_lines: Target summary length for summarization.
         """
-        # ── Vault summarize mode ──
-        if project:
-            result = _resolve_file(
-                ctx.vault, project, section, path, ctx.scopes,
-            )
-            if isinstance(result, str):
-                return track(ctx, "delegate_task", result, project)
-            filepath = result
+        try:
+            async with tool_span("delegate_task", ctx.tool_timeout):
+                # ── Vault summarize mode ──
+                if project:
+                    result = _resolve_file(
+                        ctx.vault, project, section, path, ctx.scopes,
+                    )
+                    if isinstance(result, str):
+                        return track(ctx, "delegate_task", result, project)
+                    filepath = result
 
-            try:
-                file_content = filepath.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError) as exc:
-                return track(
-                    ctx, "delegate_task", f"File I/O error: {exc}", project,
-                )
-            fm = parse_frontmatter(file_content)
-            body = extract_body(file_content)
-            line_count = len(file_content.splitlines())
-            meta = _format_metadata(fm)
-            header = f"**Metadata:** {meta}\n\n" if meta else ""
+                    try:
+                        file_content = filepath.read_text(encoding="utf-8")
+                    except (OSError, UnicodeDecodeError) as exc:
+                        return track(
+                            ctx, "delegate_task", f"File I/O error: {exc}", project,
+                        )
+                    fm = parse_frontmatter(file_content)
+                    body = extract_body(file_content)
+                    line_count = len(file_content.splitlines())
+                    meta = _format_metadata(fm)
+                    header = f"**Metadata:** {meta}\n\n" if meta else ""
 
-            if line_count <= _SUMMARIZE_THRESHOLD:
-                return track(
-                    ctx, "delegate_task", f"{header}{file_content}", project,
-                )
+                    if line_count <= _SUMMARIZE_THRESHOLD:
+                        return track(
+                            ctx, "delegate_task", f"{header}{file_content}", project,
+                        )
 
-            # Large file: try auto-delegation (free tiers only)
-            summary_prompt = (
-                f"Summarize the following document in at most "
-                f"{max_summary_lines} lines, preserving key decisions "
-                f"and action items.\n\n{body}"
-            )
-            summary_ctx = f"Document metadata: {meta}" if meta else ""
-            summary_resp: ClientResponse | None = None
-            summary_errors: list[str] = []
-            if await ctx.ollama.is_available():
-                summary_resp, err = await _try_worker(
-                    summary_prompt, max_tokens, "ollama", summary_ctx,
-                )
-                if err:
-                    summary_errors.append(err)
-            else:
-                summary_errors.append("Ollama: offline")
-            if summary_resp is None:
-                summary_resp, err = await _try_worker(
-                    summary_prompt, max_tokens, "openrouter", summary_ctx,
-                )
-                if err:
-                    summary_errors.append(err)
-            if summary_resp is not None:
-                return track(
-                    ctx, "delegate_task",
-                    f"{header}{_format_response(summary_resp)}",
-                    project,
-                )
-            # Workers unavailable — return raw content with notice
-            reasons = "; ".join(summary_errors) if summary_errors else "no workers configured"
-            _log.warning("delegate_task summarize fallback for %s: %s", project, reasons)
-            fallback_notice = (
-                f"**Note:** Summarization failed ({reasons}). "
-                "Returning raw content.\n\n"
-            )
+                    # Large file: try auto-delegation (free tiers only)
+                    summary_prompt = (
+                        f"Summarize the following document in at most "
+                        f"{max_summary_lines} lines, preserving key decisions "
+                        f"and action items.\n\n{body}"
+                    )
+                    summary_ctx = f"Document metadata: {meta}" if meta else ""
+                    summary_resp: ClientResponse | None = None
+                    summary_errors: list[str] = []
+                    if await ctx.ollama.is_available():
+                        summary_resp, err = await _try_worker(
+                            summary_prompt, max_tokens, "ollama", summary_ctx,
+                        )
+                        if err:
+                            summary_errors.append(err)
+                    else:
+                        summary_errors.append("Ollama: offline")
+                    if summary_resp is None:
+                        summary_resp, err = await _try_worker(
+                            summary_prompt, max_tokens, "openrouter", summary_ctx,
+                        )
+                        if err:
+                            summary_errors.append(err)
+                    if summary_resp is not None:
+                        return track(
+                            ctx, "delegate_task",
+                            f"{header}{_format_response(summary_resp)}",
+                            project,
+                        )
+                    # Workers unavailable — return raw content with notice
+                    reasons = (
+                        "; ".join(summary_errors) if summary_errors
+                        else "no workers configured"
+                    )
+                    _log.warning(
+                        "delegate_task summarize fallback for %s: %s",
+                        project, reasons,
+                    )
+                    fallback_notice = (
+                        f"**Note:** Summarization failed ({reasons}). "
+                        "Returning raw content.\n\n"
+                    )
+                    return track(
+                        ctx, "delegate_task", f"{header}{fallback_notice}{file_content}", project,
+                    )
+
+                if not prompt:
+                    return track(ctx, "delegate_task", "Either prompt or project is required.")
+
+                # ── Worker delegation ──
+                _tn = "delegate_task"
+
+                # Explicit routing
+                if model == "ollama":
+                    resp, err = await _try_worker(prompt, max_tokens, "ollama", context)
+                    if resp:
+                        return track(ctx, _tn, _format_response(resp))
+                    return track(ctx, _tn, f"{err}. {_REJECT_MSG}")
+                if model == "openrouter-free":
+                    resp, err = await _try_worker(prompt, max_tokens, "openrouter", context)
+                    if resp:
+                        return track(ctx, _tn, _format_response(resp))
+                    return track(ctx, _tn, f"{err}. {_REJECT_MSG}")
+                if model == "openrouter":
+                    if not ctx.budget.can_spend(ctx.openrouter_budget, max_cost_per_request):
+                        return track(ctx, _tn, f"Monthly budget exhausted. {_REJECT_MSG}")
+                    resp, err = await _try_worker(
+                        prompt, max_tokens, "openrouter", context,
+                        model=ctx.openrouter_paid_model,
+                    )
+                    if resp:
+                        return track(ctx, _tn, _format_response(resp))
+                    return track(ctx, _tn, f"{err}. {_REJECT_MSG}")
+                if model != "auto":
+                    resp, err = await _try_worker(
+                        prompt, max_tokens, "openrouter", context, model=model,
+                    )
+                    if resp:
+                        return track(ctx, _tn, _format_response(resp))
+                    return track(ctx, _tn, f"{err}. {_REJECT_MSG}")
+
+                # Auto routing: Ollama → OpenRouter free → OpenRouter paid → reject
+                errors: list[str] = []
+
+                # Tier 1: Ollama
+                if await ctx.ollama.is_available():
+                    resp, err = await _try_worker(prompt, max_tokens, "ollama", context)
+                    if resp is not None:
+                        return track(ctx, _tn, _format_response(resp))
+                    errors.append(err)
+                else:
+                    errors.append("Ollama: offline")
+
+                # Tier 2: OpenRouter free
+                resp, err = await _try_worker(prompt, max_tokens, "openrouter", context)
+                if resp is not None:
+                    return track(ctx, _tn, _format_response(resp))
+                errors.append(err)
+
+                # Tier 3: OpenRouter paid (only if max_cost > 0 and budget allows)
+                if (
+                    max_cost_per_request > 0
+                    and ctx.openrouter is not None
+                    and ctx.budget.can_spend(ctx.openrouter_budget, max_cost_per_request)
+                ):
+                    resp, err = await _try_worker(
+                        prompt, max_tokens, "openrouter", context,
+                        model=ctx.openrouter_paid_model,
+                    )
+                    if resp is not None:
+                        return track(ctx, _tn, _format_response(resp))
+                    errors.append(err)
+
+                # All tiers exhausted
+                reasons = "; ".join(errors)
+                return track(ctx, _tn, f"All workers unavailable. [{reasons}]. {_REJECT_MSG}")
+        except TimeoutError:
             return track(
-                ctx, "delegate_task", f"{header}{fallback_notice}{file_content}", project,
+                ctx, "delegate_task",
+                f"Tool timed out after {ctx.tool_timeout:.0f}s. "
+                "Worker may be slow or unresponsive.",
             )
-
-        if not prompt:
-            return track(ctx, "delegate_task", "Either prompt or project is required.")
-
-        # ── Worker delegation ──
-        _tn = "delegate_task"
-
-        # Explicit routing
-        if model == "ollama":
-            resp, err = await _try_worker(prompt, max_tokens, "ollama", context)
-            if resp:
-                return track(ctx, _tn, _format_response(resp))
-            return track(ctx, _tn, f"{err}. {_REJECT_MSG}")
-        if model == "openrouter-free":
-            resp, err = await _try_worker(prompt, max_tokens, "openrouter", context)
-            if resp:
-                return track(ctx, _tn, _format_response(resp))
-            return track(ctx, _tn, f"{err}. {_REJECT_MSG}")
-        if model == "openrouter":
-            if not ctx.budget.can_spend(ctx.openrouter_budget, max_cost_per_request):
-                return track(ctx, _tn, f"Monthly budget exhausted. {_REJECT_MSG}")
-            resp, err = await _try_worker(
-                prompt, max_tokens, "openrouter", context,
-                model=ctx.openrouter_paid_model,
-            )
-            if resp:
-                return track(ctx, _tn, _format_response(resp))
-            return track(ctx, _tn, f"{err}. {_REJECT_MSG}")
-        if model != "auto":
-            resp, err = await _try_worker(
-                prompt, max_tokens, "openrouter", context, model=model,
-            )
-            if resp:
-                return track(ctx, _tn, _format_response(resp))
-            return track(ctx, _tn, f"{err}. {_REJECT_MSG}")
-
-        # Auto routing: Ollama → OpenRouter free → OpenRouter paid → reject
-        errors: list[str] = []
-
-        # Tier 1: Ollama
-        if await ctx.ollama.is_available():
-            resp, err = await _try_worker(prompt, max_tokens, "ollama", context)
-            if resp is not None:
-                return track(ctx, _tn, _format_response(resp))
-            errors.append(err)
-        else:
-            errors.append("Ollama: offline")
-
-        # Tier 2: OpenRouter free
-        resp, err = await _try_worker(prompt, max_tokens, "openrouter", context)
-        if resp is not None:
-            return track(ctx, _tn, _format_response(resp))
-        errors.append(err)
-
-        # Tier 3: OpenRouter paid (only if max_cost > 0 and budget allows)
-        if (
-            max_cost_per_request > 0
-            and ctx.openrouter is not None
-            and ctx.budget.can_spend(ctx.openrouter_budget, max_cost_per_request)
-        ):
-            resp, err = await _try_worker(
-                prompt, max_tokens, "openrouter", context,
-                model=ctx.openrouter_paid_model,
-            )
-            if resp is not None:
-                return track(ctx, _tn, _format_response(resp))
-            errors.append(err)
-
-        # All tiers exhausted
-        reasons = "; ".join(errors)
-        return track(ctx, _tn, f"All workers unavailable. [{reasons}]. {_REJECT_MSG}")
 
     @mcp.tool(annotations=_READ_ONLY)
     async def worker_status(include_models: bool = True) -> str:
@@ -544,50 +571,63 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
         Args:
             include_models: Include available model list from all providers. Default True.
         """
-        stats = ctx.budget.month_stats(ctx.openrouter_budget)
-        ollama_up = await ctx.ollama.is_available()
+        try:
+            async with tool_span("worker_status", ctx.tool_timeout):
+                stats = ctx.budget.month_stats(ctx.openrouter_budget)
+                ollama_up = await ctx.ollama.is_available()
 
-        lines = [
-            "# Worker Status",
-            "",
-            "## Budget",
-            f"- Spent this month: ${stats['spent']:.2f}",
-            f"- Remaining: ${stats['remaining']:.2f} / ${ctx.openrouter_budget:.1f}",
-            f"- Requests: {stats['request_count']}",
-            "",
-            "## Connectivity",
-            f"- Ollama: {'online' if ollama_up else 'offline / unavailable'}",
-            f"- OpenRouter: {'configured' if ctx.openrouter is not None else 'no API key'}",
-            "",
-        ]
+                lines = [
+                    "# Worker Status",
+                    "",
+                    "## Budget",
+                    f"- Spent this month: ${stats['spent']:.2f}",
+                    f"- Remaining: ${stats['remaining']:.2f} / ${ctx.openrouter_budget:.1f}",
+                    f"- Requests: {stats['request_count']}",
+                    "",
+                    "## Connectivity",
+                    f"- Ollama: {'online' if ollama_up else 'offline / unavailable'}",
+                    f"- OpenRouter: {'configured' if ctx.openrouter is not None else 'no API key'}",
+                    "",
+                ]
 
-        if stats["by_model"]:
-            lines.append("## Top Models")
-            for model_name, model_stats in stats["by_model"].items():
-                lines.append(
-                    f"- **{model_name}**: {model_stats['count']} requests, "
-                    f"${model_stats['total_cost']:.4f}, avg {model_stats['avg_latency_ms']}ms"
-                )
-            lines.append("")
+                if stats["by_model"]:
+                    lines.append("## Top Models")
+                    for model_name, model_stats in stats["by_model"].items():
+                        cost = f"${model_stats['total_cost']:.4f}"
+                        lat = f"{model_stats['avg_latency_ms']}ms"
+                        lines.append(
+                            f"- **{model_name}**: "
+                            f"{model_stats['count']} requests, "
+                            f"{cost}, avg {lat}",
+                        )
+                    lines.append("")
 
-        if include_models:
-            lines.append("## Available Models")
-            lines.append("")
-            ollama_status = "online" if ollama_up else "offline / unavailable"
-            lines.append(f"### Ollama ({ollama_status})")
-            if ollama_up:
-                lines.append(f"- **{ctx.ollama.model}** — local, free, no token limit")
-            lines.append("")
-            lines.append("### OpenRouter")
-            if ctx.openrouter is not None:
-                try:
-                    models = await ctx.openrouter.list_models()
-                    for m in models:
-                        cost = "free" if m.is_free else f"${m.cost_per_million_input:.2f}/M in"
-                        lines.append(f"- **{m.id}** — {m.name}, ctx: {m.context_length}, {cost}")
-                except (ConnectionError, RuntimeError, TimeoutError) as exc:
-                    lines.append(f"- Error fetching models: {exc}")
-            else:
-                lines.append("- No API key configured")
+                if include_models:
+                    lines.append("## Available Models")
+                    lines.append("")
+                    ollama_status = "online" if ollama_up else "offline / unavailable"
+                    lines.append(f"### Ollama ({ollama_status})")
+                    if ollama_up:
+                        lines.append(f"- **{ctx.ollama.model}** — local, free, no token limit")
+                    lines.append("")
+                    lines.append("### OpenRouter")
+                    if ctx.openrouter is not None:
+                        try:
+                            models = await ctx.openrouter.list_models()
+                            for m in models:
+                                cost = (
+                                    "free" if m.is_free
+                                    else f"${m.cost_per_million_input:.2f}/M in"
+                                )
+                                lines.append(
+                                    f"- **{m.id}** — {m.name}, "
+                                    f"ctx: {m.context_length}, {cost}",
+                                )
+                        except (ConnectionError, RuntimeError, TimeoutError) as exc:
+                            lines.append(f"- Error fetching models: {exc}")
+                    else:
+                        lines.append("- No API key configured")
 
-        return "\n".join(lines)
+                return "\n".join(lines)
+        except TimeoutError:
+            return "Worker status timed out. Workers may be unreachable."

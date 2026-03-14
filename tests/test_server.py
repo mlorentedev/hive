@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
@@ -3175,3 +3176,156 @@ class TestSetupFileLogging:
         for h in file_handlers:
             logger.removeHandler(h)
             h.close()
+
+
+# ── Timeout tests (issue #63) ──────────────────────────────────────
+
+
+class TestToolTimeouts:
+    """Verify async tools return error on timeout instead of hanging."""
+
+    @pytest.mark.asyncio
+    async def test_delegate_task_timeout(
+        self,
+        worker: FastMCP,
+        ollama: OllamaClient,
+    ) -> None:
+        """delegate_task returns timeout message when worker hangs."""
+        async def slow_generate(*a: object, **kw: object) -> ClientResponse:
+            await asyncio.sleep(999)
+            raise AssertionError("unreachable")
+
+        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        ollama.generate = AsyncMock(side_effect=slow_generate)  # type: ignore[method-assign]
+
+        ctx = worker._hive_ctx  # type: ignore[attr-defined]
+        ctx.tool_timeout = 0.1
+
+        result = _text(await worker.call_tool("delegate_task", {"prompt": "test"}))
+        assert "timed out" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_worker_status_timeout(
+        self,
+        worker: FastMCP,
+        ollama: OllamaClient,
+    ) -> None:
+        """worker_status returns timeout message when connectivity check hangs."""
+        async def slow_check() -> bool:
+            await asyncio.sleep(999)
+            return True
+
+        ollama.is_available = AsyncMock(side_effect=slow_check)  # type: ignore[method-assign]
+
+        ctx = worker._hive_ctx  # type: ignore[attr-defined]
+        ctx.tool_timeout = 0.1
+
+        result = _text(await worker.call_tool("worker_status", {}))
+        assert "timed out" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_capture_lesson_batch_timeout(
+        self,
+        git_vault: Path,
+        budget: BudgetTracker,
+        ollama: OllamaClient,
+        openrouter: OpenRouterClient,
+    ) -> None:
+        """capture_lesson batch mode returns timeout when worker hangs."""
+        mcp = create_server(
+            vault_path=git_vault,
+            budget_tracker=budget,
+            ollama_client=ollama,
+            openrouter_client=openrouter,
+        )
+
+        async def slow_generate(*a: object, **kw: object) -> ClientResponse:
+            await asyncio.sleep(999)
+            raise AssertionError("unreachable")
+
+        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        ollama.generate = AsyncMock(side_effect=slow_generate)  # type: ignore[method-assign]
+
+        ctx = mcp._hive_ctx  # type: ignore[attr-defined]
+        ctx.tool_timeout = 0.1
+
+        result = _text(await mcp.call_tool(
+            "capture_lesson",
+            {"project": "testproject", "text": "some text to extract"},
+        ))
+        assert "timed out" in result.lower()
+        _close_server(mcp)
+
+
+class TestWriteLockTimeout:
+    """Verify vault_write/vault_patch return error on lock timeout."""
+
+    @pytest.mark.asyncio
+    async def test_write_lock_timeout_returns_error(
+        self, git_vault: Path,
+    ) -> None:
+        """vault_write returns friendly error when write lock cannot be acquired."""
+        from unittest.mock import patch
+
+        mcp = create_server(vault_path=git_vault)
+
+        with patch("hive._vault_write._WRITE_LOCK") as mock_lock:
+            mock_lock.acquire.return_value = False
+            result = _text(await mcp.call_tool(
+                "vault_write",
+                {
+                    "project": "testproject",
+                    "section": "lessons",
+                    "operation": "append",
+                    "content": "\nNew content\n",
+                },
+            ))
+        assert "busy" in result.lower() or "timeout" in result.lower()
+        _close_server(mcp)
+
+    @pytest.mark.asyncio
+    async def test_patch_lock_timeout_returns_error(
+        self, git_vault: Path,
+    ) -> None:
+        """vault_patch returns friendly error when write lock cannot be acquired."""
+        from unittest.mock import patch
+
+        mcp = create_server(vault_path=git_vault)
+
+        with patch("hive._vault_write._WRITE_LOCK") as mock_lock:
+            mock_lock.acquire.return_value = False
+            result = _text(await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "old_text": "- [ ] Task one",
+                    "new_text": "- [x] Task one done",
+                },
+            ))
+        assert "busy" in result.lower() or "timeout" in result.lower()
+        _close_server(mcp)
+
+    @pytest.mark.asyncio
+    async def test_create_lock_timeout_returns_error(
+        self, git_vault: Path,
+    ) -> None:
+        """vault_write create mode returns error when write lock cannot be acquired."""
+        from unittest.mock import patch
+
+        mcp = create_server(vault_path=git_vault)
+
+        with patch("hive._vault_write._WRITE_LOCK") as mock_lock:
+            mock_lock.acquire.return_value = False
+            result = _text(await mcp.call_tool(
+                "vault_write",
+                {
+                    "project": "testproject",
+                    "operation": "create",
+                    "path": "new-doc.md",
+                    "doc_type": "note",
+                    "content": "# New Doc\n",
+                },
+            ))
+        assert "busy" in result.lower() or "timeout" in result.lower()
+        _close_server(mcp)
