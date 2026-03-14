@@ -30,7 +30,8 @@ class HiveSettings(BaseSettings):
         Path.home() / ".local" / "share" / "hive" / "relevance.db",
     )
     stale_threshold_days: int = 180
-    http_timeout: float = 120.0
+    http_timeout: float = 60.0
+    tool_timeout: float = 60.0
     relevance_alpha: float = 0.3
     relevance_decay: float = 0.9
     relevance_epsilon: float = 0.15

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 import logging
 import re
 import subprocess
 import threading
+import time
+from contextlib import asynccontextmanager
 from datetime import date
 from typing import TYPE_CHECKING
 
@@ -15,6 +18,7 @@ from mcp.types import ToolAnnotations
 from hive.frontmatter import extract_body, parse_date, parse_frontmatter
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from pathlib import Path
 
     from hive._context import ServerContext
@@ -336,6 +340,32 @@ def track(
 
 _GIT_LOCK = threading.Lock()
 
+_LOCK_TIMEOUT = 30  # seconds — matches subprocess timeout
+
+
+@asynccontextmanager
+async def tool_span(
+    tool_name: str, timeout_seconds: float,
+) -> AsyncIterator[None]:
+    """Enforce a timeout and log wall-clock duration for an async tool.
+
+    Raises ``TimeoutError`` if the tool body exceeds *timeout_seconds*.
+    """
+    start = time.monotonic()
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            yield
+    except TimeoutError:
+        elapsed = time.monotonic() - start
+        _log.warning(
+            "%s timed out after %.1fs (limit: %.0fs)",
+            tool_name, elapsed, timeout_seconds,
+        )
+        raise
+    else:
+        elapsed = time.monotonic() - start
+        _log.debug("%s completed in %.1fs", tool_name, elapsed)
+
 
 def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
     """Stage a file and commit it in the vault git repo.
@@ -348,28 +378,32 @@ def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
     from interleaving and corrupting the index.
     """
     safe_msg = message.replace("\n", " ").replace("\r", " ")
-    with _GIT_LOCK:
-        try:
-            subprocess.run(
-                ["git", "add", str(rel_path)],
-                cwd=vault_path,
-                capture_output=True,
-                check=True,
-                timeout=30,
-            )
-            subprocess.run(
-                ["git", "commit", "-m", safe_msg],
-                cwd=vault_path,
-                capture_output=True,
-                check=True,
-                timeout=30,
-            )
-        except subprocess.CalledProcessError as exc:
-            _log.warning("git commit failed for %s: %s", rel_path, exc)
-        except subprocess.TimeoutExpired as exc:
-            _log.warning("git commit timed out for %s: %s", rel_path, exc)
-        except Exception as exc:
-            _log.warning("git commit unexpected error for %s: %s", rel_path, exc)
+    if not _GIT_LOCK.acquire(timeout=_LOCK_TIMEOUT):
+        _log.warning("git commit skipped for %s: lock timeout (%ds)", rel_path, _LOCK_TIMEOUT)
+        return
+    try:
+        subprocess.run(
+            ["git", "add", str(rel_path)],
+            cwd=vault_path,
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", safe_msg],
+            cwd=vault_path,
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError as exc:
+        _log.warning("git commit failed for %s: %s", rel_path, exc)
+    except subprocess.TimeoutExpired as exc:
+        _log.warning("git commit timed out for %s: %s", rel_path, exc)
+    except Exception as exc:
+        _log.warning("git commit unexpected error for %s: %s", rel_path, exc)
+    finally:
+        _GIT_LOCK.release()
 
 
 def _git_log(vault_path: Path, n: int) -> str:

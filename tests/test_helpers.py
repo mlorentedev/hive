@@ -1,11 +1,14 @@
-"""Tests for helper functions — _match_and_replace and _vault_guard."""
+"""Tests for helper functions — _match_and_replace, _vault_guard, tool_span."""
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
-from hive._helpers import _match_and_replace, _vault_guard
+import pytest
+
+from hive._helpers import _match_and_replace, _vault_guard, tool_span
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -128,3 +131,28 @@ class TestVaultGuard:
         ctx = MagicMock()
         ctx.vault = fake
         assert "Vault not found" in _vault_guard(ctx)
+
+
+class TestToolSpan:
+    """Tests for tool_span async context manager."""
+
+    @pytest.mark.asyncio
+    async def test_completes_within_timeout(self) -> None:
+        """tool_span does not raise when body finishes before timeout."""
+        async with tool_span("test_tool", 5.0):
+            await asyncio.sleep(0.01)
+
+    @pytest.mark.asyncio
+    async def test_raises_timeout_error(self) -> None:
+        """tool_span raises TimeoutError when body exceeds timeout."""
+        with pytest.raises(TimeoutError):
+            async with tool_span("test_tool", 0.05):
+                await asyncio.sleep(999)
+
+    @pytest.mark.asyncio
+    async def test_timeout_error_is_logged(self, caplog: pytest.LogCaptureFixture) -> None:
+        """tool_span logs a warning on timeout."""
+        with pytest.raises(TimeoutError):
+            async with tool_span("slow_tool", 0.05):
+                await asyncio.sleep(999)
+        assert any("slow_tool" in r.message and "timed out" in r.message for r in caplog.records)

@@ -181,6 +181,22 @@ claude mcp add -s user hive \
   -- uvx --upgrade hive-vault
 ```
 
+## Llamadas a Herramientas Colgadas o con Timeout
+
+**Sintoma:** Las llamadas MCP a herramientas se congelan sin respuesta, o devuelven "Tool timed out after 60s".
+
+**Causa:** Las herramientas de worker (`capture_lesson`, `delegate_task`) llaman a APIs externas (Ollama/OpenRouter) que pueden ser lentas o no responder. Las herramientas de escritura (`vault_write`, `vault_patch`) pueden bloquearse si otra operacion mantiene el lock de escritura.
+
+**Solucion:**
+1. Verifica conectividad de workers: `worker_status` — si Ollama esta offline, arregla la conexion primero
+2. Si los timeouts son muy agresivos, aumentalos:
+   - `HIVE_TOOL_TIMEOUT=120` — timeout por herramienta para tools async de worker (por defecto: 60s)
+   - `HIVE_HTTP_TIMEOUT=120` — timeout HTTP para llamadas a Ollama/OpenRouter (por defecto: 60s)
+3. Revisa `~/.local/share/hive/hive.log` para warnings de timeout con nombres de herramientas y tiempos transcurridos
+4. Si las herramientas de escritura devuelven "Server busy", reintenta en breve — una operacion de escritura previa esta terminando
+
+**Nota:** Los timeouts son una red de seguridad. Una herramienta con timeout devuelve un mensaje de error claro en lugar de colgar tu sesion indefinidamente. La operacion subyacente (llamada HTTP, git commit) se limpia automaticamente.
+
 ## Obtener Ayuda
 
 Si tu problema no está listado aquí:

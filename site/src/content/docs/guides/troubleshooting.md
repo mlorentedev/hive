@@ -181,6 +181,22 @@ claude mcp add -s user hive \
   -- uvx --upgrade hive-vault
 ```
 
+## Tool Calls Hanging or Timing Out
+
+**Symptom:** MCP tool calls freeze with no response, or return "Tool timed out after 60s".
+
+**Cause:** Worker tools (`capture_lesson`, `delegate_task`) call external APIs (Ollama/OpenRouter) that may be slow or unresponsive. Write tools (`vault_write`, `vault_patch`) may stall if another operation holds the write lock.
+
+**Fix:**
+1. Check worker connectivity: `worker_status` — if Ollama is offline, fix the connection first
+2. If timeouts are too aggressive, increase them:
+   - `HIVE_TOOL_TIMEOUT=120` — per-tool timeout for async worker tools (default: 60s)
+   - `HIVE_HTTP_TIMEOUT=120` — HTTP timeout for Ollama/OpenRouter calls (default: 60s)
+3. Check `~/.local/share/hive/hive.log` for timeout warnings with tool names and elapsed times
+4. If write tools return "Server busy", retry shortly — a previous write operation is finishing
+
+**Note:** Timeouts are a safety net. A timed-out tool returns a clear error message instead of hanging your session indefinitely. The underlying operation (HTTP call, git commit) is cleaned up automatically.
+
 ## Getting Help
 
 If your issue isn't listed here:

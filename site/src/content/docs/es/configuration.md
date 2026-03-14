@@ -19,7 +19,8 @@ Toda la configuración se realiza mediante variables de entorno, pasadas al regi
 | `HIVE_DB_PATH` | `~/.local/share/hive/worker.db` | Base de datos SQLite para tracking de presupuesto/uso |
 | `HIVE_RELEVANCE_DB_PATH` | `~/.local/share/hive/relevance.db` | Base de datos SQLite para puntuación adaptativa de contexto |
 | `HIVE_STALE_THRESHOLD_DAYS` | `180` | Días antes de que un archivo se marque como obsoleto |
-| `HIVE_HTTP_TIMEOUT` | `120.0` | Timeout HTTP (segundos) para Ollama y OpenRouter |
+| `HIVE_HTTP_TIMEOUT` | `60.0` | Timeout HTTP (segundos) para Ollama y OpenRouter |
+| `HIVE_TOOL_TIMEOUT` | `60.0` | Timeout a nivel de herramienta (segundos) para tools async de worker (capture_lesson, delegate_task, worker_status) |
 | `HIVE_RELEVANCE_ALPHA` | `0.3` | Tasa de aprendizaje EMA para puntuación adaptativa |
 | `HIVE_RELEVANCE_DECAY` | `0.9` | Factor de decaimiento por sesión para puntuaciones de relevancia |
 | `HIVE_RELEVANCE_EPSILON` | `0.15` | Ratio de exploración para session_briefing (epsilon-greedy) |

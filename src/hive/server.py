@@ -72,6 +72,7 @@ def create_server(
         stale_days=settings.stale_threshold_days,
         openrouter_budget=settings.openrouter_budget,
         openrouter_paid_model=settings.openrouter_paid_model,
+        tool_timeout=settings.tool_timeout,
     )
 
     mcp = FastMCP(
