@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.6](https://github.com/mlorentedev/hive/compare/v1.11.5...v1.11.6) (2026-03-14)
+
+
+### Bug Fixes
+
+* add tool-level timeouts to prevent MCP tool hangs ([#64](https://github.com/mlorentedev/hive/issues/64)) ([f15b741](https://github.com/mlorentedev/hive/commit/f15b7415c52fb109f373646402313af850967c0a))
+
 ## [1.11.5](https://github.com/mlorentedev/hive/compare/v1.11.4...v1.11.5) (2026-03-13)
 
 
