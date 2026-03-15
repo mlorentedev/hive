@@ -140,18 +140,29 @@ All operations auto-commit to git.
 
 ## vault_patch
 
-Surgical text replacement in a vault file.
+Surgical find-and-replace in a vault file.
 
 ```python
+# Single replacement
 vault_patch(
     project="my-project",
     path="30-architecture/adr-001.md",
-    old_text="status: draft",
-    new_text="status: accepted"
+    find="status: draft",
+    replace="status: accepted"
+)
+
+# Multiple replacements (applied in sequence)
+vault_patch(
+    project="my-project",
+    path="11-tasks.md",
+    patches=[
+        {"find": "- [ ] Task one", "replace": "- [x] Task one"},
+        {"find": "- [ ] Task two", "replace": "- [x] Task two"},
+    ]
 )
 ```
 
-Replaces exactly one occurrence of `old_text` with `new_text`. Rejects ambiguous matches — if `old_text` appears more than once, the operation fails with an error asking for more context. Auto-commits to git.
+Replaces exactly one occurrence of `find` with `replace`. Rejects ambiguous matches — if `find` appears more than once, the operation fails with an error asking for more context. Uses 3-pass cascading match: exact → body-only → whitespace-normalized. Auto-commits to git.
 
 ## capture_lesson
 
