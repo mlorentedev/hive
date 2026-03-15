@@ -94,7 +94,7 @@ class TestVaultNotFound:
         result = await missing_vault_mcp.call_tool(
             "vault_patch", {
                 "project": "test", "path": "f.md",
-                "old_text": "a", "new_text": "b",
+                "find": "a", "replace": "b",
             },
         )
         assert "Vault not found" in _text(result)
@@ -182,7 +182,7 @@ class TestUnicodeDecodeErrors:
         result = await mcp.call_tool(
             "vault_patch", {
                 "project": "testproject", "path": "bad.md",
-                "old_text": "a", "new_text": "b",
+                "find": "a", "replace": "b",
             },
         )
         text = _text(result)
@@ -2115,8 +2115,8 @@ class TestPathTraversal:
             {
                 "project": "testproject",
                 "path": "../../../../etc/passwd",
-                "old_text": "root",
-                "new_text": "pwned",
+                "find": "root",
+                "replace": "pwned",
             },
         ))
         assert "escapes vault boundary" in result.lower()
@@ -2158,7 +2158,7 @@ class TestPathTraversal:
                 "patches": [{"old": "wrong", "new": "keys"}],
             },
         ))
-        assert "old_text" in result.lower() and "new_text" in result.lower()
+        assert "find" in result.lower() and "replace" in result.lower()
 
 
 # ── vault_patch ─────────────────────────────────────────────────────
@@ -2167,16 +2167,16 @@ class TestPathTraversal:
 class TestVaultPatch:
     """Tests for vault_patch single and multi-replacement."""
 
-    async def test_single_patch_legacy_params(self, git_vault: Path) -> None:
-        """Existing single old_text/new_text still works."""
+    async def test_single_patch(self, git_vault: Path) -> None:
+        """Single find/replace works."""
         mcp = create_server(vault_path=git_vault)
         result = _text(await mcp.call_tool(
             "vault_patch",
             {
                 "project": "testproject",
                 "path": "11-tasks.md",
-                "old_text": "- [ ] Task one",
-                "new_text": "- [x] Task one",
+                "find": "- [ ] Task one",
+                "replace": "- [x] Task one",
             },
         ))
         assert "1 patch" in result.lower()
@@ -2192,8 +2192,8 @@ class TestVaultPatch:
                 "project": "testproject",
                 "path": "11-tasks.md",
                 "patches": [
-                    {"old_text": "- [ ] Task one", "new_text": "- [x] Task one"},
-                    {"old_text": "- [x] Task two", "new_text": "- [ ] Task two reopened"},
+                    {"find": "- [ ] Task one", "replace": "- [x] Task one"},
+                    {"find": "- [x] Task two", "replace": "- [ ] Task two reopened"},
                 ],
             },
         ))
@@ -2211,24 +2211,24 @@ class TestVaultPatch:
                 "project": "testproject",
                 "path": "11-tasks.md",
                 "patches": [
-                    {"old_text": "- [ ] Task one", "new_text": "- [x] Task one"},
+                    {"find": "- [ ] Task one", "replace": "- [x] Task one"},
                 ],
             },
         ))
         assert "1 patch" in result.lower()
 
     async def test_multi_patch_rejects_mixed_params(self, git_vault: Path) -> None:
-        """Providing both patches AND old_text/new_text is an error."""
+        """Providing both patches AND find/replace is an error."""
         mcp = create_server(vault_path=git_vault)
         result = _text(await mcp.call_tool(
             "vault_patch",
             {
                 "project": "testproject",
                 "path": "11-tasks.md",
-                "old_text": "- [ ] Task one",
-                "new_text": "- [x] Task one",
+                "find": "- [ ] Task one",
+                "replace": "- [x] Task one",
                 "patches": [
-                    {"old_text": "- [x] Task two", "new_text": "- [ ] Task two"},
+                    {"find": "- [x] Task two", "replace": "- [ ] Task two"},
                 ],
             },
         ))
@@ -2259,8 +2259,8 @@ class TestVaultPatch:
                 "project": "testproject",
                 "path": "11-tasks.md",
                 "patches": [
-                    {"old_text": "- [ ] Task one", "new_text": "- [x] Task one"},
-                    {"old_text": "Task", "new_text": "Item"},  # ambiguous
+                    {"find": "- [ ] Task one", "replace": "- [x] Task one"},
+                    {"find": "Task", "replace": "Item"},  # ambiguous
                 ],
             },
         ))
@@ -2270,7 +2270,7 @@ class TestVaultPatch:
         assert "- [ ] Task one" in content
 
     async def test_multi_patch_not_found_aborts_all(self, git_vault: Path) -> None:
-        """If any patch old_text is not found, no patches are applied."""
+        """If any patch find text is not found, no patches are applied."""
         mcp = create_server(vault_path=git_vault)
         result = _text(await mcp.call_tool(
             "vault_patch",
@@ -2278,8 +2278,8 @@ class TestVaultPatch:
                 "project": "testproject",
                 "path": "11-tasks.md",
                 "patches": [
-                    {"old_text": "- [ ] Task one", "new_text": "- [x] Task one"},
-                    {"old_text": "nonexistent text", "new_text": "something"},
+                    {"find": "- [ ] Task one", "replace": "- [x] Task one"},
+                    {"find": "nonexistent text", "replace": "something"},
                 ],
             },
         ))
@@ -2298,8 +2298,8 @@ class TestVaultPatch:
                 "project": "testproject",
                 "path": "11-tasks.md",
                 "patches": [
-                    {"old_text": "- [ ] Task one", "new_text": "- [x] Task alpha"},
-                    {"old_text": "- [x] Task alpha", "new_text": "- [x] Task alpha (done)"},
+                    {"find": "- [ ] Task one", "replace": "- [x] Task alpha"},
+                    {"find": "- [x] Task alpha", "replace": "- [x] Task alpha (done)"},
                 ],
             },
         ))
@@ -2315,8 +2315,8 @@ class TestVaultPatch:
             {
                 "project": "nonexistent",
                 "path": "11-tasks.md",
-                "old_text": "foo",
-                "new_text": "bar",
+                "find": "foo",
+                "replace": "bar",
             },
         ))
         assert "not found" in result.lower()
@@ -2329,8 +2329,8 @@ class TestVaultPatch:
             {
                 "project": "testproject",
                 "path": "nonexistent.md",
-                "old_text": "foo",
-                "new_text": "bar",
+                "find": "foo",
+                "replace": "bar",
             },
         ))
         assert "not found" in result.lower()
@@ -2343,8 +2343,8 @@ class TestVaultPatch:
             {
                 "project": "testproject",
                 "path": "11-tasks.md",
-                "old_text": "Task",
-                "new_text": "Item",
+                "find": "Task",
+                "replace": "Item",
             },
         ))
         assert "ambiguous" in result.lower()
@@ -2357,14 +2357,14 @@ class TestVaultPatch:
             {
                 "project": "testproject",
                 "path": "11-tasks.md",
-                "old_text": "nonexistent text here",
-                "new_text": "replacement",
+                "find": "nonexistent text here",
+                "replace": "replacement",
             },
         ))
         assert "not found" in result.lower()
 
     async def test_no_params_error(self, git_vault: Path) -> None:
-        """Neither old_text/new_text nor patches provided is an error."""
+        """Neither find/replace nor patches provided is an error."""
         mcp = create_server(vault_path=git_vault)
         result = _text(await mcp.call_tool(
             "vault_patch",
@@ -2393,8 +2393,8 @@ class TestVaultPatch:
                 "project": "testproject",
                 "path": "11-tasks.md",
                 "patches": [
-                    {"old_text": "- [ ] Task one", "new_text": "- [x] Task one"},
-                    {"old_text": "- [x] Task two", "new_text": "- [ ] Task two reopened"},
+                    {"find": "- [ ] Task one", "replace": "- [x] Task one"},
+                    {"find": "- [x] Task two", "replace": "- [ ] Task two reopened"},
                 ],
             },
         )
@@ -2413,7 +2413,7 @@ class TestVaultPatchTolerantMatching:
     async def test_patch_tolerates_trailing_whitespace(
         self, git_vault: Path,
     ) -> None:
-        """Multi-line old_text with trailing whitespace differences."""
+        """Multi-line find text with trailing whitespace differences."""
         tasks = git_vault / "10_projects" / "testproject" / "11-tasks.md"
         # Write a table with trailing spaces on each line
         raw = tasks.read_text()
@@ -2437,8 +2437,8 @@ class TestVaultPatchTolerantMatching:
             {
                 "project": "testproject",
                 "path": "11-tasks.md",
-                "old_text": "| A | B |\n|---|---|\n| 1 | 2 |",
-                "new_text": "| A | B | C |\n|---|---|---|\n| 1 | 2 | 3 |",
+                "find": "| A | B |\n|---|---|\n| 1 | 2 |",
+                "replace": "| A | B | C |\n|---|---|---|\n| 1 | 2 | 3 |",
             },
         ))
         assert "1 patch" in result.lower()
@@ -2453,8 +2453,8 @@ class TestVaultPatchTolerantMatching:
             {
                 "project": "testproject",
                 "path": "11-tasks.md",
-                "old_text": "- [ ] Task ones",
-                "new_text": "- [x] Task one",
+                "find": "- [ ] Task ones",
+                "replace": "- [x] Task one",
             },
         ))
         assert "not found" in result.lower()
@@ -2463,7 +2463,7 @@ class TestVaultPatchTolerantMatching:
     async def test_patch_roundtrip_query_then_patch(
         self, git_vault: Path,
     ) -> None:
-        """Real workflow: vault_query output used as vault_patch old_text."""
+        """Real workflow: vault_query output used as vault_patch find text."""
         mcp = create_server(vault_path=git_vault)
         query_result = _text(await mcp.call_tool(
             "vault_query",
@@ -2475,8 +2475,8 @@ class TestVaultPatchTolerantMatching:
             {
                 "project": "testproject",
                 "path": "11-tasks.md",
-                "old_text": "- [ ] Task one",
-                "new_text": "- [x] Task one (completed)",
+                "find": "- [ ] Task one",
+                "replace": "- [x] Task one (completed)",
             },
         ))
         assert "1 patch" in result.lower()
@@ -2484,7 +2484,7 @@ class TestVaultPatchTolerantMatching:
     async def test_patch_body_only_match_when_frontmatter_overlaps(
         self, git_vault: Path,
     ) -> None:
-        """old_text matches body uniquely even if ambiguous in full file."""
+        """find text matches body uniquely even if ambiguous in full file."""
         tasks = git_vault / "10_projects" / "testproject" / "11-tasks.md"
         # "active" is in the frontmatter status AND we add it to body
         raw = tasks.read_text()
@@ -2504,8 +2504,8 @@ class TestVaultPatchTolerantMatching:
             {
                 "project": "testproject",
                 "path": "11-tasks.md",
-                "old_text": "- [ ] active task",
-                "new_text": "- [x] active task (done)",
+                "find": "- [ ] active task",
+                "replace": "- [x] active task (done)",
             },
         ))
         assert "1 patch" in result.lower()
@@ -2529,8 +2529,8 @@ class TestGitCommitResilience:
                 {
                     "project": "testproject",
                     "path": "11-tasks.md",
-                    "old_text": "- [ ] Task one",
-                    "new_text": "- [x] Task one done",
+                    "find": "- [ ] Task one",
+                    "replace": "- [x] Task one done",
                 },
             ))
 
@@ -2571,8 +2571,8 @@ class TestGitCommitResilience:
                 {
                     "project": "testproject",
                     "path": "11-tasks.md",
-                    "old_text": "- [ ] Task one",
-                    "new_text": "- [x] Task one done",
+                    "find": "- [ ] Task one",
+                    "replace": "- [x] Task one done",
                 },
             )
 
@@ -2628,8 +2628,8 @@ class TestFileIOResilience:
                 {
                     "project": "testproject",
                     "path": "11-tasks.md",
-                    "old_text": "foo",
-                    "new_text": "bar",
+                    "find": "foo",
+                    "replace": "bar",
                 },
             ))
             assert "error" in result.lower()
@@ -3299,8 +3299,8 @@ class TestWriteLockTimeout:
                 {
                     "project": "testproject",
                     "path": "11-tasks.md",
-                    "old_text": "- [ ] Task one",
-                    "new_text": "- [x] Task one done",
+                    "find": "- [ ] Task one",
+                    "replace": "- [x] Task one done",
                 },
             ))
         assert "busy" in result.lower() or "timeout" in result.lower()

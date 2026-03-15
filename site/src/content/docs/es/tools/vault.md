@@ -140,18 +140,29 @@ Todas las operaciones hacen auto-commit a git.
 
 ## vault_patch
 
-Reemplazo quirúrgico de texto en un archivo del vault.
+Buscar y reemplazar quirúrgico en un archivo del vault.
 
 ```python
+# Reemplazo simple
 vault_patch(
     project="mi-proyecto",
     path="30-architecture/adr-001.md",
-    old_text="status: draft",
-    new_text="status: accepted"
+    find="status: draft",
+    replace="status: accepted"
+)
+
+# Múltiples reemplazos (aplicados en secuencia)
+vault_patch(
+    project="mi-proyecto",
+    path="11-tasks.md",
+    patches=[
+        {"find": "- [ ] Tarea uno", "replace": "- [x] Tarea uno"},
+        {"find": "- [ ] Tarea dos", "replace": "- [x] Tarea dos"},
+    ]
 )
 ```
 
-Reemplaza exactamente una ocurrencia de `old_text` con `new_text`. Rechaza coincidencias ambiguas — si `old_text` aparece más de una vez, la operación falla con un error pidiendo más contexto. Auto-commit a git.
+Reemplaza exactamente una ocurrencia de `find` con `replace`. Rechaza coincidencias ambiguas — si `find` aparece más de una vez, la operación falla con un error pidiendo más contexto. Usa coincidencia en cascada de 3 pasadas: exacta → solo cuerpo → normalizada por espacios. Auto-commit a git.
 
 ## capture_lesson
 

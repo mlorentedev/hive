@@ -204,58 +204,61 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
     def vault_patch(
         project: str,
         path: str,
-        old_text: str = "",
-        new_text: str = "",
+        find: str = "",
+        replace: str = "",
         patches: list[dict[str, str]] = [],  # noqa: B006
     ) -> str:
-        """Surgical text replacement in a vault file with auto git commit.
+        """Surgical find-and-replace in a vault file with auto git commit.
 
-        Supports single or multi-replacement. For single replacement, provide
-        old_text and new_text. For multiple replacements, provide patches — a list
-        of {old_text, new_text} dicts applied in sequence. Do not mix both modes.
+        Supports single or multi-replacement. For a single replacement, provide
+        ``find`` and ``replace``. For multiple replacements, provide ``patches``
+        — a list of ``{"find": "...", "replace": "..."}`` dicts applied in
+        sequence. Do not mix both modes.
 
-        Each old_text must appear exactly once in the file (after prior patches in
-        the list have been applied). If any patch fails validation, no changes are
-        written.
+        Each ``find`` value must appear exactly once in the file (after prior
+        patches in the list have been applied). If any patch fails validation,
+        no changes are written.
+
+        Uses 3-pass cascading match: exact → body-only → whitespace-normalized.
 
         Args:
             project: Project slug or '_meta' for cross-project content.
             path: Relative path to the file within the project.
-            old_text: Exact text to find and replace (single mode). Empty = not set.
-            new_text: Replacement text (single mode). Empty = not set.
-            patches: List of {old_text, new_text} dicts (multi mode).
+            find: Exact text to find (single mode). Empty = not set.
+            replace: Replacement text (single mode). Empty = not set.
+            patches: List of {"find", "replace"} dicts (multi mode).
         """
         guard = _vault_guard(ctx)
         if guard:
             return track(ctx, "vault_patch", guard, project)
 
-        has_single = bool(old_text) or bool(new_text)
+        has_single = bool(find) or bool(replace)
         has_multi = len(patches) > 0
 
         if has_single and has_multi:
             return track(
                 ctx, "vault_patch",
-                "Cannot mix old_text/new_text with patches. "
+                "Cannot mix find/replace with patches. "
                 "Use one mode or the other.",
                 project,
             )
 
         if has_single:
-            if not old_text or not new_text:
+            if not find or not replace:
                 return track(
                     ctx, "vault_patch",
-                    "Provide both old_text and new_text for single replacement.",
+                    "Provide both find and replace for single replacement.",
                     project,
                 )
             patch_list: list[dict[str, str]] = [
-                {"old_text": old_text, "new_text": new_text},
+                {"find": find, "replace": replace},
             ]
         elif has_multi:
             patch_list = patches
         else:
             return track(
                 ctx, "vault_patch",
-                "Provide old_text/new_text or a patches list.",
+                "Provide find/replace or a patches list.",
                 project,
             )
 
@@ -290,15 +293,15 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             # Validate and apply all patches on a working copy first
             working = content
             for i, patch in enumerate(patch_list, 1):
-                if "old_text" not in patch or "new_text" not in patch:
+                if "find" not in patch or "replace" not in patch:
                     label = f"patch {i}: " if len(patch_list) > 1 else ""
                     return track(
                         ctx, "vault_patch",
-                        f"{label}Each patch must have 'old_text' and 'new_text' keys.",
+                        f"{label}Each patch must have 'find' and 'replace' keys.",
                         project,
                     )
                 ok, result = _match_and_replace(
-                    working, patch["old_text"], patch["new_text"],
+                    working, patch["find"], patch["replace"],
                 )
                 if not ok:
                     label = f"patch {i}: " if len(patch_list) > 1 else ""

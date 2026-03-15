@@ -28,7 +28,7 @@ class TestMatchAndReplace:
         assert new_content.startswith("---")
 
     def test_exact_match_body_only(self) -> None:
-        """Pass 2: old_text matches body but is ambiguous in full file."""
+        """Pass 2: find text matches body but is ambiguous in full file."""
         # "active" appears in frontmatter AND body — ambiguous in Pass 1,
         # but unique in Pass 2 (body-only)
         content = _FM + "# Title\n\nStatus: active\n"
@@ -43,9 +43,9 @@ class TestMatchAndReplace:
         """Pass 3: trailing whitespace differences tolerated."""
         content = _FM + "# Title\n\n| A | B |   \n|---|---|\n| 1 | 2 |  \n"
         # LLM stripped trailing spaces
-        old_text = "| A | B |\n|---|---|\n| 1 | 2 |"
+        find_text = "| A | B |\n|---|---|\n| 1 | 2 |"
         ok, new_content = _match_and_replace(
-            content, old_text, "| A | B | C |\n|---|---|---|\n| 1 | 2 | 3 |",
+            content, find_text, "| A | B | C |\n|---|---|---|\n| 1 | 2 | 3 |",
         )
         assert ok
         assert "| C |" in new_content
@@ -76,7 +76,7 @@ class TestMatchAndReplace:
         assert "Goodbye world" in new_content
 
     def test_similarity_hint_on_close_miss(self) -> None:
-        """When old_text is close but not exact, error includes similarity %."""
+        """When find text is close but not exact, error includes similarity %."""
         content = _FM + "Hello world\n"
         ok, msg = _match_and_replace(content, "Hello worlds", "replacement")
         assert not ok

@@ -187,8 +187,8 @@ def _normalize_ws(text: str) -> str:
 
 def _match_and_replace(
     content: str,
-    old_text: str,
-    new_text: str,
+    find: str,
+    replace: str,
 ) -> tuple[bool, str]:
     """Cascading match-and-replace: exact → body-only → whitespace-normalized.
 
@@ -196,46 +196,46 @@ def _match_and_replace(
     on failure.
     """
     # ── Pass 1: Exact match on full content ──
-    count = content.count(old_text)
+    count = content.count(find)
     if count == 1:
-        return True, content.replace(old_text, new_text, 1)
+        return True, content.replace(find, replace, 1)
     if count > 1:
-        return False, f"Ambiguous: old_text appears {count} times."
+        return False, f"Ambiguous: find text appears {count} times."
 
     # ── Pass 2: Exact match on body (post-frontmatter) ──
     body = extract_body(content)
     frontmatter = content[: len(content) - len(body)] if body != content else ""
 
-    count = body.count(old_text)
+    count = body.count(find)
     if count == 1:
-        return True, frontmatter + body.replace(old_text, new_text, 1)
+        return True, frontmatter + body.replace(find, replace, 1)
     if count > 1:
-        return False, f"Ambiguous: old_text appears {count} times."
+        return False, f"Ambiguous: find text appears {count} times."
 
     # ── Pass 3: Whitespace-normalized match on body ──
     norm_body = _normalize_ws(body)
-    norm_old = _normalize_ws(old_text)
+    norm_find = _normalize_ws(find)
 
-    if norm_old:
-        count = norm_body.count(norm_old)
+    if norm_find:
+        count = norm_body.count(norm_find)
         if count == 1:
-            return True, frontmatter + norm_body.replace(norm_old, new_text, 1)
+            return True, frontmatter + norm_body.replace(norm_find, replace, 1)
         if count > 1:
             return (
                 False,
-                f"Ambiguous: old_text appears {count} times"
+                f"Ambiguous: find text appears {count} times"
                 " (after whitespace normalization).",
             )
 
     # ── Diagnostic: similarity hint ──
     best_ratio = 0.0
     search_in = norm_body or body
-    if norm_old:
-        matcher = difflib.SequenceMatcher(None, norm_old, "")
+    if norm_find:
+        matcher = difflib.SequenceMatcher(None, norm_find, "")
         lines = search_in.splitlines()
-        n_old = max(len(norm_old.splitlines()), 1)
-        for i in range(max(1, len(lines) - n_old + 2)):
-            chunk = "\n".join(lines[i : i + n_old])
+        n_find = max(len(norm_find.splitlines()), 1)
+        for i in range(max(1, len(lines) - n_find + 2)):
+            chunk = "\n".join(lines[i : i + n_find])
             matcher.set_seq2(chunk)
             ratio = matcher.ratio()
             if ratio > best_ratio:
@@ -243,7 +243,7 @@ def _match_and_replace(
 
     pct = int(best_ratio * 100)
     hint = f" Best match: {pct}% similar." if pct > 40 else ""
-    return False, f"old_text not found.{hint}"
+    return False, f"find text not found.{hint}"
 
 
 # ── Text formatting ────────────────────────────────────────────────────

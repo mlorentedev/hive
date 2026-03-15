@@ -335,8 +335,8 @@ class TestVaultSmoke:
             {
                 "project": "smoketest",
                 "path": "11-tasks.md",
-                "old_text": "- [ ] Task alpha",
-                "new_text": "- [x] Task alpha",
+                "find": "- [ ] Task alpha",
+                "replace": "- [x] Task alpha",
             },
         ))
         assert "patch" in result.lower()
@@ -350,8 +350,8 @@ class TestVaultSmoke:
             {
                 "project": "smoketest",
                 "path": "11-tasks.md",
-                "old_text": "Task",
-                "new_text": "Item",
+                "find": "Task",
+                "replace": "Item",
             },
         ))
         assert "ambiguous" in result.lower()
