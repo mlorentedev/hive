@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/mlorentedev/hive/compare/v1.11.6...v1.12.0) (2026-03-27)
+
+
+### Features
+
+* hierarchical scope support for work vault ([#67](https://github.com/mlorentedev/hive/issues/67)) ([63f2378](https://github.com/mlorentedev/hive/commit/63f2378034db282bc301c4108d381e3c36da9fea))
+
 ## [1.11.6](https://github.com/mlorentedev/hive/compare/v1.11.5...v1.11.6) (2026-03-14)
 
 
