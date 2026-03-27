@@ -33,6 +33,27 @@ _ALL_CHECKS = frozenset({"frontmatter", "stale", "links"})
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+?)(?:[|#][^\]]*?)?\]\]")
 
 
+def _find_duplicate_names(scope_dir: Path) -> list[tuple[str, list[str]]]:
+    """Find directory names that appear at multiple depths within a scope.
+
+    Returns a list of (name, [relative_paths]) for duplicated names.
+    """
+    from collections import defaultdict
+
+    name_paths: dict[str, list[str]] = defaultdict(list)
+    try:
+        for d in scope_dir.rglob("*"):
+            if d.is_dir():
+                rel = d.relative_to(scope_dir).as_posix()
+                name_paths[d.name].append(rel)
+    except OSError:
+        return []
+    return [
+        (name, paths) for name, paths in sorted(name_paths.items())
+        if len(paths) > 1
+    ]
+
+
 def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
     """Build health report text (shared by resource and tool)."""
     stale_threshold = date.today() - timedelta(days=ctx.stale_days)
@@ -79,6 +100,27 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
                     f"{', '.join(sorted(stale_files))}"
                 )
             lines.append("")
+
+    # ── Duplicate name warnings ──
+    dup_lines: list[str] = []
+    for scope_name, dir_name in ctx.scopes.items():
+        if scope_name == "meta":
+            continue
+        scope_dir = ctx.vault / dir_name
+        if not scope_dir.is_dir():
+            continue
+        duplicates = _find_duplicate_names(scope_dir)
+        for name, paths in duplicates:
+            dup_lines.append(
+                f"- **{scope_name}**: '{name}' exists at: "
+                + ", ".join(paths)
+                + f" (resolved to: {paths[0]})"
+            )
+    if dup_lines:
+        found_any = True
+        lines.append("## Duplicate Names (BFS resolution warning)")
+        lines.extend(dup_lines)
+        lines.append("")
 
     if not found_any:
         return "No projects found in vault."

@@ -23,6 +23,24 @@ vault_list(project="mi-proyecto", pattern="adr-*")
 
 Sin `project`, lista todos los proyectos del vault con recuento de archivos y atajos. Con `project`, lista archivos y directorios (directorios primero, luego archivos). Con `pattern`, busca recursivamente todos los archivos que coincidan.
 
+### Resolución de scopes
+
+Los proyectos se organizan en **scopes** — directorios de nivel superior del vault. Por defecto, Hive incluye tres scopes:
+
+| Scope | Directorio | Propósito |
+|---|---|---|
+| `projects` | `10_projects/` | Proyectos personales |
+| `work` | `50_work/` | Trabajo: productos, clientes, tickets, desarrollo |
+| `meta` | `00_meta/` | Patrones y plantillas cross-proyecto |
+
+Usa la sintaxis `scope:slug` para apuntar a un scope específico: `vault_list(project="work:hydra3d-plus")`.
+
+**Scopes jerárquicos:** El scope `work` (y cualquier scope) soporta directorios anidados. Si un slug no se encuentra como hijo directo del directorio del scope, Hive busca recursivamente usando búsqueda en amplitud (BFS). Por ejemplo, `work:hydra3d-plus` resuelve a `50_work/20-products/hydra3d-plus/` automáticamente.
+
+Usa rutas explícitas con `/` para saltar BFS: `work:20-products/hydra3d-plus`.
+
+Sin prefijo de scope, Hive escanea todos los scopes en orden — la primera coincidencia gana.
+
 ## vault_query
 
 Lee secciones o archivos bajo demanda.
@@ -67,6 +85,9 @@ vault_search(query="deployment", ranked=True, max_results=5)
 
 # Cambios recientes (últimos N días)
 vault_search(since_days=7, project="mi-proyecto")
+
+# Restringir búsqueda a un scope
+vault_search(query="LVDS", scope="work")
 ```
 
 **Modo estándar:** Devuelve líneas coincidentes agrupadas por archivo, con cabeceras de metadatos. Cuando `use_regex=True`, la query se compila como expresión regular de Python (case-insensitive).
@@ -74,6 +95,8 @@ vault_search(since_days=7, project="mi-proyecto")
 **Modo ranking** (`ranked=True`): Puntúa resultados por peso de estado (active > draft > archived), recencia y densidad de coincidencias. Devuelve los mejores resultados con metadatos y líneas coincidentes.
 
 **Modo reciente** (`since_days > 0`): Combina historial de git con fechas `created` del frontmatter para encontrar archivos modificados en los últimos N días. Filtro opcional por `project`.
+
+**Filtro de scope** (`scope`): Restringe la búsqueda a un solo scope (ej. `"work"`, `"projects"`). Funciona en los tres modos. Sin `scope`, busca en todo el vault.
 
 ## vault_health
 
@@ -90,7 +113,7 @@ vault_health(project="mi-proyecto", checks=["frontmatter", "stale", "links"], ma
 vault_health(include_usage=True, usage_days=30)
 ```
 
-**Reporte de salud** (por defecto): Recuento de archivos por proyecto, total de líneas, archivos obsoletos (>180 días, configurable vía `HIVE_STALE_THRESHOLD_DAYS`), cobertura de secciones.
+**Reporte de salud** (por defecto): Recuento de archivos por proyecto, total de líneas, archivos obsoletos (>180 días, configurable vía `HIVE_STALE_THRESHOLD_DAYS`), cobertura de secciones. También detecta **nombres de directorio duplicados** en scopes jerárquicos y advierte qué ruta resolverá BFS.
 
 **Validación** (parámetro `checks`): Detector de drift para problemas comunes:
 - **frontmatter**: Frontmatter YAML faltante o malformado, campos requeridos ausentes (id, type, status), fechas no parseables

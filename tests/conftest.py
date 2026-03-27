@@ -87,10 +87,10 @@ def mock_vault(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def multi_scope_vault(mock_vault: Path) -> Path:
-    """Extend mock_vault with a 50_work scope containing a company project."""
+    """Extend mock_vault with a 50_work scope containing hierarchical structure."""
+    # Direct child (flat entity, like 10_projects)
     company = mock_vault / "50_work" / "my-company"
     company.mkdir(parents=True)
-
     (company / "00-context.md").write_text(
         "---\nid: my-company\ntype: project\nstatus: active\n---\n\n"
         "# My Company\n\nProfessional project.\n"
@@ -102,6 +102,23 @@ def multi_scope_vault(mock_vault: Path) -> Path:
     (company / "90-lessons.md").write_text(
         "---\nid: my-company-lessons\ntype: lesson\nstatus: active\n---\n\n"
         "# My Company: Lessons\n\n## Entry 1\nDeploy on Fridays.\n"
+    )
+
+    # Nested entity under a category (hierarchical)
+    hydra = mock_vault / "50_work" / "20-products" / "hydra3d-plus"
+    hydra.mkdir(parents=True)
+    (hydra / "00-context.md").write_text(
+        "---\nid: hydra3d-plus\ntype: product\nstatus: active\n---\n\n"
+        "# Hydra3D Plus\n\n3D camera product.\n"
+    )
+
+    # Another nested entity (different category)
+    client = mock_vault / "50_work" / "30-clients" / "appliedmaterials"
+    client.mkdir(parents=True)
+    (client / "00-context.md").write_text(
+        "---\nid: appliedmaterials\ntype: client\nstatus: active\n"
+        "tags: [hydra3d-plus]\n---\n\n"
+        "# Applied Materials\n\nKey client using Hydra3D Plus.\n"
     )
 
     return mock_vault

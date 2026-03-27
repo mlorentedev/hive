@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from hive._helpers import _match_and_replace, _vault_guard, tool_span
+from hive._helpers import _match_and_replace, _resolve_project_dir, _vault_guard, tool_span
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -156,3 +156,85 @@ class TestToolSpan:
             async with tool_span("slow_tool", 0.05):
                 await asyncio.sleep(999)
         assert any("slow_tool" in r.message and "timed out" in r.message for r in caplog.records)
+
+
+class TestResolveProjectDir:
+    """Tests for _resolve_project_dir with hierarchical scopes."""
+
+    def test_flat_scope_resolves(self, mock_vault: Path) -> None:
+        """Standard flat scope: 10_projects/testproject resolves."""
+        result = _resolve_project_dir(mock_vault, "testproject")
+        assert result is not None
+        assert result[0] == mock_vault / "10_projects" / "testproject"
+        assert result[1] == "projects"
+
+    def test_explicit_scope_flat(self, mock_vault: Path) -> None:
+        """Explicit scope:slug resolves for flat scopes."""
+        result = _resolve_project_dir(mock_vault, "projects:testproject")
+        assert result is not None
+        assert result[0] == mock_vault / "10_projects" / "testproject"
+
+    def test_hierarchical_scope_resolves_nested(self, tmp_path: Path) -> None:
+        """BFS finds entity nested under a category in a hierarchical scope."""
+        (tmp_path / "50_work" / "20-products" / "hydra3d-plus").mkdir(parents=True)
+        scopes = {"work": "50_work"}
+        result = _resolve_project_dir(tmp_path, "work:hydra3d-plus", scopes)
+        assert result is not None
+        assert result[0] == tmp_path / "50_work" / "20-products" / "hydra3d-plus"
+        assert result[1] == "work"
+
+    def test_hierarchical_bfs_shallowest_wins(self, tmp_path: Path) -> None:
+        """When same name exists at multiple depths, shallowest wins (BFS)."""
+        (tmp_path / "50_work" / "agents").mkdir(parents=True)
+        (tmp_path / "50_work" / "30-clients" / "acme" / "agents").mkdir(parents=True)
+        scopes = {"work": "50_work"}
+        result = _resolve_project_dir(tmp_path, "work:agents", scopes)
+        assert result is not None
+        assert result[0] == tmp_path / "50_work" / "agents"
+
+    def test_hierarchical_category_itself_resolves(self, tmp_path: Path) -> None:
+        """Category directories (e.g. 12-tickets) are valid targets."""
+        (tmp_path / "50_work" / "12-tickets" / "active").mkdir(parents=True)
+        scopes = {"work": "50_work"}
+        result = _resolve_project_dir(tmp_path, "work:12-tickets", scopes)
+        assert result is not None
+        assert result[0] == tmp_path / "50_work" / "12-tickets"
+
+    def test_hierarchical_explicit_path_with_slash(self, tmp_path: Path) -> None:
+        """Explicit category/entity path resolves directly."""
+        (tmp_path / "50_work" / "20-products" / "hydra3d-plus").mkdir(parents=True)
+        scopes = {"work": "50_work"}
+        result = _resolve_project_dir(tmp_path, "work:20-products/hydra3d-plus", scopes)
+        assert result is not None
+        assert result[0] == tmp_path / "50_work" / "20-products" / "hydra3d-plus"
+
+    def test_auto_scan_finds_in_hierarchical_scope(self, tmp_path: Path) -> None:
+        """Auto-scan (no explicit scope) searches hierarchical scopes too."""
+        (tmp_path / "10_projects").mkdir()
+        (tmp_path / "50_work" / "20-products" / "hydra3d-plus").mkdir(parents=True)
+        scopes = {"projects": "10_projects", "work": "50_work"}
+        result = _resolve_project_dir(tmp_path, "hydra3d-plus", scopes)
+        assert result is not None
+        assert result[0] == tmp_path / "50_work" / "20-products" / "hydra3d-plus"
+        assert result[1] == "work"
+
+    def test_not_found_returns_none(self, tmp_path: Path) -> None:
+        """Non-existent slug returns None."""
+        (tmp_path / "50_work").mkdir()
+        scopes = {"work": "50_work"}
+        result = _resolve_project_dir(tmp_path, "work:nonexistent", scopes)
+        assert result is None
+
+    def test_boundary_escape_blocked(self, tmp_path: Path) -> None:
+        """Path traversal in slug is blocked."""
+        (tmp_path / "50_work").mkdir()
+        scopes = {"work": "50_work"}
+        result = _resolve_project_dir(tmp_path, "work:../../etc", scopes)
+        assert result is None
+
+    def test_meta_unchanged(self, mock_vault: Path) -> None:
+        """_meta still resolves to 00_meta scope root."""
+        result = _resolve_project_dir(mock_vault, "_meta")
+        assert result is not None
+        assert result[0] == mock_vault / "00_meta"
+        assert result[1] == "meta"

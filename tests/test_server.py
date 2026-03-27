@@ -2038,6 +2038,150 @@ class TestMultiScopeSearchRecent:
         assert "my-company" in result or "50_work" in result
 
 
+class TestHierarchicalScopeWriteGuard:
+    """vault_write refuses to create entities at ambiguous locations in hierarchical scopes."""
+
+    async def test_write_to_resolved_entity_works(self, git_multi_scope_vault: Path) -> None:
+        """Writing to an existing resolved entity in hierarchical scope works."""
+        products = git_multi_scope_vault / "50_work" / "20-products" / "hydra3d"
+        products.mkdir(parents=True)
+        (products / "00-context.md").write_text(
+            "---\nid: hydra3d\ntype: project\nstatus: active\n---\n\n# Hydra3D\n"
+        )
+        import subprocess
+        subprocess.run(
+            ["git", "add", "."], cwd=git_multi_scope_vault,
+            capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "add hydra3d"], cwd=git_multi_scope_vault,
+            capture_output=True, check=True,
+        )
+
+        mcp = create_server(vault_path=git_multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool("vault_write", {
+            "project": "work:hydra3d",
+            "path": "notes.md",
+            "content": "# Notes\n",
+            "doc_type": "note",
+            "operation": "create",
+        }))
+        assert "created" in result.lower()
+
+    async def test_write_to_nonexistent_slug_without_path_fails(
+        self, git_multi_scope_vault: Path,
+    ) -> None:
+        """Creating a file in a non-existent slug without category path returns error."""
+        mcp = create_server(vault_path=git_multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool("vault_write", {
+            "project": "work:new-thing",
+            "path": "notes.md",
+            "content": "# Notes\n",
+            "doc_type": "note",
+            "operation": "create",
+        }))
+        assert "not found" in result.lower()
+
+    async def test_write_with_explicit_category_path_works(
+        self, git_multi_scope_vault: Path,
+    ) -> None:
+        """Creating with explicit category/entity path works (vault_write resolves it)."""
+        # my-company is a direct child of 50_work — use it as the target
+        mcp = create_server(vault_path=git_multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool("vault_write", {
+            "project": "work:my-company",
+            "path": "40-runbooks/deploy.md",
+            "content": "# Deploy Guide\n",
+            "doc_type": "runbook",
+            "operation": "create",
+        }))
+        assert "created" in result.lower()
+
+
+class TestDuplicateNameDetection:
+    """vault_health warns about duplicate directory names within a scope."""
+
+    async def test_detects_duplicate_names(self, multi_scope_vault: Path) -> None:
+        """Health report warns when same name exists at different depths."""
+        (multi_scope_vault / "50_work" / "agents").mkdir(parents=True, exist_ok=True)
+        (multi_scope_vault / "50_work" / "30-clients" / "acme" / "agents").mkdir(
+            parents=True,
+        )
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool("vault_health", {}))
+        assert "duplicate" in result.lower()
+        assert "agents" in result
+
+    async def test_no_false_positive_without_duplicates(
+        self, multi_scope_vault: Path,
+    ) -> None:
+        """No duplicate warning when all names are unique."""
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool("vault_health", {}))
+        assert "duplicate" not in result.lower()
+
+
+class TestVaultSearchScopeFilter:
+    """vault_search scope parameter restricts search to a specific scope."""
+
+    async def test_scope_filter_limits_to_work(self, multi_scope_vault: Path) -> None:
+        """Search with scope='work' only finds files in 50_work."""
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool("vault_search", {
+            "query": "Project",
+            "scope": "work",
+        }))
+        assert "50_work" in result or "my-company" in result
+        assert "10_projects" not in result
+
+    async def test_scope_filter_limits_to_projects(self, multi_scope_vault: Path) -> None:
+        """Search with scope='projects' only finds files in 10_projects."""
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool("vault_search", {
+            "query": "Project",
+            "scope": "projects",
+        }))
+        assert "10_projects" in result or "testproject" in result
+        assert "50_work" not in result
+
+    async def test_scope_filter_invalid_scope(self, multi_scope_vault: Path) -> None:
+        """Search with an invalid scope name returns error."""
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool("vault_search", {
+            "query": "anything",
+            "scope": "nonexistent",
+        }))
+        assert "unknown scope" in result.lower()
+
+    async def test_no_scope_searches_everything(self, multi_scope_vault: Path) -> None:
+        """Without scope, searches the entire vault (backward compat)."""
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool("vault_search", {
+            "query": "Project",
+        }))
+        assert "testproject" in result.lower() or "10_projects" in result
+        assert "my-company" in result.lower() or "50_work" in result
+
+    async def test_scope_filter_ranked_mode(self, multi_scope_vault: Path) -> None:
+        """Scope filter works in ranked mode too."""
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool("vault_search", {
+            "query": "Project",
+            "scope": "work",
+            "ranked": True,
+        }))
+        assert "10_projects" not in result
+
+    async def test_scope_filter_recent_mode(self, git_multi_scope_vault: Path) -> None:
+        """Scope filter works in recent mode too."""
+        mcp = create_server(vault_path=git_multi_scope_vault, vault_scopes=MULTI_SCOPES)
+        result = _text(await mcp.call_tool("vault_search", {
+            "scope": "work",
+            "since_days": 30,
+        }))
+        assert "10_projects" not in result
+
+
 # ── Path Traversal Protection ────────────────────────────────────────
 
 

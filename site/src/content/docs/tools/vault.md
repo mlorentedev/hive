@@ -23,6 +23,24 @@ vault_list(project="my-project", pattern="adr-*")
 
 Without `project`, lists all vault projects with file counts and shortcuts. With `project`, lists files and directories (directories first, then files). With `pattern`, recursively finds all matching files.
 
+### Scope resolution
+
+Projects are organized in **scopes** — top-level vault directories. By default, Hive ships with three scopes:
+
+| Scope | Directory | Purpose |
+|---|---|---|
+| `projects` | `10_projects/` | Personal projects |
+| `work` | `50_work/` | Work: products, clients, tickets, development |
+| `meta` | `00_meta/` | Cross-project patterns and templates |
+
+Use `scope:slug` syntax to target a specific scope: `vault_list(project="work:hydra3d-plus")`.
+
+**Hierarchical scopes:** The `work` scope (and any scope) supports nested directories. If a slug isn't found as a direct child of the scope directory, Hive searches recursively using breadth-first search. For example, `work:hydra3d-plus` resolves to `50_work/20-products/hydra3d-plus/` automatically.
+
+Use explicit paths with `/` to skip BFS: `work:20-products/hydra3d-plus`.
+
+Without a scope prefix, Hive auto-scans all scopes in order — first match wins.
+
 ## vault_query
 
 Read sections or files on demand.
@@ -67,6 +85,9 @@ vault_search(query="deployment", ranked=True, max_results=5)
 
 # Recent changes (last N days)
 vault_search(since_days=7, project="my-project")
+
+# Restrict search to a scope
+vault_search(query="LVDS", scope="work")
 ```
 
 **Standard mode:** Returns matching lines grouped by file, with metadata headers. When `use_regex=True`, the query is compiled as a Python regular expression (case-insensitive).
@@ -74,6 +95,8 @@ vault_search(since_days=7, project="my-project")
 **Ranked mode** (`ranked=True`): Scores results by status weight (active > draft > archived), recency, and match density. Returns top results with metadata and matching lines.
 
 **Recent mode** (`since_days > 0`): Combines git history with frontmatter `created` dates to find files changed in the last N days. Optional `project` filter.
+
+**Scope filter** (`scope`): Restricts the search to a single scope (e.g. `"work"`, `"projects"`). Works in all three modes. Without `scope`, searches the entire vault.
 
 ## vault_health
 
@@ -90,7 +113,7 @@ vault_health(project="my-project", checks=["frontmatter", "stale", "links"], max
 vault_health(include_usage=True, usage_days=30)
 ```
 
-**Health report** (default): Per-project file count, total lines, stale files (>180 days, configurable via `HIVE_STALE_THRESHOLD_DAYS`), section coverage.
+**Health report** (default): Per-project file count, total lines, stale files (>180 days, configurable via `HIVE_STALE_THRESHOLD_DAYS`), section coverage. Also detects **duplicate directory names** within hierarchical scopes and warns which path BFS will resolve to.
 
 **Validation** (`checks` parameter): Drift detector for common issues:
 - **frontmatter**: Missing or malformed YAML frontmatter, missing required fields (id, type, status), unparseable dates
