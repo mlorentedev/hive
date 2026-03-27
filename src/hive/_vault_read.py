@@ -211,6 +211,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         max_results: int = 10,
         since_days: int = 0,
         project: str = "",
+        scope: str = "",
     ) -> str:
         """Search the vault: full-text, ranked, or recent changes.
 
@@ -229,10 +230,28 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             max_results: Max files when ranked. Default 10.
             since_days: Show recent changes (0 = disabled). Default 0.
             project: Filter to this project (recent mode only).
+            scope: Restrict search to a scope (e.g. 'work', 'projects'). Empty = all.
         """
         guard = _vault_guard(ctx)
         if guard:
             return track(ctx, "vault_search", guard)
+
+        # ── Scope filter ──
+        search_root = ctx.vault
+        if scope:
+            scope_dir_name = ctx.scopes.get(scope)
+            if scope_dir_name is None:
+                available = ", ".join(sorted(ctx.scopes.keys()))
+                return track(
+                    ctx, "vault_search",
+                    f"Unknown scope '{scope}'. Available: {available}",
+                )
+            search_root = ctx.vault / scope_dir_name
+            if not search_root.is_dir():
+                return track(
+                    ctx, "vault_search",
+                    f"Scope directory '{scope_dir_name}' not found in vault.",
+                )
 
         if since_days < 0:
             return track(
@@ -242,8 +261,11 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         # ── Recent mode ──
         if since_days > 0:
             git_paths = set(_git_recent(ctx.vault, since_days))
+            if scope and search_root != ctx.vault:
+                scope_prefix = search_root.relative_to(ctx.vault).as_posix() + "/"
+                git_paths = {p for p in git_paths if p.startswith(scope_prefix)}
             cutoff = date.today() - timedelta(days=since_days)
-            for md_file in ctx.vault.rglob("*.md"):
+            for md_file in search_root.rglob("*.md"):
                 content = _safe_read(md_file)
                 if content is None:
                     continue
@@ -313,7 +335,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             today = date.today()
             scored: list[tuple[float, str, str, list[str]]] = []
 
-            for md_file in sorted(ctx.vault.rglob("*.md")):
+            for md_file in sorted(search_root.rglob("*.md")):
                 content = _safe_read(md_file)
                 if content is None:
                     continue
@@ -380,7 +402,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         query_lower = query.lower()
         has_filters = bool(type_filter or status_filter or tag_filter)
 
-        for md_file in sorted(ctx.vault.rglob("*.md")):
+        for md_file in sorted(search_root.rglob("*.md")):
             content = _safe_read(md_file)
             if content is None:
                 continue

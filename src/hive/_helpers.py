@@ -9,6 +9,7 @@ import re
 import subprocess
 import threading
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import date
 from typing import TYPE_CHECKING
@@ -39,7 +40,7 @@ SECTION_SHORTCUTS: dict[str, str] = {
     "lessons": "90-lessons.md",
 }
 
-_DEFAULT_SCOPES: dict[str, str] = {"projects": "10_projects", "meta": "00_meta"}
+_DEFAULT_SCOPES: dict[str, str] = {"projects": "10_projects", "meta": "00_meta", "work": "50_work"}
 
 _VAULT_NOT_FOUND_MSG = (
     "Vault not found at {path}.\n\n"
@@ -93,6 +94,11 @@ def _resolve_project_dir(
     - ``scope:project`` targets a specific scope.
     - Plain ``project`` auto-scans all scopes, first match wins.
 
+    Supports hierarchical scopes: if the slug is not found at the first
+    level of a scope directory, a breadth-first search finds it at any
+    depth.  Slugs containing ``/`` are resolved as literal relative paths
+    within the scope directory (no BFS).
+
     Returns None if the project is not found or escapes the vault boundary.
     """
     scopes = scopes or _DEFAULT_SCOPES
@@ -113,23 +119,61 @@ def _resolve_project_dir(
         dir_name = scopes.get(explicit_scope)
         if dir_name is None:
             return None
-        d = vault / dir_name / slug
-        if not d.is_dir():
-            return None
-        if _check_path_boundary(d, vault) is not None:
-            return None
-        return (d, explicit_scope)
+        scope_dir = vault / dir_name
+        return _search_scope(scope_dir, slug, explicit_scope, vault)
 
     # Auto-scan: iterate scopes, first match wins, skip missing dirs
     for scope_name, dir_name in scopes.items():
         if scope_name == "meta":
             continue  # meta is not a project container
         scope_dir = vault / dir_name
-        if not scope_dir.is_dir():
-            continue
+        result = _search_scope(scope_dir, slug, scope_name, vault)
+        if result is not None:
+            return result
+
+    return None
+
+
+def _search_scope(
+    scope_dir: Path, slug: str, scope_name: str, vault: Path,
+) -> tuple[Path, str] | None:
+    """Search for a slug within a scope directory.
+
+    If *slug* contains ``/``, treat it as a literal relative path.
+    Otherwise, try a direct child first, then breadth-first search.
+    """
+    if not scope_dir.is_dir():
+        return None
+
+    # Literal relative path (e.g. "20-products/hydra3d-plus")
+    if "/" in slug:
         d = scope_dir / slug
         if d.is_dir() and _check_path_boundary(d, vault) is None:
             return (d, scope_name)
+        return None
+
+    # Fast path: direct child
+    d = scope_dir / slug
+    if d.is_dir() and _check_path_boundary(d, vault) is None:
+        return (d, scope_name)
+
+    # BFS: breadth-first search through subdirectories
+    queue: deque[Path] = deque()
+    try:
+        queue.extend(sorted(c for c in scope_dir.iterdir() if c.is_dir()))
+    except OSError:
+        return None
+
+    while queue:
+        candidate = queue.popleft()
+        try:
+            children = sorted(c for c in candidate.iterdir() if c.is_dir())
+        except OSError:
+            continue
+        for child in children:
+            if child.name == slug and _check_path_boundary(child, vault) is None:
+                return (child, scope_name)
+            queue.append(child)
 
     return None
 

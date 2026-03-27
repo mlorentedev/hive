@@ -24,7 +24,7 @@ Toda la configuración se realiza mediante variables de entorno, pasadas al regi
 | `HIVE_RELEVANCE_ALPHA` | `0.3` | Tasa de aprendizaje EMA para puntuación adaptativa |
 | `HIVE_RELEVANCE_DECAY` | `0.9` | Factor de decaimiento por sesión para puntuaciones de relevancia |
 | `HIVE_RELEVANCE_EPSILON` | `0.15` | Ratio de exploración para session_briefing (epsilon-greedy) |
-| `HIVE_VAULT_SCOPES` | `{"projects": "10_projects", "meta": "00_meta"}` | Mapeo JSON de nombres de scope a subdirectorios del vault |
+| `HIVE_VAULT_SCOPES` | `{"projects": "10_projects", "meta": "00_meta", "work": "50_work"}` | Mapeo JSON de nombres de scope a subdirectorios del vault. Los scopes soportan resolución jerárquica (BFS). |
 | `HIVE_LOG_PATH` | `~/.local/share/hive/hive.log` | Ruta del log persistente de depuración (rotación 1MB) |
 
 ## Resolución de API Key

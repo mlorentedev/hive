@@ -119,3 +119,51 @@ class TestWorkflowCrossProjectAccess:
             )
         )
         assert "Test-Driven Development" in meta_pattern
+
+
+_HIER_SCOPES = {"projects": "10_projects", "meta": "00_meta", "work": "50_work"}
+
+
+class TestHierarchicalScopeDiscovery:
+    """Navigate hierarchical 50_work scope: list -> drill -> query."""
+
+    async def test_list_then_drill_into_category(self, multi_scope_vault: Path) -> None:
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=_HIER_SCOPES)
+
+        projects = _text(await mcp.call_tool("vault_list", {}))
+        assert "work/" in projects
+
+        products = _text(await mcp.call_tool(
+            "vault_list", {"project": "work:20-products"},
+        ))
+        assert "hydra3d-plus" in products
+
+        ctx = _text(await mcp.call_tool(
+            "vault_query", {"project": "work:hydra3d-plus", "section": "context"},
+        ))
+        assert "Hydra3D Plus" in ctx
+
+    async def test_auto_scan_resolves_nested_entity(
+        self, multi_scope_vault: Path,
+    ) -> None:
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=_HIER_SCOPES)
+
+        ctx = _text(await mcp.call_tool(
+            "vault_query", {"project": "hydra3d-plus", "section": "context"},
+        ))
+        assert "Hydra3D Plus" in ctx
+
+    async def test_search_with_scope_filter(self, multi_scope_vault: Path) -> None:
+        mcp = create_server(vault_path=multi_scope_vault, vault_scopes=_HIER_SCOPES)
+
+        result = _text(await mcp.call_tool("vault_search", {
+            "query": "Hydra3D",
+            "scope": "work",
+        }))
+        assert "hydra3d" in result.lower()
+
+        result = _text(await mcp.call_tool("vault_search", {
+            "query": "Hydra3D",
+            "scope": "projects",
+        }))
+        assert "no matches" in result.lower()
