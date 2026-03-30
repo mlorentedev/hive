@@ -40,6 +40,10 @@ For Codex CLI, GitHub Copilot, Cursor, Windsurf, and other clients, see [Getting
 
 Then ask your assistant: *"Use vault_list to see my vault"*
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/mlorentedev-hive).
+
 ## Tools
 
 | Tool | What it does |
