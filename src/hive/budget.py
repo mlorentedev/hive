@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-import contextlib
-import sqlite3
-import threading
-from pathlib import Path
 from typing import Any
 
-_SCHEMA = """\
+from hive._sqlite_tracker import _SqliteTracker
+
+_MONTH_CLAUSE = "WHERE month = strftime('%Y-%m', 'now')"
+
+
+class BudgetTracker(_SqliteTracker):
+    """Track worker request costs against a monthly budget cap."""
+
+    _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS requests (
     id INTEGER PRIMARY KEY,
     timestamp TEXT DEFAULT (datetime('now')),
@@ -20,22 +24,6 @@ CREATE TABLE IF NOT EXISTS requests (
     task_type TEXT DEFAULT 'general'
 );
 """
-
-_MONTH_CLAUSE = "WHERE month = strftime('%Y-%m', 'now')"
-
-
-class BudgetTracker:
-    """Track worker request costs against a monthly budget cap."""
-
-    def __init__(self, db_path: str = ":memory:") -> None:
-        if db_path != ":memory:":
-            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-
-        self._lock = threading.Lock()
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        if db_path != ":memory:":
-            self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.executescript(_SCHEMA)
 
     def record_request(
         self,
@@ -75,15 +63,6 @@ class BudgetTracker:
         """Check if spending `amount` would stay within budget."""
         with self._lock:
             return (budget - self._month_spent()) >= amount
-
-    def close(self) -> None:
-        """Close the database connection."""
-        with self._lock:
-            self._conn.close()
-
-    def __del__(self) -> None:
-        with contextlib.suppress(Exception):
-            self._conn.close()
 
     def month_stats(self, budget: float) -> dict[str, Any]:
         """Aggregate stats for the current month."""

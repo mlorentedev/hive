@@ -19,6 +19,7 @@ from hive._helpers import (
     _truncate,
     _vault_guard,
     count_stale,
+    project_not_found,
     track,
 )
 from hive.frontmatter import extract_body, parse_date, parse_frontmatter
@@ -91,7 +92,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         resolved = _resolve_project_dir(ctx.vault, project, ctx.scopes)
         if resolved is None:
             return track(ctx, "vault_list",
-                         f"Project '{project}' not found in vault.", project)
+                         project_not_found(project), project)
         project_dir, _ = resolved
 
         from hive._helpers import _check_path_boundary
@@ -465,7 +466,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         resolved = _resolve_project_dir(ctx.vault, project, ctx.scopes)
         if resolved is None:
             return track(ctx, "session_briefing",
-                         f"Project '{project}' not found.", project)
+                         project_not_found(project), project)
         project_dir, _ = resolved
 
         # Decay stale relevance scores at session start
