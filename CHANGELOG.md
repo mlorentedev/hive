@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.1](https://github.com/mlorentedev/hive/compare/v1.12.0...v1.12.1) (2026-05-12)
+
+
+### Bug Fixes
+
+* stop false positives in vault_health link and frontmatter validator ([#70](https://github.com/mlorentedev/hive/issues/70)) ([03becde](https://github.com/mlorentedev/hive/commit/03becde013b7fffa20f42784a94779cb5ad19af0))
+
 ## [1.12.0](https://github.com/mlorentedev/hive/compare/v1.11.6...v1.12.0) (2026-03-27)
 
 
