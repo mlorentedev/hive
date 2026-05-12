@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
-import contextlib
 import random
-import sqlite3
-import threading
-from pathlib import Path
 
-_SCHEMA = """\
+from hive._sqlite_tracker import _SqliteTracker
+
+_DEFAULT_ALPHA = 0.3
+_DECAY_FACTOR = 0.9
+_PRUNE_THRESHOLD = 0.001
+_WRITE_MULTIPLIER = 2.0
+_DEFAULT_EPSILON = 0.15
+
+
+class RelevanceTracker(_SqliteTracker):
+    """Track per-section relevance using Exponential Moving Average."""
+
+    _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS section_scores (
     project TEXT NOT NULL,
     section TEXT NOT NULL,
@@ -19,16 +27,6 @@ CREATE TABLE IF NOT EXISTS section_scores (
 );
 """
 
-_DEFAULT_ALPHA = 0.3
-_DECAY_FACTOR = 0.9
-_PRUNE_THRESHOLD = 0.001
-_WRITE_MULTIPLIER = 2.0
-_DEFAULT_EPSILON = 0.15
-
-
-class RelevanceTracker:
-    """Track per-section relevance using Exponential Moving Average."""
-
     def __init__(
         self,
         db_path: str = ":memory:",
@@ -36,25 +34,10 @@ class RelevanceTracker:
         decay_factor: float = _DECAY_FACTOR,
         epsilon: float = _DEFAULT_EPSILON,
     ) -> None:
-        if db_path != ":memory:":
-            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        if db_path != ":memory:":
-            self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.executescript(_SCHEMA)
+        super().__init__(db_path)
         self._alpha = alpha
         self._decay_factor = decay_factor
         self._epsilon = epsilon
-
-    def close(self) -> None:
-        """Close the database connection."""
-        with self._lock:
-            self._conn.close()
-
-    def __del__(self) -> None:
-        with contextlib.suppress(Exception):
-            self._conn.close()
 
     def record_access(
         self, project: str, section: str, *, is_write: bool = False,
