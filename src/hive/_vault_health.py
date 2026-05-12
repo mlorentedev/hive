@@ -14,6 +14,7 @@ from hive._helpers import (
     _safe_read,
     _vault_guard,
     count_stale,
+    project_not_found,
     track,
 )
 from hive.frontmatter import (
@@ -193,7 +194,7 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                 if resolved is None:
                     return track(
                         ctx, "vault_health",
-                        f"Project '{project}' not found in vault.",
+                        project_not_found(project),
                         project,
                     )
                 project_dirs.append(resolved)
