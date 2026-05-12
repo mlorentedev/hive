@@ -30,6 +30,11 @@ _log = logging.getLogger(__name__)
 
 _REJECT_MSG = "The host should handle this task directly."
 
+
+def project_not_found(project: str) -> str:
+    """Standard error string for unresolvable project slugs."""
+    return f"Project '{project}' not found in vault."
+
 _READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
 _WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False)
 
@@ -197,7 +202,7 @@ def _resolve_file(
     """Resolve a vault file from project + section/path. Returns Path or error string."""
     result = _resolve_project_dir(vault, project, scopes)
     if result is None:
-        return f"Project '{project}' not found in vault."
+        return project_not_found(project)
     project_dir, _ = result
 
     if path:

@@ -15,6 +15,7 @@ from hive._helpers import (
     _match_and_replace,
     _resolve_project_dir,
     _vault_guard,
+    project_not_found,
     track,
 )
 from hive.frontmatter import validate_frontmatter
@@ -68,7 +69,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         if resolved is None:
             return track(
                 ctx, "vault_write",
-                f"Project '{project}' not found in vault.",
+                project_not_found(project),
                 project,
             )
         project_dir, _ = resolved
@@ -265,7 +266,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         resolved = _resolve_project_dir(ctx.vault, project, ctx.scopes)
         if resolved is None:
             return track(ctx, "vault_patch",
-                         f"Project '{project}' not found in vault.", project)
+                         project_not_found(project), project)
         project_dir, _ = resolved
 
         filepath = project_dir / path

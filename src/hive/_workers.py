@@ -20,6 +20,7 @@ from hive._helpers import (
     _resolve_file,
     _resolve_project_dir,
     _vault_guard,
+    project_not_found,
     tool_span,
     track,
 )
@@ -206,7 +207,7 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                 if resolved is None:
                     return track(
                         ctx, "capture_lesson",
-                        f"Project '{project}' not found in vault.",
+                        project_not_found(project),
                         project,
                     )
                 project_dir, _ = resolved
