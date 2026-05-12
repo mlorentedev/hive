@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
@@ -32,6 +33,19 @@ if TYPE_CHECKING:
 
 _ALL_CHECKS = frozenset({"frontmatter", "stale", "links"})
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+?)(?:[|#][^\]]*?)?\]\]")
+_FENCED_CODE_RE = re.compile(
+    r"(?ms)^(?P<fence>`{3,}|~{3,})[^\n]*\n.*?^(?P=fence)[^\n]*$",
+)
+_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+
+
+def _strip_code(text: str) -> str:
+    """Remove fenced and inline code so wikilink-like syntax inside code
+    (e.g. bash regex `[[:space:]]`, shell `[[ -z "$1" ]]`) is not parsed
+    as a wikilink.
+    """
+    text = _FENCED_CODE_RE.sub("", text)
+    return _INLINE_CODE_RE.sub("", text)
 
 
 def _find_duplicate_names(scope_dir: Path) -> list[tuple[str, list[str]]]:
@@ -201,10 +215,15 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                 )
 
             all_stems: set[str] = set()
+            all_paths: set[str] = set()
             if "links" in active_checks:
                 for pd, _ in project_dirs:
                     for f in pd.rglob("*.md"):
                         all_stems.add(f.stem)
+                        with contextlib.suppress(ValueError):
+                            all_paths.add(
+                                f.relative_to(pd).with_suffix("").as_posix(),
+                            )
 
             issues: list[str] = []
             stale_threshold = date.today() - timedelta(days=ctx.stale_days)
@@ -224,8 +243,11 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                         continue
 
                     fm = parse_frontmatter(content)
+                    in_memory_dir = "memory" in (
+                        f.relative_to(project_dir).parts
+                    )
 
-                    if "frontmatter" in active_checks:
+                    if "frontmatter" in active_checks and not in_memory_dir:
                         if fm is None:
                             issues.append(
                                 f"[error] {proj_name}/{rel}: "
@@ -271,10 +293,13 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                                 )
 
                     if "links" in active_checks:
-                        body = extract_body(content)
+                        body = _strip_code(extract_body(content))
                         for m in _WIKILINK_RE.finditer(body):
-                            target = m.group(1).strip()
-                            if target not in all_stems:
+                            target = m.group(1).strip().rstrip("\\").strip()
+                            if (
+                                target not in all_stems
+                                and target not in all_paths
+                            ):
                                 issues.append(
                                     f"[warning] {proj_name}/{rel}: "
                                     f"Broken link [[{target}]]"

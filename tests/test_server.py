@@ -3287,6 +3287,112 @@ class TestVaultValidate:
         ))
         assert "not found" in result.lower()
 
+    async def test_wikilink_inside_fenced_code_block_not_flagged(
+        self, mock_vault: Path,
+    ) -> None:
+        """Bash regex classes (e.g. [[:space:]], [[ -z "$1" ]]) inside fenced
+        code blocks must NOT be parsed as wikilinks. Currently false-positives.
+        """
+        doc = mock_vault / "10_projects" / "testproject" / "shell-snippets.md"
+        doc.write_text(
+            "---\nid: shell-snippets\ntype: note\nstatus: active\n---\n\n"
+            "# Shell snippets\n\n"
+            "```bash\n"
+            'if [[ -z "$1" ]]; then echo "no arg"; fi\n'
+            'echo "$x" | grep "[[:space:]]"\n'
+            "```\n\n"
+            "And a tilde fence:\n\n"
+            "~~~bash\n"
+            '[[ "$x" =~ ^[[:digit:]]+$ ]]\n'
+            "~~~\n",
+        )
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool(
+            "vault_health",
+            {"project": "testproject", "checks": ["links"]},
+        ))
+        assert "shell-snippets.md" not in result, (
+            f"Bash regex inside fenced blocks should not produce broken-link "
+            f"warnings; got: {result}"
+        )
+
+    async def test_escaped_pipe_in_wikilink_resolves_target(
+        self, mock_vault: Path,
+    ) -> None:
+        """`[[target\\|alias]]` is Obsidian's escape for pipes inside table cells.
+        The parser must treat `\\|` as an alias separator, not part of the target.
+        """
+        doc = mock_vault / "10_projects" / "testproject" / "with-escaped-pipe.md"
+        doc.write_text(
+            "---\nid: with-escaped-pipe\ntype: note\nstatus: active\n---\n\n"
+            "| Col | Link |\n"
+            "|-----|------|\n"
+            "| ADR | [[adr-001-test\\|the ADR]] |\n",
+        )
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool(
+            "vault_health",
+            {"project": "testproject", "checks": ["links"]},
+        ))
+        # The target adr-001-test exists; the escaped pipe must be parsed as
+        # an alias separator, so no broken-link warning should appear.
+        assert "with-escaped-pipe.md" not in result, (
+            f"Escaped-pipe wikilink should resolve to existing target; "
+            f"got: {result}"
+        )
+
+    async def test_subdir_path_wikilink_to_existing_file_not_flagged(
+        self, mock_vault: Path,
+    ) -> None:
+        """`[[30-architecture/adr-001-test|alias]]` should resolve to the
+        existing file `30-architecture/adr-001-test.md`, not be flagged broken.
+        """
+        doc = mock_vault / "10_projects" / "testproject" / "with-subdir-link.md"
+        doc.write_text(
+            "---\nid: with-subdir-link\ntype: note\nstatus: active\n---\n\n"
+            "See [[30-architecture/adr-001-test|the ADR]] for the rationale.\n",
+        )
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool(
+            "vault_health",
+            {"project": "testproject", "checks": ["links"]},
+        ))
+        assert "with-subdir-link.md" not in result, (
+            f"Subdir-path wikilink to existing file should not be flagged; "
+            f"got: {result}"
+        )
+
+    async def test_memory_file_skipped_by_frontmatter_check(
+        self, mock_vault: Path,
+    ) -> None:
+        """Files under */memory/ use Claude auto-memory schema
+        (`name`/`description`/`metadata.type`), not the standard vault schema.
+        Frontmatter check must skip them rather than flagging missing
+        id/type/status fields.
+        """
+        mem_dir = mock_vault / "10_projects" / "testproject" / "memory"
+        mem_dir.mkdir()
+        (mem_dir / "feedback_example.md").write_text(
+            "---\nname: feedback-example\n"
+            "description: example feedback memory\n"
+            "metadata:\n  type: feedback\n---\n\n"
+            "Lead with the rule.\n",
+        )
+        (mem_dir / "MEMORY.md").write_text(
+            "# Project Memory\n\nIndex content with no frontmatter.\n",
+        )
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool(
+            "vault_health",
+            {"project": "testproject", "checks": ["frontmatter"]},
+        ))
+        assert "memory/feedback_example.md" not in result, (
+            f"Auto-memory schema must be accepted; got: {result}"
+        )
+        assert "memory/MEMORY.md" not in result, (
+            f"MEMORY.md must be skipped; got: {result}"
+        )
+
 
 # ── _setup_file_logging ─────────────────────────────────────────────
 
