@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import contextlib
-import sqlite3
-import threading
-from pathlib import Path
 from typing import Any
 
-_SCHEMA = """\
+from hive._sqlite_tracker import _SqliteTracker
+
+
+class UsageTracker(_SqliteTracker):
+    """Track vault tool calls for session profiling and analytics."""
+
+    _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS tool_calls (
     id INTEGER PRIMARY KEY,
     timestamp TEXT DEFAULT (datetime('now')),
@@ -18,20 +20,6 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     response_lines INTEGER DEFAULT 0
 );
 """
-
-
-class UsageTracker:
-    """Track vault tool calls for session profiling and analytics."""
-
-    def __init__(self, db_path: str = ":memory:") -> None:
-        if db_path != ":memory:":
-            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-
-        self._lock = threading.Lock()
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        if db_path != ":memory:":
-            self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.executescript(_SCHEMA)
 
     def log_call(
         self,
@@ -46,15 +34,6 @@ class UsageTracker:
                 (tool, project, response_lines),
             )
             self._conn.commit()
-
-    def close(self) -> None:
-        """Close the database connection."""
-        with self._lock:
-            self._conn.close()
-
-    def __del__(self) -> None:
-        with contextlib.suppress(Exception):
-            self._conn.close()
 
     def stats(self, since_days: int = 30) -> dict[str, Any]:
         """Aggregate usage stats for the last N days."""
