@@ -67,6 +67,10 @@ MCP Host (Claude Code, Gemini CLI, Codex CLI, Cursor, ...)
             └── Worker Tools (2) ── Ollama (free) → OpenRouter free → paid ($1/mo cap) → reject
 ```
 
+## Known Issues
+
+- **MCP transport disconnect after rejecting first tool call.** Caused by a race in the upstream `mcp` library where a cancelled request kills the server's receive loop. Hive ships a compatibility patch (see `src/hive/_compat.py`) that neutralises it. Reproduction, root cause and the upstream-bound fix are documented in [Troubleshooting → Transport disconnect](https://mlorentedev.github.io/hive/guides/troubleshooting/#mcp-transport-disconnect-after-rejecting-the-first-tool-call) and tracked in [issue #75](https://github.com/mlorentedev/hive/issues/75).
+
 ## Documentation
 
 Full documentation at **[mlorentedev.github.io/hive](https://mlorentedev.github.io/hive/)**:
