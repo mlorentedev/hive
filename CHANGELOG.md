@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.2](https://github.com/mlorentedev/hive/compare/v1.12.1...v1.12.2) (2026-05-15)
+
+
+### Bug Fixes
+
+* prevent stdio transport disconnect after request cancellation ([#75](https://github.com/mlorentedev/hive/issues/75)) ([#76](https://github.com/mlorentedev/hive/issues/76)) ([a5e6372](https://github.com/mlorentedev/hive/commit/a5e637242c901aa11ddb9788e7cd62c9a72309db))
+
 ## [1.12.1](https://github.com/mlorentedev/hive/compare/v1.12.0...v1.12.1) (2026-05-12)
 
 
