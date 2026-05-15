@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
@@ -2758,6 +2759,10 @@ class TestGitReadResilience:
         assert result  # non-empty response
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="chmod 0o000/0o444 does not restrict access on Windows — POSIX-only",
+)
 class TestFileIOResilience:
     """Verify write tools return errors instead of crashing on I/O failures."""
 

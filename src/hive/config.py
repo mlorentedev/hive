@@ -36,6 +36,7 @@ class HiveSettings(BaseSettings):
     relevance_decay: float = 0.9
     relevance_epsilon: float = 0.15
     log_path: str = str(Path.home() / ".local" / "share" / "hive" / "hive.log")
+    log_level: str = "INFO"
 
 
 settings = HiveSettings()

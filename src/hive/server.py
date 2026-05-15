@@ -6,26 +6,31 @@ import logging
 import logging.handlers
 from typing import TYPE_CHECKING
 
-from fastmcp import FastMCP
+from hive import _compat as _hive_compat
+
+_hive_compat.apply()
+
+from fastmcp import FastMCP  # noqa: E402
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-from hive._context import ServerContext
-from hive._helpers import (
+from hive._context import ServerContext  # noqa: E402
+from hive._diagnostics import LifecycleMiddleware  # noqa: E402
+from hive._helpers import (  # noqa: E402
     _resolve_file,
     _safe_read,
     _truncate,
 )
-from hive._vault_health import health_report_text, register_vault_health
-from hive._vault_read import list_projects_text, register_vault_read
-from hive._vault_write import register_vault_write
-from hive._workers import register_workers
-from hive.budget import BudgetTracker
-from hive.clients import OllamaClient, OpenRouterClient
-from hive.config import settings
-from hive.relevance import RelevanceTracker
-from hive.usage import UsageTracker
+from hive._vault_health import health_report_text, register_vault_health  # noqa: E402
+from hive._vault_read import list_projects_text, register_vault_read  # noqa: E402
+from hive._vault_write import register_vault_write  # noqa: E402
+from hive._workers import register_workers  # noqa: E402
+from hive.budget import BudgetTracker  # noqa: E402
+from hive.clients import OllamaClient, OpenRouterClient  # noqa: E402
+from hive.config import settings  # noqa: E402
+from hive.relevance import RelevanceTracker  # noqa: E402
+from hive.usage import UsageTracker  # noqa: E402
 
 
 def create_server(
@@ -77,6 +82,7 @@ def create_server(
 
     mcp = FastMCP(
         "Hive",
+        middleware=[LifecycleMiddleware()],
         instructions=(
             "Hive provides on-demand access to an Obsidian vault.\n\n"
             "## When to use each tool\n\n"
@@ -392,7 +398,13 @@ Total estimated savings: ~C tokens
 
 
 def _setup_file_logging() -> None:
-    """Configure persistent file logging for post-mortem debugging."""
+    """Configure persistent file logging for post-mortem debugging.
+
+    Captures the ``hive``, ``fastmcp`` and ``mcp`` loggers so that
+    lifecycle events, cancellations, and transport-level issues are
+    visible after the fact. Level is controlled by ``HIVE_LOG_LEVEL``
+    (default ``INFO``).
+    """
     from pathlib import Path as _Path
 
     log_file = _Path(settings.log_path)
@@ -403,14 +415,22 @@ def _setup_file_logging() -> None:
     handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"),
     )
-    logging.getLogger("hive").addHandler(handler)
-    logging.getLogger("hive").setLevel(logging.WARNING)
+    level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    for name in ("hive", "fastmcp", "mcp"):
+        logger = logging.getLogger(name)
+        logger.addHandler(handler)
+        logger.setLevel(level)
 
 
 def main() -> None:
     """Entry point for the hive CLI command."""
     _setup_file_logging()
-    server.run()
+    _log = logging.getLogger("hive")
+    try:
+        server.run()
+    except BaseException as exc:
+        _log.critical("hive server exiting: %r", exc, exc_info=True)
+        raise
 
 
 server = create_server()

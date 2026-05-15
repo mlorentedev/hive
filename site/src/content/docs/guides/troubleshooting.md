@@ -197,6 +197,22 @@ claude mcp add -s user hive \
 
 **Note:** Timeouts are a safety net. A timed-out tool returns a clear error message instead of hanging your session indefinitely. The underlying operation (HTTP call, git commit) is cleaned up automatically.
 
+## MCP Transport Disconnect After Rejecting the First Tool Call
+
+**Symptom:** In Claude Code (and likely other MCP hosts), rejecting the very first `mcp__hive__*` permission prompt poisons the transport for the rest of the conversation. Subsequent calls to any Hive tool return `MCP error -32000: Connection closed`, then `No such tool available`. Restarting the conversation recovers, and `claude mcp list` still reports the server as connected at the process level.
+
+**Cause:** A race condition in the upstream `mcp` Python SDK (`mcp.shared.session.RequestResponder.__exit__`). When the client sends `notifications/cancelled` for an in-flight request, the responder's anyio `CancelScope` re-raises a `CancelledError` after the cancellation response has already been sent. That spurious exception propagates to the server's receive loop `task_group` and kills it — the process stays alive but stops reading stdin.
+
+**Fix:** Hive applies a targeted monkey-patch at startup (`src/hive/_compat.py`) that swallows the spurious `CancelledError` once the responder is marked completed. The patch is self-gated: it only triggers in the exact failure mode, so it remains inert once upstream fixes the bug.
+
+Tracked in [issue #75](https://github.com/mlorentedev/hive/issues/75). Regression test in [`tests/test_transport_recovery.py`](https://github.com/mlorentedev/hive/blob/master/tests/test_transport_recovery.py).
+
+**If you still see the disconnect:**
+
+1. Confirm you are on `hive-vault >= 1.13.0` — earlier versions did not ship the patch.
+2. Check `~/.local/share/hive/hive.log` for `Swallowed spurious cancellation on completed responder` debug lines (set `HIVE_LOG_LEVEL=DEBUG` to enable).
+3. As a workaround, always accept the first Hive tool call in a fresh conversation. Later rejections do not break the transport.
+
 ## Getting Help
 
 If your issue isn't listed here:

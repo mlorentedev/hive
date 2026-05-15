@@ -197,6 +197,22 @@ claude mcp add -s user hive \
 
 **Nota:** Los timeouts son una red de seguridad. Una herramienta con timeout devuelve un mensaje de error claro en lugar de colgar tu sesion indefinidamente. La operacion subyacente (llamada HTTP, git commit) se limpia automaticamente.
 
+## Desconexión del Transporte MCP Tras Rechazar la Primera Llamada
+
+**Síntoma:** En Claude Code (y probablemente otros hosts MCP), rechazar el primer prompt de permisos de `mcp__hive__*` envenena el transporte durante el resto de la conversación. Las llamadas siguientes a cualquier herramienta de Hive devuelven `MCP error -32000: Connection closed` y después `No such tool available`. Reiniciar la conversación lo soluciona, y `claude mcp list` sigue reportando el servidor como conectado a nivel de proceso.
+
+**Causa:** Una condición de carrera en el SDK Python `mcp` upstream (`mcp.shared.session.RequestResponder.__exit__`). Cuando el cliente envía `notifications/cancelled` para una petición en vuelo, el `CancelScope` de anyio del responder vuelve a lanzar un `CancelledError` después de que la respuesta de cancelación ya se haya enviado. Esa excepción espuria se propaga al `task_group` del receive loop del servidor y lo mata — el proceso sigue vivo pero deja de leer stdin.
+
+**Solución:** Hive aplica un monkey-patch quirúrgico al arrancar (`src/hive/_compat.py`) que ignora la `CancelledError` espuria una vez el responder está marcado como completado. El patch está auto-acotado: sólo se activa en el modo de fallo exacto, por lo que queda inerte cuando upstream corrija el bug.
+
+Seguimiento en [issue #75](https://github.com/mlorentedev/hive/issues/75). Test de regresión en [`tests/test_transport_recovery.py`](https://github.com/mlorentedev/hive/blob/master/tests/test_transport_recovery.py).
+
+**Si la desconexión persiste:**
+
+1. Confirma que estás en `hive-vault >= 1.13.0` — versiones anteriores no incluían el patch.
+2. Revisa `~/.local/share/hive/hive.log` buscando líneas debug `Swallowed spurious cancellation on completed responder` (activa con `HIVE_LOG_LEVEL=DEBUG`).
+3. Como solución temporal, acepta siempre la primera llamada de Hive en una conversación nueva. Los rechazos posteriores no rompen el transporte.
+
 ## Obtener Ayuda
 
 Si tu problema no está listado aquí:
