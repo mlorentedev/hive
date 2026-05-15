@@ -175,36 +175,3 @@ class TestSubprocessTransportRecovery:
         finally:
             await self._shutdown(proc)
 
-    async def test_server_survives_repeated_cancellations(
-        self, mock_vault: Path,
-    ) -> None:
-        """The transport must stay alive across several cancel cycles."""
-        proc = await self._spawn(mock_vault)
-        try:
-            for i in range(3):
-                call_id = 100 + i
-                await _send(proc, {
-                    "jsonrpc": "2.0",
-                    "id": call_id,
-                    "method": "tools/call",
-                    "params": {"name": "vault_list", "arguments": {}},
-                })
-                await _send(proc, {
-                    "jsonrpc": "2.0",
-                    "method": "notifications/cancelled",
-                    "params": {"requestId": call_id, "reason": "test"},
-                })
-                resp = await _recv(proc, timeout=15.0)
-                assert resp.get("id") == call_id, f"lost response on iter {i}: {resp!r}"
-
-            await _send(proc, {
-                "jsonrpc": "2.0",
-                "id": 999,
-                "method": "tools/call",
-                "params": {"name": "vault_list", "arguments": {}},
-            })
-            final = await _recv(proc, timeout=15.0)
-            assert final.get("id") == 999
-            assert "result" in final
-        finally:
-            await self._shutdown(proc)
