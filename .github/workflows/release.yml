@@ -3,6 +3,13 @@ name: Release
 on:
   push:
     branches: [master]
+  workflow_dispatch:
+    inputs:
+      republish_mcp:
+        description: "Re-publish current server.json to the MCP Registry (skip release-please/PyPI)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -11,6 +18,7 @@ permissions:
 
 jobs:
   release-please:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -45,6 +53,12 @@ jobs:
 
   publish-mcp:
     needs: publish
+    if: |
+      always() &&
+      (
+        needs.publish.result == 'success' ||
+        (github.event_name == 'workflow_dispatch' && inputs.republish_mcp == 'true')
+      )
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -60,4 +74,19 @@ jobs:
         run: ./mcp-publisher login github-oidc
 
       - name: Publish to MCP Registry
-        run: ./mcp-publisher publish || echo "MCP Registry publish skipped (version may already exist)"
+        run: |
+          set +e
+          output=$(./mcp-publisher publish 2>&1)
+          rc=$?
+          echo "$output"
+          if [ $rc -eq 0 ]; then
+            exit 0
+          fi
+          # Tolerate ONLY the specific "duplicate version" error from the
+          # registry — anything else is a real failure.
+          if echo "$output" | grep -q "cannot publish duplicate version"; then
+            echo "::warning::MCP Registry already has this version — nothing to do."
+            exit 0
+          fi
+          echo "::error::mcp-publisher publish failed with an unexpected error."
+          exit $rc
