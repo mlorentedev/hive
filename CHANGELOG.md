@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.4](https://github.com/mlorentedev/hive/compare/v1.12.3...v1.12.4) (2026-05-16)
+
+
+### Documentation
+
+* document HIVE_LOG_LEVEL env var and refresh counts ([#82](https://github.com/mlorentedev/hive/issues/82)) ([49b3ec3](https://github.com/mlorentedev/hive/commit/49b3ec3c986529a7afdef452cb4df86c26375d24))
+
 ## [1.12.3](https://github.com/mlorentedev/hive/compare/v1.12.2...v1.12.3) (2026-05-16)
 
 
