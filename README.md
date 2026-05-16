@@ -76,7 +76,7 @@ MCP Host (Claude Code, Gemini CLI, Codex CLI, Cursor, ...)
 Full documentation at **[mlorentedev.github.io/hive](https://mlorentedev.github.io/hive/)**:
 
 - [Getting Started](https://mlorentedev.github.io/hive/getting-started/) — install for all MCP clients
-- [Configuration](https://mlorentedev.github.io/hive/configuration/) — all 16 environment variables
+- [Configuration](https://mlorentedev.github.io/hive/configuration/) — all 17 environment variables
 - [Vault Structure](https://mlorentedev.github.io/hive/guides/vault-structure/) — how to organize your vault
 - [Use Cases](https://mlorentedev.github.io/hive/guides/use-cases/) — real-world workflows
 - [Architecture](https://mlorentedev.github.io/hive/reference/architecture/) — module map and design decisions
@@ -89,7 +89,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and PR workflow.
 ```bash
 git clone https://github.com/mlorentedev/hive.git && cd hive
 make install   # create venv + install deps
-make check     # lint + typecheck + test (337 tests, 92% coverage)
+make check     # lint + typecheck + test (424 tests, 91% coverage)
 ```
 
 ## License

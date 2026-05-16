@@ -26,6 +26,7 @@ Toda la configuración se realiza mediante variables de entorno, pasadas al regi
 | `HIVE_RELEVANCE_EPSILON` | `0.15` | Ratio de exploración para session_briefing (epsilon-greedy) |
 | `HIVE_VAULT_SCOPES` | `{"projects": "10_projects", "meta": "00_meta", "work": "50_work"}` | Mapeo JSON de nombres de scope a subdirectorios del vault. Los scopes soportan resolución jerárquica (BFS). |
 | `HIVE_LOG_PATH` | `~/.local/share/hive/hive.log` | Ruta del log persistente de depuración (rotación 1MB) |
+| `HIVE_LOG_LEVEL` | `INFO` | Nivel del log persistente. Captura los loggers `hive`, `fastmcp` y `mcp`. `DEBUG` para diagnóstico a nivel de transporte; `WARNING` para silenciar eventos de ciclo de vida. |
 
 ## Resolución de API Key
 
