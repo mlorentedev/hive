@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.3](https://github.com/mlorentedev/hive/compare/v1.12.2...v1.12.3) (2026-05-16)
+
+
+### Bug Fixes
+
+* **ci:** compare workflow_dispatch boolean input as boolean ([#79](https://github.com/mlorentedev/hive/issues/79)) ([46fd32e](https://github.com/mlorentedev/hive/commit/46fd32e6d177ceebfb8e17818af212785af92c7f))
+
 ## [1.12.2](https://github.com/mlorentedev/hive/compare/v1.12.1...v1.12.2) (2026-05-15)
 
 
