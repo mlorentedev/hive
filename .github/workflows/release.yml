@@ -57,7 +57,7 @@ jobs:
       always() &&
       (
         needs.publish.result == 'success' ||
-        (github.event_name == 'workflow_dispatch' && inputs.republish_mcp == 'true')
+        (github.event_name == 'workflow_dispatch' && inputs.republish_mcp)
       )
     runs-on: ubuntu-latest
     permissions:
