@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.5](https://github.com/mlorentedev/hive/compare/v1.12.4...v1.12.5) (2026-05-18)
+
+
+### Documentation
+
+* add codecov badge to README ([#84](https://github.com/mlorentedev/hive/issues/84)) ([ccec00a](https://github.com/mlorentedev/hive/commit/ccec00ac7a8ca0ab6602b15b7e728c66c6f5e660))
+
 ## [1.12.4](https://github.com/mlorentedev/hive/compare/v1.12.3...v1.12.4) (2026-05-16)
 
 
