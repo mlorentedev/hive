@@ -14,12 +14,13 @@ from contextlib import asynccontextmanager
 from datetime import date
 from typing import TYPE_CHECKING
 
+import filelock
 from mcp.types import ToolAnnotations
 
 from hive.frontmatter import extract_body, parse_date, parse_frontmatter
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
     from pathlib import Path
 
     from hive._context import ServerContext
@@ -392,6 +393,33 @@ _GIT_LOCK = threading.Lock()
 _LOCK_TIMEOUT = 30  # seconds — matches subprocess timeout
 
 
+_GIT_FILELOCKS: dict[str, filelock.BaseFileLock] = {}
+_GIT_FILELOCKS_GUARD = threading.Lock()
+
+
+def _git_filelock(vault_path: Path) -> filelock.BaseFileLock:
+    """Inter-process lock file under the vault's .git dir.
+
+    Serializes write critical sections across separate hive processes
+    (the threading lock only covers a single process). The lock file
+    lives alongside git's own ``index.lock`` so it travels with the
+    repo and is naturally ignored by git itself.
+
+    Returns a process-singleton ``FileLock`` instance per vault path so
+    nested ``acquire()`` calls from the same thread re-enter cleanly:
+    ``vault_write`` takes the lock around the read-modify-write, then
+    calls ``_git_commit`` which would otherwise deadlock waiting on its
+    own outer hold.
+    """
+    key = str(vault_path / ".git" / "hive.lock")
+    with _GIT_FILELOCKS_GUARD:
+        lock = _GIT_FILELOCKS.get(key)
+        if lock is None:
+            lock = filelock.FileLock(key)
+            _GIT_FILELOCKS[key] = lock
+    return lock
+
+
 @asynccontextmanager
 async def tool_span(
     tool_name: str, timeout_seconds: float,
@@ -416,6 +444,71 @@ async def tool_span(
         _log.debug("%s completed in %.1fs", tool_name, elapsed)
 
 
+async def run_sync_tool(
+    tool_name: str,
+    timeout_seconds: float,
+    fn: Callable[..., str],
+    *args: object,
+    **kwargs: object,
+) -> str:
+    """Run a sync tool body in a worker thread with a wall-clock timeout.
+
+    ``asyncio.timeout`` cancels the awaiting coroutine but cannot interrupt
+    the underlying thread — see lesson 2026-03-13. This helper still uses
+    it because the goal is to give the client a fast response (and unblock
+    the MCP receive loop) even when the sync work is stuck on a lock or
+    subprocess; the thread eventually returns and its late ``respond()``
+    call is silenced by the ``_compat`` shim.
+
+    Returns a user-visible error string on timeout instead of propagating
+    so the MCP client sees a normal tool response.
+    """
+    try:
+        async with tool_span(tool_name, timeout_seconds):
+            return await asyncio.to_thread(fn, *args, **kwargs)
+    except TimeoutError:
+        return (
+            f"{tool_name} timed out after {timeout_seconds:.0f}s. "
+            "Server may be under load or a lock is contended; retry shortly."
+        )
+
+
+def wrap_sync_tool(
+    ctx: ServerContext, tool_name: str,
+) -> Callable[[Callable[..., str]], Callable[..., object]]:
+    """Decorator: convert a sync MCP tool handler into async-with-timeout.
+
+    Applied between ``@mcp.tool`` and the sync handler so the body keeps
+    its original ``def`` form (no indentation churn) while gaining a
+    wall-clock timeout and thread-pool execution. The wrapper preserves
+    the original signature, annotations, name, and docstring so
+    FastMCP's schema introspection still sees the correct shape.
+
+    Usage::
+
+        @mcp.tool(annotations=_READ_ONLY)
+        @wrap_sync_tool(ctx, "vault_list")
+        def vault_list(project: str = "", ...) -> str:
+            ...
+    """
+    import functools
+    import inspect
+
+    def decorator(fn: Callable[..., str]) -> Callable[..., object]:
+        sig = inspect.signature(fn)
+
+        @functools.wraps(fn)
+        async def wrapper(*args: object, **kwargs: object) -> str:
+            return await run_sync_tool(
+                tool_name, ctx.tool_timeout, fn, *args, **kwargs,
+            )
+
+        wrapper.__signature__ = sig  # type: ignore[attr-defined]
+        return wrapper
+
+    return decorator
+
+
 def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
     """Stage a file and commit it in the vault git repo.
 
@@ -423,34 +516,49 @@ def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
     propagated, so a git problem cannot crash the MCP server or prevent
     the tool response from reaching the client.
 
-    Serialized via ``_GIT_LOCK`` to prevent concurrent git-add/commit
-    from interleaving and corrupting the index.
+    Serialized at two levels: ``_GIT_LOCK`` (threading) serializes
+    concurrent calls inside a single hive process; the filelock under
+    ``vault/.git/hive.lock`` serializes concurrent calls across separate
+    hive processes (one per MCP client session). Without the filelock,
+    two hive subprocesses could race on git's own ``.git/index.lock``
+    and time out (see hive.log history: 5+ ``git commit timed out``
+    warnings from concurrent sessions).
     """
     safe_msg = message.replace("\n", " ").replace("\r", " ")
     if not _GIT_LOCK.acquire(timeout=_LOCK_TIMEOUT):
-        _log.warning("git commit skipped for %s: lock timeout (%ds)", rel_path, _LOCK_TIMEOUT)
+        _log.warning(
+            "git commit skipped for %s: thread lock timeout (%ds)",
+            rel_path, _LOCK_TIMEOUT,
+        )
         return
     try:
-        subprocess.run(
-            ["git", "add", str(rel_path)],
-            cwd=vault_path,
-            capture_output=True,
-            check=True,
-            timeout=30,
-        )
-        subprocess.run(
-            ["git", "commit", "-m", safe_msg],
-            cwd=vault_path,
-            capture_output=True,
-            check=True,
-            timeout=30,
-        )
-    except subprocess.CalledProcessError as exc:
-        _log.warning("git commit failed for %s: %s", rel_path, exc)
-    except subprocess.TimeoutExpired as exc:
-        _log.warning("git commit timed out for %s: %s", rel_path, exc)
-    except Exception as exc:
-        _log.warning("git commit unexpected error for %s: %s", rel_path, exc)
+        try:
+            with _git_filelock(vault_path).acquire(timeout=_LOCK_TIMEOUT):
+                subprocess.run(
+                    ["git", "add", str(rel_path)],
+                    cwd=vault_path,
+                    capture_output=True,
+                    check=True,
+                    timeout=30,
+                )
+                subprocess.run(
+                    ["git", "commit", "-m", safe_msg],
+                    cwd=vault_path,
+                    capture_output=True,
+                    check=True,
+                    timeout=30,
+                )
+        except filelock.Timeout:
+            _log.warning(
+                "git commit skipped for %s: inter-process lock timeout (%ds)",
+                rel_path, _LOCK_TIMEOUT,
+            )
+        except subprocess.CalledProcessError as exc:
+            _log.warning("git commit failed for %s: %s", rel_path, exc)
+        except subprocess.TimeoutExpired as exc:
+            _log.warning("git commit timed out for %s: %s", rel_path, exc)
+        except Exception as exc:
+            _log.warning("git commit unexpected error for %s: %s", rel_path, exc)
     finally:
         _GIT_LOCK.release()
 

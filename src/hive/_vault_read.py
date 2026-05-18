@@ -21,6 +21,7 @@ from hive._helpers import (
     count_stale,
     project_not_found,
     track,
+    wrap_sync_tool,
 )
 from hive.frontmatter import extract_body, parse_date, parse_frontmatter
 
@@ -67,6 +68,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
     """Register vault read tools on the MCP server."""
 
     @mcp.tool(annotations=_READ_ONLY)
+    @wrap_sync_tool(ctx, "vault_list")
     def vault_list(
         project: str = "",
         path: str = "",
@@ -159,6 +161,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         return track(ctx, "vault_list", "\n".join(lines), project, path)
 
     @mcp.tool(annotations=_READ_ONLY)
+    @wrap_sync_tool(ctx, "vault_query")
     def vault_query(
         project: str,
         section: str = "context",
@@ -201,6 +204,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
                      project, resolved_section)
 
     @mcp.tool(annotations=_READ_ONLY)
+    @wrap_sync_tool(ctx, "vault_search")
     def vault_search(
         query: str = "",
         max_lines: int = 500,
@@ -450,6 +454,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         return track(ctx, "vault_search", _truncate(output, max_lines))
 
     @mcp.tool(annotations=_READ_ONLY)
+    @wrap_sync_tool(ctx, "session_briefing")
     def session_briefing(project: str) -> str:
         """Call at the start of every new session to load project context.
 

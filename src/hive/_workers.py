@@ -168,6 +168,12 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
         except (ConnectionError, RuntimeError) as exc:
             label = f"OpenRouter ({model})" if model else provider.capitalize()
             return None, f"{label}: {exc}"
+        except Exception as exc:
+            label = f"OpenRouter ({model})" if model else provider.capitalize()
+            _log.warning(
+                "_try_worker unexpected error for %s: %r", label, exc,
+            )
+            return None, f"{label}: unexpected error ({type(exc).__name__})"
 
     @mcp.tool(annotations=_WRITE)
     async def capture_lesson(

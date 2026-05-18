@@ -16,6 +16,7 @@ from hive._helpers import (
     count_stale,
     project_not_found,
     track,
+    wrap_sync_tool,
 )
 from hive.frontmatter import (
     _TERMINAL_STATUSES,
@@ -146,6 +147,7 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
     """Register vault health tools on the MCP server."""
 
     @mcp.tool(annotations=_READ_ONLY)
+    @wrap_sync_tool(ctx, "vault_health")
     def vault_health(
         project: str = "",
         checks: list[str] = [],  # noqa: B006

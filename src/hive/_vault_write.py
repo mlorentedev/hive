@@ -5,18 +5,22 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
+import filelock
+
 from hive._helpers import (
     _LOCK_TIMEOUT,
     _WRITE,
     SECTION_SHORTCUTS,
     _check_path_boundary,
     _git_commit,
+    _git_filelock,
     _make_frontmatter,
     _match_and_replace,
     _resolve_project_dir,
     _vault_guard,
     project_not_found,
     track,
+    wrap_sync_tool,
 )
 from hive.frontmatter import validate_frontmatter
 
@@ -33,6 +37,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
     """Register vault write tools on the MCP server."""
 
     @mcp.tool(annotations=_WRITE)
+    @wrap_sync_tool(ctx, "vault_write")
     def vault_write(
         project: str,
         content: str,
@@ -103,30 +108,39 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     project,
                 )
             try:
-                if filepath.exists():
+                try:
+                    with _git_filelock(ctx.vault).acquire(timeout=_LOCK_TIMEOUT):
+                        if filepath.exists():
+                            return track(
+                                ctx, "vault_write",
+                                f"File already exists: {path}. "
+                                "Use vault_write(operation='replace') to modify.",
+                                project,
+                            )
+
+                        try:
+                            filepath.parent.mkdir(parents=True, exist_ok=True)
+                            filepath.write_text(
+                                frontmatter + content, encoding="utf-8",
+                            )
+                        except OSError as exc:
+                            return track(
+                                ctx, "vault_write",
+                                f"File I/O error: {exc}", project,
+                            )
+
+                        rel = filepath.relative_to(ctx.vault)
+                        display = "00_meta" if project == "_meta" else project
+                        _git_commit(
+                            ctx.vault, rel,
+                            f"vault: create {display}/{path}",
+                        )
+                except filelock.Timeout:
                     return track(
                         ctx, "vault_write",
-                        f"File already exists: {path}. "
-                        "Use vault_write(operation='replace') to modify.",
+                        "Server busy — inter-process lock timeout. Retry shortly.",
                         project,
                     )
-
-                try:
-                    filepath.parent.mkdir(parents=True, exist_ok=True)
-                    filepath.write_text(
-                        frontmatter + content, encoding="utf-8",
-                    )
-                except OSError as exc:
-                    return track(
-                        ctx, "vault_write", f"File I/O error: {exc}", project,
-                    )
-
-                rel = filepath.relative_to(ctx.vault)
-                display = "00_meta" if project == "_meta" else project
-                _git_commit(
-                    ctx.vault, rel,
-                    f"vault: create {display}/{path}",
-                )
             finally:
                 _WRITE_LOCK.release()
 
@@ -172,26 +186,35 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             )
         try:
             try:
-                if operation == "append":
-                    existing = (
-                        filepath.read_text(encoding="utf-8")
-                        if filepath.exists()
-                        else ""
-                    )
-                    filepath.write_text(
-                        existing + content, encoding="utf-8",
-                    )
-                else:
-                    filepath.write_text(content, encoding="utf-8")
-            except (OSError, UnicodeDecodeError) as exc:
-                return track(
-                    ctx, "vault_write", f"File I/O error: {exc}", project,
-                )
+                with _git_filelock(ctx.vault).acquire(timeout=_LOCK_TIMEOUT):
+                    try:
+                        if operation == "append":
+                            existing = (
+                                filepath.read_text(encoding="utf-8")
+                                if filepath.exists()
+                                else ""
+                            )
+                            filepath.write_text(
+                                existing + content, encoding="utf-8",
+                            )
+                        else:
+                            filepath.write_text(content, encoding="utf-8")
+                    except (OSError, UnicodeDecodeError) as exc:
+                        return track(
+                            ctx, "vault_write",
+                            f"File I/O error: {exc}", project,
+                        )
 
-            rel = filepath.relative_to(ctx.vault)
-            _git_commit(
-                ctx.vault, rel, f"vault: update {project}/{section}",
-            )
+                    rel = filepath.relative_to(ctx.vault)
+                    _git_commit(
+                        ctx.vault, rel, f"vault: update {project}/{section}",
+                    )
+            except filelock.Timeout:
+                return track(
+                    ctx, "vault_write",
+                    "Server busy — inter-process lock timeout. Retry shortly.",
+                    project,
+                )
         finally:
             _WRITE_LOCK.release()
 
@@ -202,6 +225,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         )
 
     @mcp.tool(annotations=_WRITE)
+    @wrap_sync_tool(ctx, "vault_patch")
     def vault_patch(
         project: str,
         path: str,
@@ -284,42 +308,61 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 "Server busy — write lock timeout. Retry shortly.",
                 project,
             )
+        n = 0
         try:
             try:
-                content = filepath.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError) as exc:
-                return track(ctx, "vault_patch",
-                             f"File I/O error reading '{path}': {exc}", project)
+                with _git_filelock(ctx.vault).acquire(timeout=_LOCK_TIMEOUT):
+                    try:
+                        content = filepath.read_text(encoding="utf-8")
+                    except (OSError, UnicodeDecodeError) as exc:
+                        return track(
+                            ctx, "vault_patch",
+                            f"File I/O error reading '{path}': {exc}",
+                            project,
+                        )
 
-            # Validate and apply all patches on a working copy first
-            working = content
-            for i, patch in enumerate(patch_list, 1):
-                if "find" not in patch or "replace" not in patch:
-                    label = f"patch {i}: " if len(patch_list) > 1 else ""
-                    return track(
-                        ctx, "vault_patch",
-                        f"{label}Each patch must have 'find' and 'replace' keys.",
-                        project,
+                    # Validate and apply all patches on a working copy first
+                    working = content
+                    for i, patch in enumerate(patch_list, 1):
+                        if "find" not in patch or "replace" not in patch:
+                            label = f"patch {i}: " if len(patch_list) > 1 else ""
+                            return track(
+                                ctx, "vault_patch",
+                                f"{label}Each patch must have 'find' and "
+                                f"'replace' keys.",
+                                project,
+                            )
+                        ok, result = _match_and_replace(
+                            working, patch["find"], patch["replace"],
+                        )
+                        if not ok:
+                            label = f"patch {i}: " if len(patch_list) > 1 else ""
+                            return track(
+                                ctx, "vault_patch",
+                                f"{label}{result}", project,
+                            )
+                        working = result
+
+                    try:
+                        filepath.write_text(working, encoding="utf-8")
+                    except OSError as exc:
+                        return track(
+                            ctx, "vault_patch",
+                            f"File I/O error writing '{path}': {exc}",
+                            project,
+                        )
+
+                    rel = filepath.relative_to(ctx.vault)
+                    n = len(patch_list)
+                    _git_commit(
+                        ctx.vault, rel, f"vault: patch {project}/{path}",
                     )
-                ok, result = _match_and_replace(
-                    working, patch["find"], patch["replace"],
+            except filelock.Timeout:
+                return track(
+                    ctx, "vault_patch",
+                    "Server busy — inter-process lock timeout. Retry shortly.",
+                    project,
                 )
-                if not ok:
-                    label = f"patch {i}: " if len(patch_list) > 1 else ""
-                    return track(
-                        ctx, "vault_patch", f"{label}{result}", project,
-                    )
-                working = result
-
-            try:
-                filepath.write_text(working, encoding="utf-8")
-            except OSError as exc:
-                return track(ctx, "vault_patch",
-                             f"File I/O error writing '{path}': {exc}", project)
-
-            rel = filepath.relative_to(ctx.vault)
-            n = len(patch_list)
-            _git_commit(ctx.vault, rel, f"vault: patch {project}/{path}")
         finally:
             _WRITE_LOCK.release()
 

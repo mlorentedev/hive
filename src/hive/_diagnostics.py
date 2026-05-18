@@ -39,28 +39,29 @@ class LifecycleMiddleware(Middleware):
     ) -> Any:
         method = context.method or "<unknown>"
         request_id = _extract_request_id(context)
+        tool = _extract_tool_name(context)
         start = time.monotonic()
         try:
             result = await call_next(context)
         except asyncio.CancelledError:
             elapsed_ms = (time.monotonic() - start) * 1000
             _log.info(
-                "mcp cancelled method=%s id=%s elapsed_ms=%.0f",
-                method, request_id, elapsed_ms,
+                "mcp cancelled method=%s tool=%s id=%s elapsed_ms=%.0f",
+                method, tool, request_id, elapsed_ms,
             )
             raise
         except Exception as exc:
             elapsed_ms = (time.monotonic() - start) * 1000
             _log.warning(
-                "mcp error method=%s id=%s elapsed_ms=%.0f exc=%r",
-                method, request_id, elapsed_ms, exc,
+                "mcp error method=%s tool=%s id=%s elapsed_ms=%.0f exc=%r",
+                method, tool, request_id, elapsed_ms, exc,
             )
             raise
         else:
             elapsed_ms = (time.monotonic() - start) * 1000
             _log.info(
-                "mcp ok method=%s id=%s elapsed_ms=%.0f",
-                method, request_id, elapsed_ms,
+                "mcp ok method=%s tool=%s id=%s elapsed_ms=%.0f",
+                method, tool, request_id, elapsed_ms,
             )
             return result
 
@@ -74,3 +75,11 @@ def _extract_request_id(context: MiddlewareContext[Any]) -> str:
         return "-"
     rid = getattr(request_context, "request_id", None)
     return str(rid) if rid is not None else "-"
+
+
+def _extract_tool_name(context: MiddlewareContext[Any]) -> str:
+    """Return the tool name for tools/call, else '-'."""
+    if context.method != "tools/call":
+        return "-"
+    name = getattr(context.message, "name", None)
+    return str(name) if name else "-"
