@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.6](https://github.com/mlorentedev/hive/compare/v1.12.5...v1.12.6) (2026-05-18)
+
+
+### Documentation
+
+* clean up README — remove resolved bug notice and refresh counts ([#86](https://github.com/mlorentedev/hive/issues/86)) ([ae72111](https://github.com/mlorentedev/hive/commit/ae72111cb0a40e7c800734c473f41e8d4287a0f9))
+
 ## [1.12.5](https://github.com/mlorentedev/hive/compare/v1.12.4...v1.12.5) (2026-05-18)
 
 
