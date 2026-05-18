@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.8](https://github.com/mlorentedev/hive/compare/v1.12.7...v1.12.8) (2026-05-18)
+
+
+### Bug Fixes
+
+* prevent multi-process hangs, crashes, and write-loss ([#90](https://github.com/mlorentedev/hive/issues/90)) ([8e6cb8b](https://github.com/mlorentedev/hive/commit/8e6cb8b70cfe645c1d2e805968df8b67c392c3f7))
+
 ## [1.12.7](https://github.com/mlorentedev/hive/compare/v1.12.6...v1.12.7) (2026-05-18)
 
 
