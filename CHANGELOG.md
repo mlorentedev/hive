@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.7](https://github.com/mlorentedev/hive/compare/v1.12.6...v1.12.7) (2026-05-18)
+
+
+### Bug Fixes
+
+* **release:** keep uv.lock self-reference in sync with project version ([#88](https://github.com/mlorentedev/hive/issues/88)) ([29dea3b](https://github.com/mlorentedev/hive/commit/29dea3b16f3cdd50395cb19a27ecdfd145a51cf1))
+
 ## [1.12.6](https://github.com/mlorentedev/hive/compare/v1.12.5...v1.12.6) (2026-05-18)
 
 
