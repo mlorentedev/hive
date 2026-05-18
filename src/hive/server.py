@@ -100,8 +100,10 @@ def create_server(
             "results, or `since_days=N` for recent changes.\n"
             "- **Recording lessons:** Call `capture_lesson` when a bug fix, "
             "architectural decision, or useful insight emerges during work. "
-            "Use `capture_lesson(text=...)` for bulk extraction from large "
-            "text blocks.\n"
+            "Default is **inline mode** — pass `title`, `context`, `problem`, "
+            "and `solution`. Pass `text=...` for **batch mode** when you "
+            "want a worker model to extract multiple lessons from a free-form "
+            "text block.\n"
             "- **Writing to vault:** Use `vault_write` to create, append, or "
             "replace files. Use `vault_patch` for surgical find-and-replace "
             "edits.\n"
@@ -404,11 +406,20 @@ def _setup_file_logging() -> None:
     lifecycle events, cancellations, and transport-level issues are
     visible after the fact. Level is controlled by ``HIVE_LOG_LEVEL``
     (default ``INFO``).
+
+    Each hive subprocess writes to its own ``hive-{pid}.log`` so the
+    rotation race that ``RotatingFileHandler`` cannot survive under
+    multiple concurrent writers cannot happen. The configured
+    ``settings.log_path`` is reused as a *template*: its parent
+    directory is taken; the stem and suffix are kept; the PID is
+    appended before the suffix.
     """
+    import os
     from pathlib import Path as _Path
 
-    log_file = _Path(settings.log_path)
-    log_file.parent.mkdir(parents=True, exist_ok=True)
+    template = _Path(settings.log_path)
+    template.parent.mkdir(parents=True, exist_ok=True)
+    log_file = template.with_name(f"{template.stem}-{os.getpid()}{template.suffix}")
     handler = logging.handlers.RotatingFileHandler(
         log_file, maxBytes=1_000_000, backupCount=1, encoding="utf-8",
     )
@@ -423,17 +434,23 @@ def _setup_file_logging() -> None:
 
 
 def main() -> None:
-    """Entry point for the hive CLI command."""
+    """Entry point for the hive CLI command.
+
+    ``create_server()`` is called here rather than at module import
+    so importing ``hive.server`` (e.g. from tests, from typing tools,
+    or from a future ``hive serve --http`` entry point) is side-effect
+    free. The previous import-time instantiation cost every ``uvx
+    hive-vault`` spawn ~300-600 ms before main() even ran.
+    """
     _setup_file_logging()
     _log = logging.getLogger("hive")
+    server = create_server()
     try:
         server.run()
     except BaseException as exc:
         _log.critical("hive server exiting: %r", exc, exc_info=True)
         raise
 
-
-server = create_server()
 
 if __name__ == "__main__":
     main()

@@ -7,6 +7,11 @@ from dataclasses import dataclass
 
 import httpx
 
+_AVAILABILITY_CACHE_TTL_S = 30.0
+# Health-check connect timeout: kept short so an unreachable Ollama
+# fails fast (1s) instead of consuming the generate-timeout budget.
+_AVAILABILITY_CONNECT_TIMEOUT_S = 1.0
+
 
 @dataclass(frozen=True)
 class ClientResponse:
@@ -38,6 +43,21 @@ class OllamaClient:
         self._endpoint = endpoint.rstrip("/")
         self._model = model
         self._http = httpx.AsyncClient(base_url=self._endpoint, timeout=timeout)
+        # is_available probe uses a much shorter connect timeout so an
+        # unreachable homelab fails in ~1s rather than burning the full
+        # generate timeout; the read timeout still matches generate
+        # because the / endpoint should respond instantly.
+        self._probe_http = httpx.AsyncClient(
+            base_url=self._endpoint,
+            timeout=httpx.Timeout(
+                connect=_AVAILABILITY_CONNECT_TIMEOUT_S,
+                read=_AVAILABILITY_CONNECT_TIMEOUT_S,
+                write=_AVAILABILITY_CONNECT_TIMEOUT_S,
+                pool=_AVAILABILITY_CONNECT_TIMEOUT_S,
+            ),
+        )
+        self._availability_cached: bool | None = None
+        self._availability_cached_at: float = 0.0
 
     @property
     def model(self) -> str:
@@ -45,8 +65,9 @@ class OllamaClient:
         return self._model
 
     async def aclose(self) -> None:
-        """Close the underlying HTTP client."""
+        """Close the underlying HTTP clients."""
         await self._http.aclose()
+        await self._probe_http.aclose()
 
     async def generate(
         self, prompt: str, context: str = "", max_tokens: int = 2000
@@ -104,12 +125,28 @@ class OllamaClient:
         )
 
     async def is_available(self) -> bool:
-        """Check if Ollama is reachable."""
+        """Check if Ollama is reachable.
+
+        Result is cached for ``_AVAILABILITY_CACHE_TTL_S`` seconds to
+        avoid storming the endpoint when multiple tool calls (or
+        multiple hive subprocesses) all probe within the same window.
+        Uses a short connect timeout so an outage answers in ~1s
+        instead of consuming the generate-timeout budget.
+        """
+        now = time.monotonic()
+        if (
+            self._availability_cached is not None
+            and now - self._availability_cached_at < _AVAILABILITY_CACHE_TTL_S
+        ):
+            return self._availability_cached
         try:
-            resp = await self._http.get("/")
-            return resp.status_code == 200
+            resp = await self._probe_http.get("/")
+            available = resp.status_code == 200
         except (httpx.ConnectError, httpx.TimeoutException):
-            return False
+            available = False
+        self._availability_cached = available
+        self._availability_cached_at = now
+        return available
 
 
 class OpenRouterClient:

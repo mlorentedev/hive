@@ -174,7 +174,7 @@ class TestUnicodeDecodeErrors:
             "vault_query", {"project": "testproject", "path": "bad.md"},
         )
         text = _text(result)
-        assert "error" in text.lower() or "I/O" in text
+        assert "utf-8" in text.lower() or "error" in text.lower()
 
     async def test_vault_patch_non_utf8(self, git_vault: Path) -> None:
         bad = git_vault / "10_projects" / "testproject" / "bad.md"
@@ -187,7 +187,7 @@ class TestUnicodeDecodeErrors:
             },
         )
         text = _text(result)
-        assert "error" in text.lower() or "I/O" in text
+        assert "utf-8" in text.lower() or "error" in text.lower()
 
     async def test_vault_write_append_non_utf8(
         self, git_vault: Path,
@@ -204,7 +204,7 @@ class TestUnicodeDecodeErrors:
             },
         )
         text = _text(result)
-        assert "error" in text.lower() or "I/O" in text
+        assert "utf-8" in text.lower() or "error" in text.lower()
 
 
 # ── vault_query ──────────────────────────────────────────────────────
@@ -3407,6 +3407,7 @@ class TestSetupFileLogging:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         import logging
+        import os
 
         from hive.server import _setup_file_logging
 
@@ -3415,12 +3416,14 @@ class TestSetupFileLogging:
 
         _setup_file_logging()
 
+        # Per-PID suffix: test.log -> test-{pid}.log
+        expected = log_file.with_name(f"test-{os.getpid()}.log")
+
         logger = logging.getLogger("hive")
-        # Handler was attached
         file_handlers = [
             h for h in logger.handlers
             if isinstance(h, logging.handlers.RotatingFileHandler)
-            and str(log_file) in str(getattr(h, "baseFilename", ""))
+            and str(expected) in str(getattr(h, "baseFilename", ""))
         ]
         assert len(file_handlers) == 1
 
@@ -3524,7 +3527,7 @@ class TestWriteLockTimeout:
 
         mcp = create_server(vault_path=git_vault)
 
-        with patch("hive._vault_write._WRITE_LOCK") as mock_lock:
+        with patch("hive._helpers._WRITE_LOCK") as mock_lock:
             mock_lock.acquire.return_value = False
             result = _text(await mcp.call_tool(
                 "vault_write",
@@ -3547,7 +3550,7 @@ class TestWriteLockTimeout:
 
         mcp = create_server(vault_path=git_vault)
 
-        with patch("hive._vault_write._WRITE_LOCK") as mock_lock:
+        with patch("hive._helpers._WRITE_LOCK") as mock_lock:
             mock_lock.acquire.return_value = False
             result = _text(await mcp.call_tool(
                 "vault_patch",
@@ -3570,7 +3573,7 @@ class TestWriteLockTimeout:
 
         mcp = create_server(vault_path=git_vault)
 
-        with patch("hive._vault_write._WRITE_LOCK") as mock_lock:
+        with patch("hive._helpers._WRITE_LOCK") as mock_lock:
             mock_lock.acquire.return_value = False
             result = _text(await mcp.call_tool(
                 "vault_write",

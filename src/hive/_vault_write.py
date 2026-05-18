@@ -2,24 +2,22 @@
 
 from __future__ import annotations
 
-import threading
 from typing import TYPE_CHECKING
 
-import filelock
-
 from hive._helpers import (
-    _LOCK_TIMEOUT,
     _WRITE,
     SECTION_SHORTCUTS,
+    WriteLockTimeout,
     _check_path_boundary,
     _git_commit,
-    _git_filelock,
     _make_frontmatter,
     _match_and_replace,
     _resolve_project_dir,
     _vault_guard,
+    format_io_error,
     project_not_found,
     track,
+    vault_write_lock,
     wrap_sync_tool,
 )
 from hive.frontmatter import validate_frontmatter
@@ -30,7 +28,6 @@ if TYPE_CHECKING:
     from hive._context import ServerContext
 
 _WRITE_OPERATIONS = frozenset({"append", "replace", "create"})
-_WRITE_LOCK = threading.Lock()
 
 
 def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
@@ -101,48 +98,40 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
             frontmatter = _make_frontmatter(filepath.stem, doc_type)
 
-            if not _WRITE_LOCK.acquire(timeout=_LOCK_TIMEOUT):
+            try:
+                with vault_write_lock(ctx.vault):
+                    if filepath.exists():
+                        return track(
+                            ctx, "vault_write",
+                            f"File already exists: {path}. "
+                            "Use vault_write(operation='replace') to modify.",
+                            project,
+                        )
+
+                    try:
+                        filepath.parent.mkdir(parents=True, exist_ok=True)
+                        filepath.write_text(
+                            frontmatter + content, encoding="utf-8",
+                        )
+                    except OSError as exc:
+                        return track(
+                            ctx, "vault_write",
+                            format_io_error(exc, path, "create"),
+                            project,
+                        )
+
+                    rel = filepath.relative_to(ctx.vault)
+                    display = "00_meta" if project == "_meta" else project
+                    _git_commit(
+                        ctx.vault, rel,
+                        f"vault: create {display}/{path}",
+                    )
+            except WriteLockTimeout as exc:
                 return track(
                     ctx, "vault_write",
-                    "Server busy — write lock timeout. Retry shortly.",
+                    f"Server busy — {exc.reason}. Retry shortly.",
                     project,
                 )
-            try:
-                try:
-                    with _git_filelock(ctx.vault).acquire(timeout=_LOCK_TIMEOUT):
-                        if filepath.exists():
-                            return track(
-                                ctx, "vault_write",
-                                f"File already exists: {path}. "
-                                "Use vault_write(operation='replace') to modify.",
-                                project,
-                            )
-
-                        try:
-                            filepath.parent.mkdir(parents=True, exist_ok=True)
-                            filepath.write_text(
-                                frontmatter + content, encoding="utf-8",
-                            )
-                        except OSError as exc:
-                            return track(
-                                ctx, "vault_write",
-                                f"File I/O error: {exc}", project,
-                            )
-
-                        rel = filepath.relative_to(ctx.vault)
-                        display = "00_meta" if project == "_meta" else project
-                        _git_commit(
-                            ctx.vault, rel,
-                            f"vault: create {display}/{path}",
-                        )
-                except filelock.Timeout:
-                    return track(
-                        ctx, "vault_write",
-                        "Server busy — inter-process lock timeout. Retry shortly.",
-                        project,
-                    )
-            finally:
-                _WRITE_LOCK.release()
 
             return track(
                 ctx, "vault_write",
@@ -178,45 +167,37 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     project,
                 )
 
-        if not _WRITE_LOCK.acquire(timeout=_LOCK_TIMEOUT):
+        try:
+            with vault_write_lock(ctx.vault):
+                try:
+                    if operation == "append":
+                        existing = (
+                            filepath.read_text(encoding="utf-8")
+                            if filepath.exists()
+                            else ""
+                        )
+                        filepath.write_text(
+                            existing + content, encoding="utf-8",
+                        )
+                    else:
+                        filepath.write_text(content, encoding="utf-8")
+                except (OSError, UnicodeDecodeError) as exc:
+                    return track(
+                        ctx, "vault_write",
+                        format_io_error(exc, f"{project}/{section}", operation),
+                        project,
+                    )
+
+                rel = filepath.relative_to(ctx.vault)
+                _git_commit(
+                    ctx.vault, rel, f"vault: update {project}/{section}",
+                )
+        except WriteLockTimeout as exc:
             return track(
                 ctx, "vault_write",
-                "Server busy — write lock timeout. Retry shortly.",
+                f"Server busy — {exc.reason}. Retry shortly.",
                 project,
             )
-        try:
-            try:
-                with _git_filelock(ctx.vault).acquire(timeout=_LOCK_TIMEOUT):
-                    try:
-                        if operation == "append":
-                            existing = (
-                                filepath.read_text(encoding="utf-8")
-                                if filepath.exists()
-                                else ""
-                            )
-                            filepath.write_text(
-                                existing + content, encoding="utf-8",
-                            )
-                        else:
-                            filepath.write_text(content, encoding="utf-8")
-                    except (OSError, UnicodeDecodeError) as exc:
-                        return track(
-                            ctx, "vault_write",
-                            f"File I/O error: {exc}", project,
-                        )
-
-                    rel = filepath.relative_to(ctx.vault)
-                    _git_commit(
-                        ctx.vault, rel, f"vault: update {project}/{section}",
-                    )
-            except filelock.Timeout:
-                return track(
-                    ctx, "vault_write",
-                    "Server busy — inter-process lock timeout. Retry shortly.",
-                    project,
-                )
-        finally:
-            _WRITE_LOCK.release()
 
         return track(
             ctx, "vault_write",
@@ -302,69 +283,60 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                          f"File '{path}' not found in project '{project}'.",
                          project)
 
-        if not _WRITE_LOCK.acquire(timeout=_LOCK_TIMEOUT):
-            return track(
-                ctx, "vault_patch",
-                "Server busy — write lock timeout. Retry shortly.",
-                project,
-            )
         n = 0
         try:
-            try:
-                with _git_filelock(ctx.vault).acquire(timeout=_LOCK_TIMEOUT):
-                    try:
-                        content = filepath.read_text(encoding="utf-8")
-                    except (OSError, UnicodeDecodeError) as exc:
-                        return track(
-                            ctx, "vault_patch",
-                            f"File I/O error reading '{path}': {exc}",
-                            project,
-                        )
-
-                    # Validate and apply all patches on a working copy first
-                    working = content
-                    for i, patch in enumerate(patch_list, 1):
-                        if "find" not in patch or "replace" not in patch:
-                            label = f"patch {i}: " if len(patch_list) > 1 else ""
-                            return track(
-                                ctx, "vault_patch",
-                                f"{label}Each patch must have 'find' and "
-                                f"'replace' keys.",
-                                project,
-                            )
-                        ok, result = _match_and_replace(
-                            working, patch["find"], patch["replace"],
-                        )
-                        if not ok:
-                            label = f"patch {i}: " if len(patch_list) > 1 else ""
-                            return track(
-                                ctx, "vault_patch",
-                                f"{label}{result}", project,
-                            )
-                        working = result
-
-                    try:
-                        filepath.write_text(working, encoding="utf-8")
-                    except OSError as exc:
-                        return track(
-                            ctx, "vault_patch",
-                            f"File I/O error writing '{path}': {exc}",
-                            project,
-                        )
-
-                    rel = filepath.relative_to(ctx.vault)
-                    n = len(patch_list)
-                    _git_commit(
-                        ctx.vault, rel, f"vault: patch {project}/{path}",
+            with vault_write_lock(ctx.vault):
+                try:
+                    content = filepath.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError) as exc:
+                    return track(
+                        ctx, "vault_patch",
+                        format_io_error(exc, path, "read"),
+                        project,
                     )
-            except filelock.Timeout:
-                return track(
-                    ctx, "vault_patch",
-                    "Server busy — inter-process lock timeout. Retry shortly.",
-                    project,
+
+                # Validate and apply all patches on a working copy first
+                working = content
+                for i, patch in enumerate(patch_list, 1):
+                    if "find" not in patch or "replace" not in patch:
+                        label = f"patch {i}: " if len(patch_list) > 1 else ""
+                        return track(
+                            ctx, "vault_patch",
+                            f"{label}Each patch must have 'find' and "
+                            f"'replace' keys.",
+                            project,
+                        )
+                    ok, result = _match_and_replace(
+                        working, patch["find"], patch["replace"],
+                    )
+                    if not ok:
+                        label = f"patch {i}: " if len(patch_list) > 1 else ""
+                        return track(
+                            ctx, "vault_patch",
+                            f"{label}{result}", project,
+                        )
+                    working = result
+
+                try:
+                    filepath.write_text(working, encoding="utf-8")
+                except OSError as exc:
+                    return track(
+                        ctx, "vault_patch",
+                        format_io_error(exc, path, "write"),
+                        project,
+                    )
+
+                rel = filepath.relative_to(ctx.vault)
+                n = len(patch_list)
+                _git_commit(
+                    ctx.vault, rel, f"vault: patch {project}/{path}",
                 )
-        finally:
-            _WRITE_LOCK.release()
+        except WriteLockTimeout as exc:
+            return track(
+                ctx, "vault_patch",
+                f"Server busy — {exc.reason}. Retry shortly.",
+                project,
+            )
 
         noun = "patch" if n == 1 else "patches"
         return track(ctx, "vault_patch",

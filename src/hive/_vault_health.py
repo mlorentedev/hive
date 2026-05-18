@@ -13,8 +13,9 @@ from hive._helpers import (
     _resolve_project_dir,
     _safe_read,
     _vault_guard,
-    count_stale,
+    count_stale_from,
     project_not_found,
+    scan_project,
     track,
     wrap_sync_tool,
 )
@@ -90,16 +91,13 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
             if filter_project and project_dir.name != filter_project:
                 continue
             found_any = True
-            try:
-                md_files = list(project_dir.rglob("*.md"))
-            except OSError:
-                md_files = []
-            total_lines = 0
-            for f in md_files:
-                content = _safe_read(f)
-                if content is not None:
-                    total_lines += len(content.splitlines())
-            stale_files = count_stale(project_dir, stale_threshold)
+            md_files, contents, frontmatters = scan_project(project_dir)
+            total_lines = sum(
+                len(c.splitlines()) for c in contents.values() if c is not None
+            )
+            stale_files = count_stale_from(
+                project_dir, md_files, frontmatters, stale_threshold,
+            )
             missing = [
                 s for s, fname in SECTION_SHORTCUTS.items()
                 if not (project_dir / fname).exists()

@@ -64,12 +64,41 @@ class TestDecay:
         assert scores["tasks"] > scores["lessons"]
 
     def test_decay_removes_near_zero(self) -> None:
-        t = RelevanceTracker(alpha=0.01)
+        # decay_min_interval_seconds=0 disables the rate-limit so we can
+        # exercise the prune path; production gates decay to once/60s.
+        t = RelevanceTracker(alpha=0.01, decay_min_interval_seconds=0)
         t.record_access("hive", "tasks")
         for _ in range(50):
             t.apply_decay()
         scores = t.get_scores("hive")
         assert "tasks" not in scores or scores["tasks"] < 0.001
+
+    def test_decay_rate_limited_when_called_back_to_back(self) -> None:
+        """Two apply_decay calls within the interval window apply only once.
+
+        Regression for the concurrent-briefing over-decay bug:
+        N sessions calling session_briefing within 60s would otherwise
+        multiply scores by decay_factor^N and break the EMA model.
+        """
+        t = RelevanceTracker()  # default 60s interval
+        t.record_access("hive", "tasks")
+        before = t.get_scores("hive")["tasks"]
+        t.apply_decay()
+        once = t.get_scores("hive")["tasks"]
+        t.apply_decay()  # within window — must be a no-op
+        twice = t.get_scores("hive")["tasks"]
+        assert once < before
+        assert twice == once, "second decay must not compound"
+
+    def test_decay_proceeds_after_interval_elapsed(self) -> None:
+        """Gate releases after the configured interval."""
+        t = RelevanceTracker(decay_min_interval_seconds=0)
+        t.record_access("hive", "tasks")
+        t.apply_decay()
+        first = t.get_scores("hive")["tasks"]
+        t.apply_decay()
+        second = t.get_scores("hive")["tasks"]
+        assert second < first
 
 
 class TestTopSections:

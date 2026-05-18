@@ -6,9 +6,21 @@ from typing import Any
 
 from hive._sqlite_tracker import _SqliteTracker
 
+_LOG_BUFFER_MAX = 50
+
 
 class UsageTracker(_SqliteTracker):
-    """Track vault tool calls for session profiling and analytics."""
+    """Track vault tool calls for session profiling and analytics.
+
+    ``log_call`` is on the hot path of every tool response. To avoid
+    one SQLite INSERT+commit per call (which serializes across all
+    threads of the process AND across all hive subprocesses sharing
+    the DB), calls buffer in memory and flush in batches of
+    ``_LOG_BUFFER_MAX``. Reads (``stats``) flush first so they see
+    fresh data. ``close()`` flushes too. On a hard crash, up to
+    ``_LOG_BUFFER_MAX`` informational rows can be lost — acceptable
+    for usage analytics.
+    """
 
     _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS tool_calls (
@@ -21,19 +33,45 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 );
 """
 
+    def __init__(self, db_path: str = ":memory:") -> None:
+        super().__init__(db_path)
+        self._buffer: list[tuple[str, str, int]] = []
+
     def log_call(
         self,
         tool: str,
         project: str = "",
         response_lines: int = 0,
     ) -> None:
-        """Record a vault tool call."""
+        """Buffer a vault tool call; flush when the buffer fills."""
         with self._lock:
-            self._conn.execute(
-                "INSERT INTO tool_calls (tool, project, response_lines) VALUES (?, ?, ?)",
-                (tool, project, response_lines),
-            )
-            self._conn.commit()
+            self._buffer.append((tool, project, response_lines))
+            if len(self._buffer) >= _LOG_BUFFER_MAX:
+                self._flush_locked()
+
+    def _flush_locked(self) -> None:
+        """Drain the in-memory buffer into SQLite. Caller MUST hold self._lock."""
+        if not self._buffer:
+            return
+        batch = self._buffer
+        self._buffer = []
+        self._conn.executemany(
+            "INSERT INTO tool_calls (tool, project, response_lines) "
+            "VALUES (?, ?, ?)",
+            batch,
+        )
+        self._conn.commit()
+
+    def flush(self) -> None:
+        """Force a flush of the in-memory buffer (e.g. before shutdown)."""
+        with self._lock:
+            self._flush_locked()
+
+    def close(self) -> None:
+        """Flush the buffer, then close the underlying connection."""
+        with self._lock:
+            self._flush_locked()
+        super().close()
 
     def stats(self, since_days: int = 30) -> dict[str, Any]:
         """Aggregate usage stats for the last N days."""
@@ -41,6 +79,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
         since_param = str(-since_days)
 
         with self._lock:
+            self._flush_locked()
             total_row = self._conn.execute(
                 f"SELECT COUNT(*) FROM tool_calls {since_clause}",
                 (since_param,),

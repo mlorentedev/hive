@@ -10,7 +10,7 @@ import subprocess
 import threading
 import time
 from collections import deque
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import date
 from typing import TYPE_CHECKING
 
@@ -20,7 +20,7 @@ from mcp.types import ToolAnnotations
 from hive.frontmatter import extract_body, parse_date, parse_frontmatter
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Callable, Iterator
     from pathlib import Path
 
     from hive._context import ServerContext
@@ -235,6 +235,35 @@ def _normalize_ws(text: str) -> str:
     return "\n".join(line.rstrip() for line in text.splitlines())
 
 
+def _find_line_numbers(content: str, needle: str) -> list[int]:
+    """Return 1-indexed line numbers where ``needle`` starts in ``content``.
+
+    Used to make ``vault_patch`` ambiguity errors point the caller at
+    the conflicting matches instead of just saying "N occurrences".
+    """
+    out: list[int] = []
+    start = 0
+    while True:
+        idx = content.find(needle, start)
+        if idx == -1:
+            return out
+        out.append(content.count("\n", 0, idx) + 1)
+        start = idx + 1
+
+
+def _format_ambiguous(count: int, content: str, find: str, suffix: str = "") -> str:
+    locations = _find_line_numbers(content, find)
+    if not locations:
+        return f"Ambiguous: find text appears {count} times{suffix}."
+    shown = locations[:5]
+    hint = ", ".join(f"line {ln}" for ln in shown)
+    more = f" (+{len(locations) - len(shown)} more)" if len(locations) > len(shown) else ""
+    return (
+        f"Ambiguous: find text appears {count} times{suffix} at {hint}{more}. "
+        "Add surrounding context to your `find` so it matches exactly one location."
+    )
+
+
 def _match_and_replace(
     content: str,
     find: str,
@@ -250,7 +279,7 @@ def _match_and_replace(
     if count == 1:
         return True, content.replace(find, replace, 1)
     if count > 1:
-        return False, f"Ambiguous: find text appears {count} times."
+        return False, _format_ambiguous(count, content, find)
 
     # ── Pass 2: Exact match on body (post-frontmatter) ──
     body = extract_body(content)
@@ -260,7 +289,7 @@ def _match_and_replace(
     if count == 1:
         return True, frontmatter + body.replace(find, replace, 1)
     if count > 1:
-        return False, f"Ambiguous: find text appears {count} times."
+        return False, _format_ambiguous(count, content, find)
 
     # ── Pass 3: Whitespace-normalized match on body ──
     norm_body = _normalize_ws(body)
@@ -271,10 +300,12 @@ def _match_and_replace(
         if count == 1:
             return True, frontmatter + norm_body.replace(norm_find, replace, 1)
         if count > 1:
+            # After ws-normalize the offsets don't map back cleanly;
+            # report count + hint without line numbers in this branch.
             return (
                 False,
-                f"Ambiguous: find text appears {count} times"
-                " (after whitespace normalization).",
+                f"Ambiguous: find text appears {count} times "
+                "(after whitespace normalization). Add more context.",
             )
 
     # ── Diagnostic: similarity hint ──
@@ -360,6 +391,39 @@ def _score_file(match_count: int, fm: Frontmatter | None, today: date) -> float:
 # ── File I/O ───────────────────────────────────────────────────────────
 
 
+def format_io_error(exc: BaseException, path: object, action: str) -> str:
+    """Produce a user-facing message for an OSError / UnicodeDecodeError.
+
+    Distinguishes the common cases (perms, missing, wrong type, encoding)
+    and includes a remediation hint per case. Generic OSError keeps the
+    errno + strerror for diagnosis but adds context the bare repr lacks.
+    """
+    if isinstance(exc, PermissionError):
+        return (
+            f"Cannot {action} '{path}': permission denied. "
+            "Check the file is readable/writable by the MCP server process."
+        )
+    if isinstance(exc, FileNotFoundError):
+        return (
+            f"Cannot {action} '{path}': file not found. "
+            "Check the path is correct and the parent directory exists."
+        )
+    if isinstance(exc, IsADirectoryError):
+        return (
+            f"Cannot {action} '{path}': target is a directory, expected a file."
+        )
+    if isinstance(exc, UnicodeDecodeError):
+        return (
+            f"Cannot read '{path}': file is not valid UTF-8 "
+            "(hive only supports UTF-8 markdown)."
+        )
+    if isinstance(exc, OSError):
+        errno = exc.errno or "?"
+        strerror = exc.strerror or str(exc)
+        return f"Cannot {action} '{path}': {strerror} (errno {errno})."
+    return f"Cannot {action} '{path}': {exc!r}"
+
+
 def _safe_read(f: Path) -> str | None:
     """Read file text, returning None on error."""
     try:
@@ -389,8 +453,42 @@ def track(
 # ── Git operations ─────────────────────────────────────────────────────
 
 _GIT_LOCK = threading.Lock()
+_WRITE_LOCK = threading.Lock()
 
 _LOCK_TIMEOUT = 30  # seconds — matches subprocess timeout
+
+
+class WriteLockTimeout(Exception):  # noqa: N818  # mirrors stdlib TimeoutError naming
+    """Either the intra-process or inter-process write lock timed out."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+@contextmanager
+def vault_write_lock(vault_path: Path) -> Iterator[None]:
+    """Acquire both the thread lock and the inter-process filelock for a write.
+
+    Combines what was a 3x-duplicated ``_WRITE_LOCK.acquire / try / filelock /
+    try / except / finally`` block across ``vault_write`` create, append/replace,
+    and ``vault_patch``. Raises :class:`WriteLockTimeout` (with a
+    human-readable ``reason``) on either lock timeout; callers map that to a
+    user-facing ``"Server busy"`` message.
+
+    The filelock is the singleton from :func:`_git_filelock`, so a nested
+    ``_git_commit`` inside this block re-enters the same lock cleanly.
+    """
+    if not _WRITE_LOCK.acquire(timeout=_LOCK_TIMEOUT):
+        raise WriteLockTimeout("write lock timeout")
+    try:
+        try:
+            with _git_filelock(vault_path).acquire(timeout=_LOCK_TIMEOUT):
+                yield
+        except filelock.Timeout as exc:
+            raise WriteLockTimeout("inter-process lock timeout") from exc
+    finally:
+        _WRITE_LOCK.release()
 
 
 _GIT_FILELOCKS: dict[str, filelock.BaseFileLock] = {}
@@ -563,8 +661,55 @@ def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
         _GIT_LOCK.release()
 
 
+_GIT_CACHE_TTL_S = 300.0  # 5 min — invalidated earlier if HEAD changes
+_GIT_CACHE_LOCK = threading.Lock()
+# Entry: (cached_at_monotonic, head_sha, value)
+_git_log_cache: dict[tuple[str, int], tuple[float, str, str]] = {}
+_git_recent_cache: dict[tuple[str, int], tuple[float, str, list[str]]] = {}
+
+
+def _current_head_sha(vault_path: Path) -> str:
+    """Fast read of .git/HEAD (and the referenced ref) for cache keys.
+
+    Returns empty string on any failure — the caller treats that as
+    "no cache" and skips caching, so a transient git problem just
+    falls through to the live subprocess call.
+    """
+    try:
+        head_file = vault_path / ".git" / "HEAD"
+        head_text = head_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    if head_text.startswith("ref:"):
+        ref = head_text.split(":", 1)[1].strip()
+        try:
+            return (vault_path / ".git" / ref).read_text(
+                encoding="utf-8",
+            ).strip()
+        except OSError:
+            return ""
+    return head_text  # already a detached SHA
+
+
 def _git_log(vault_path: Path, n: int) -> str:
-    """Return last n git log entries, or empty string on failure."""
+    """Return last n git log entries, or empty string on failure.
+
+    Cached for ``_GIT_CACHE_TTL_S`` keyed by (vault_path, n, HEAD_SHA)
+    so ``session_briefing`` does not spawn ``git log`` on every call
+    when HEAD has not moved.
+    """
+    key = (str(vault_path), n)
+    sha = _current_head_sha(vault_path)
+    if sha:
+        with _GIT_CACHE_LOCK:
+            entry = _git_log_cache.get(key)
+            if entry is not None:
+                cached_at, cached_sha, value = entry
+                if (
+                    cached_sha == sha
+                    and time.monotonic() - cached_at < _GIT_CACHE_TTL_S
+                ):
+                    return value
     try:
         result = subprocess.run(
             ["git", "log", "--oneline", f"-{n}"],
@@ -575,11 +720,32 @@ def _git_log(vault_path: Path, n: int) -> str:
         )
     except Exception:
         return ""
-    return result.stdout.strip() if result.returncode == 0 else ""
+    value = result.stdout.strip() if result.returncode == 0 else ""
+    if sha:
+        with _GIT_CACHE_LOCK:
+            _git_log_cache[key] = (time.monotonic(), sha, value)
+    return value
 
 
 def _git_recent(vault_path: Path, since_days: int) -> list[str]:
-    """Return vault-relative .md paths changed in the last N days via git."""
+    """Return vault-relative .md paths changed in the last N days via git.
+
+    Cached for ``_GIT_CACHE_TTL_S`` keyed by (vault_path, since_days,
+    HEAD_SHA) so ``vault_search(since_days=N)`` does not respawn git
+    on every call when HEAD has not moved.
+    """
+    key = (str(vault_path), since_days)
+    sha = _current_head_sha(vault_path)
+    if sha:
+        with _GIT_CACHE_LOCK:
+            entry = _git_recent_cache.get(key)
+            if entry is not None:
+                cached_at, cached_sha, value = entry
+                if (
+                    cached_sha == sha
+                    and time.monotonic() - cached_at < _GIT_CACHE_TTL_S
+                ):
+                    return list(value)
     try:
         result = subprocess.run(
             ["git", "log", f"--since={since_days} days ago",
@@ -593,27 +759,55 @@ def _git_recent(vault_path: Path, since_days: int) -> list[str]:
         return []
     if result.returncode != 0:
         return []
-    return sorted({
+    value = sorted({
         line.strip() for line in result.stdout.splitlines()
         if line.strip().endswith(".md")
     })
+    if sha:
+        with _GIT_CACHE_LOCK:
+            _git_recent_cache[key] = (time.monotonic(), sha, value)
+    return list(value)
 
 
 # ── Stale detection ───────────────────────────────────────────────────
 
 
-def count_stale(
-    project_dir: Path, threshold: date,
+def scan_project(
+    project_dir: Path,
+) -> tuple[list[Path], dict[Path, str | None], dict[Path, Frontmatter | None]]:
+    """One pass: walk + read + parse-frontmatter every .md in the project.
+
+    Returns ``(files, contents_by_path, frontmatters_by_path)``. Files
+    that cannot be read have ``None`` content and ``None`` frontmatter.
+    This is the shared primitive for tools that need multiple views of
+    the same project subtree (``vault_health``, ``session_briefing``,
+    ``count_stale``) — eliminates the previous 2x walk + 2x parse.
+    """
+    try:
+        files = list(project_dir.rglob("*.md"))
+    except OSError:
+        return [], {}, {}
+    contents: dict[Path, str | None] = {}
+    frontmatters: dict[Path, Frontmatter | None] = {}
+    for f in files:
+        content = _safe_read(f)
+        contents[f] = content
+        frontmatters[f] = parse_frontmatter(content) if content is not None else None
+    return files, contents, frontmatters
+
+
+def count_stale_from(
+    project_dir: Path,
+    files: list[Path],
+    frontmatters: dict[Path, Frontmatter | None],
+    threshold: date,
 ) -> list[str]:
-    """Return list of stale file paths in a project directory."""
+    """Stale-file list from a precomputed :func:`scan_project` result."""
     from hive.frontmatter import _TERMINAL_STATUSES
 
     stale: list[str] = []
-    for f in project_dir.rglob("*.md"):
-        content = _safe_read(f)
-        if content is None:
-            continue
-        fm = parse_frontmatter(content)
+    for f in files:
+        fm = frontmatters.get(f)
         if fm is not None and fm.status in _TERMINAL_STATUSES:
             continue
         created_date = parse_date(fm.created) if fm is not None else None
@@ -625,3 +819,16 @@ def count_stale(
         if created_date < threshold:
             stale.append(f.relative_to(project_dir).as_posix())
     return stale
+
+
+def count_stale(
+    project_dir: Path, threshold: date,
+) -> list[str]:
+    """Return list of stale file paths in a project directory.
+
+    Backwards-compatible wrapper: when callers already have a scan
+    result, prefer :func:`count_stale_from` to avoid the second walk
+    and second frontmatter parse.
+    """
+    files, _, frontmatters = scan_project(project_dir)
+    return count_stale_from(project_dir, files, frontmatters, threshold)
