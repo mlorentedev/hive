@@ -2781,7 +2781,9 @@ class TestFileIOResilience:
                     "replace": "bar",
                 },
             ))
-            assert "error" in result.lower()
+            # format_io_error wording: "Cannot read 'X': permission denied. ..."
+            lower = result.lower()
+            assert "permission" in lower or "error" in lower
         finally:
             tasks.chmod(0o644)
 
@@ -2800,7 +2802,8 @@ class TestFileIOResilience:
                     "content": "\n- [ ] New task\n",
                 },
             ))
-            assert "error" in result.lower()
+            lower = result.lower()
+            assert "permission" in lower or "error" in lower
         finally:
             tasks.chmod(0o644)
 
@@ -3065,7 +3068,12 @@ class TestExtractLessons:
                 "capture_lesson",
                 {"project": "testproject", "text": "session notes"},
             ))
-            assert "write error" in result.lower() or "error" in result.lower()
+            lower = result.lower()
+            assert (
+                "permission" in lower
+                or "write error" in lower
+                or "error" in lower
+            )
         finally:
             lessons_file.chmod(0o644)
 
