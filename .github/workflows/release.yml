@@ -30,6 +30,47 @@ jobs:
           release-type: python
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
 
+      # release-please bumps `pyproject.toml` and `server.json` (via extra-files)
+      # but does not touch `uv.lock`'s self-reference, so the release PR ships
+      # with a stale lock version. Regenerate the lock on the release-please
+      # branch so the merged PR is internally consistent.
+      - name: Capture release-please PR branch
+        if: steps.release.outputs.pr
+        env:
+          PR_DATA: ${{ steps.release.outputs.pr }}
+        run: |
+          branch=$(printf '%s' "$PR_DATA" | jq -r .headBranchName)
+          echo "PR_BRANCH=$branch" >> "$GITHUB_ENV"
+
+      - name: Check out release-please PR branch
+        if: steps.release.outputs.pr
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PR_BRANCH }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+
+      - name: Set up uv
+        if: steps.release.outputs.pr
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        if: steps.release.outputs.pr
+        run: uv python install 3.12
+
+      - name: Sync uv.lock with release version bump
+        if: steps.release.outputs.pr
+        run: |
+          uv lock
+          if git diff --quiet uv.lock; then
+            echo "No uv.lock drift to fix."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "chore: sync uv.lock with release version bump"
+          git push origin "$PR_BRANCH"
+
   publish:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
