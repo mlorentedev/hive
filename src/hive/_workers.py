@@ -20,6 +20,7 @@ from hive._helpers import (
     _resolve_file,
     _resolve_project_dir,
     _vault_guard,
+    format_io_error,
     project_not_found,
     tool_span,
     track,
@@ -78,7 +79,7 @@ def _write_lesson(
         try:
             existing = lessons_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
-            return "error", f"File I/O error: {exc}"
+            return "error", format_io_error(exc, f"{project}/90-lessons.md", "read")
 
     if f"] {title}\n" in existing:
         return "skipped", f"Lesson already exists: '{title}'. Skipping."
@@ -103,7 +104,7 @@ def _write_lesson(
             with lessons_file.open("a", encoding="utf-8") as f:
                 f.write(entry)
     except OSError as exc:
-        return "error", f"File I/O error: {exc}"
+        return "error", format_io_error(exc, f"{project}/90-lessons.md", "write")
 
     return "written", f"Lesson captured: '{title}' → {project}/90-lessons.md"
 

@@ -18,8 +18,10 @@ from hive._helpers import (
     _score_file,
     _truncate,
     _vault_guard,
-    count_stale,
+    count_stale_from,
+    format_io_error,
     project_not_found,
+    scan_project,
     track,
     wrap_sync_tool,
 )
@@ -191,8 +193,11 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         try:
             content = filepath.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
-            return track(ctx, "vault_query",
-                         f"File I/O error: {exc}", project, resolved_section)
+            return track(
+                ctx, "vault_query",
+                format_io_error(exc, resolved_section, "read"),
+                project, resolved_section,
+            )
 
         if include_metadata:
             fm = parse_frontmatter(content)
@@ -455,18 +460,29 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
 
     @mcp.tool(annotations=_READ_ONLY)
     @wrap_sync_tool(ctx, "session_briefing")
-    def session_briefing(project: str) -> str:
+    def session_briefing(project: str = "") -> str:
         """Call at the start of every new session to load project context.
 
-        Assembles active tasks, recent lessons, git activity, and project
-        health into a single response — replaces 3-4 manual tool calls.
+        Without a project, returns the available project list with a usage
+        hint — discoverability parity with vault_health() and worker_status().
+        With a project, assembles active tasks, recent lessons, git activity,
+        and project health into a single response (replaces 3-4 manual calls).
 
         Args:
-            project: Project slug (directory under 10_projects/).
+            project: Project slug (directory under 10_projects/). Empty =
+                list available projects so the caller can pick one.
         """
         guard = _vault_guard(ctx)
         if guard:
             return track(ctx, "session_briefing", guard, project)
+
+        if not project:
+            listing = list_projects_text(ctx)
+            hint = (
+                "\n\n_Pass `project=<slug>` to load tasks, lessons, "
+                "git activity, and health for one of the projects above._"
+            )
+            return track(ctx, "session_briefing", listing + hint)
 
         resolved = _resolve_project_dir(ctx.vault, project, ctx.scopes)
         if resolved is None:
@@ -505,10 +521,12 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         git_block = "## Recent Vault Activity\n"
         git_block += _git_log(ctx.vault, 5) or "(no git history available)"
 
-        # Health (always shown, not ranked)
-        md_files = list(project_dir.rglob("*.md"))
+        # Health (always shown, not ranked) — single project scan reused.
+        md_files, _, frontmatters = scan_project(project_dir)
         stale_threshold = date.today() - timedelta(days=ctx.stale_days)
-        stale_count = len(count_stale(project_dir, stale_threshold))
+        stale_count = len(count_stale_from(
+            project_dir, md_files, frontmatters, stale_threshold,
+        ))
         health_lines = [f"- Files: {len(md_files)}"]
         if stale_count:
             health_lines.append(f"- Stale: {stale_count}")

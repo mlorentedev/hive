@@ -87,16 +87,34 @@ class TestOllamaAvailability:
     async def test_is_available_true(self) -> None:
         client = OllamaClient(endpoint="http://localhost:11434", model="test")
         mock_resp = _mock_response(200)
-        with patch.object(client._http, "get", new_callable=AsyncMock, return_value=mock_resp):
+        with patch.object(
+            client._probe_http, "get",
+            new_callable=AsyncMock, return_value=mock_resp,
+        ):
             assert await client.is_available() is True
 
     @pytest.mark.asyncio
     async def test_is_available_false_on_error(self) -> None:
         client = OllamaClient(endpoint="http://localhost:11434", model="test")
         with patch.object(
-            client._http, "get", new_callable=AsyncMock, side_effect=httpx.ConnectError("down")
+            client._probe_http, "get",
+            new_callable=AsyncMock, side_effect=httpx.ConnectError("down"),
         ):
             assert await client.is_available() is False
+
+    @pytest.mark.asyncio
+    async def test_is_available_caches_within_ttl(self) -> None:
+        """Second call within TTL must not re-issue the HTTP probe."""
+        client = OllamaClient(endpoint="http://localhost:11434", model="test")
+        mock_resp = _mock_response(200)
+        with patch.object(
+            client._probe_http, "get",
+            new_callable=AsyncMock, return_value=mock_resp,
+        ) as mock_get:
+            assert await client.is_available() is True
+            assert await client.is_available() is True
+            assert await client.is_available() is True
+            assert mock_get.call_count == 1, "cache must suppress repeat probes"
 
 
 # ── OpenRouterClient ────────────────────────────────────────────────
@@ -315,7 +333,7 @@ class TestReadTimeoutResilience:
     async def test_ollama_is_available_read_timeout(self) -> None:
         client = OllamaClient(endpoint="http://localhost:11434", model="test")
         with patch.object(
-            client._http, "get", new_callable=AsyncMock,
+            client._probe_http, "get", new_callable=AsyncMock,
             side_effect=httpx.ReadTimeout("slow"),
         ):
             assert await client.is_available() is False

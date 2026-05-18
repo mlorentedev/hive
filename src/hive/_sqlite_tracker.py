@@ -41,6 +41,16 @@ class _SqliteTracker:
             self._conn.execute(
                 f"PRAGMA busy_timeout={_BUSY_TIMEOUT_SECONDS * 1000}",
             )
+            # synchronous=NORMAL is safe with WAL: fsync only on
+            # checkpoint, not on every commit. Tracker writes are
+            # informational (usage/relevance/budget) — a power-loss
+            # losing the last 1-2 events is acceptable.
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            # Checkpoint every 200 pages (~800 KB) instead of the
+            # default 1000 — bounds WAL growth when N hive processes
+            # share the DB and none of them is idle long enough to
+            # trigger a passive checkpoint.
+            self._conn.execute("PRAGMA wal_autocheckpoint=200")
         self._conn.executescript(self._SCHEMA)
 
     def close(self) -> None:
