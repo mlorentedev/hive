@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.9](https://github.com/mlorentedev/hive/compare/v1.12.8...v1.12.9) (2026-05-18)
+
+
+### Bug Fixes
+
+* post-PR-90 stability pass — correctness, perf, contention, UX ([#92](https://github.com/mlorentedev/hive/issues/92)) ([20a869c](https://github.com/mlorentedev/hive/commit/20a869c3b1f8356710090cb4a46a332f8d9c2a2c))
+
 ## [1.12.8](https://github.com/mlorentedev/hive/compare/v1.12.7...v1.12.8) (2026-05-18)
 
 
