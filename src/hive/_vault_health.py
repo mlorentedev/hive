@@ -39,6 +39,7 @@ _FENCED_CODE_RE = re.compile(
     r"(?ms)^(?P<fence>`{3,}|~{3,})[^\n]*\n.*?^(?P=fence)[^\n]*$",
 )
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+_POSIX_CLASS_RE = re.compile(r"^:[a-z]+:$")
 
 
 def _strip_code(text: str) -> str:
@@ -217,9 +218,33 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
             all_stems: set[str] = set()
             all_paths: set[str] = set()
             if "links" in active_checks:
-                for pd, _ in project_dirs:
-                    for f in pd.rglob("*.md"):
-                        all_stems.add(f.stem)
+                # Index every .md in the vault under all 4 forms Obsidian
+                # accepts: bare stem, vault-rooted full path, vault-rooted
+                # without scope dir, and project-relative. Meta-scope files
+                # also get an `_meta/`-prefixed form (the slug Obsidian/Hive
+                # users type in wikilinks).
+                scope_dir_names = set(ctx.scopes.values())
+                meta_dir_name = ctx.scopes.get("meta")
+                try:
+                    md_files = list(ctx.vault.rglob("*.md"))
+                except OSError:
+                    md_files = []
+                for f in md_files:
+                    if not f.is_file():
+                        continue
+                    all_stems.add(f.stem)
+                    with contextlib.suppress(ValueError):
+                        vault_rel = (
+                            f.relative_to(ctx.vault).with_suffix("").as_posix()
+                        )
+                        all_paths.add(vault_rel)
+                        if "/" in vault_rel:
+                            leading, rest = vault_rel.split("/", 1)
+                            if leading in scope_dir_names:
+                                all_paths.add(rest)
+                                if leading == meta_dir_name:
+                                    all_paths.add(f"_meta/{rest}")
+                    for pd, _ in project_dirs:
                         with contextlib.suppress(ValueError):
                             all_paths.add(
                                 f.relative_to(pd).with_suffix("").as_posix(),
@@ -296,6 +321,8 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                         body = _strip_code(extract_body(content))
                         for m in _WIKILINK_RE.finditer(body):
                             target = m.group(1).strip().rstrip("\\").strip()
+                            if _POSIX_CLASS_RE.match(target):
+                                continue
                             if (
                                 target not in all_stems
                                 and target not in all_paths

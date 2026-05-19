@@ -3406,6 +3406,94 @@ class TestVaultValidate:
             f"MEMORY.md must be skipped; got: {result}"
         )
 
+    async def test_meta_scope_wikilink_resolves(
+        self, mock_vault: Path,
+    ) -> None:
+        """`[[pattern-X]]` targeting `00_meta/patterns/pattern-X.md` must
+        resolve. The meta scope is the canonical home for cross-project
+        patterns/templates and must be a valid link target from every project.
+
+        Regression for #94 category 1.
+        """
+        doc = mock_vault / "10_projects" / "testproject" / "with-meta-link.md"
+        doc.write_text(
+            "---\nid: with-meta-link\ntype: note\nstatus: active\n---\n\n"
+            "See [[pattern-tdd]] for context.\n"
+            "Also [[_meta/patterns/pattern-tdd]] (scope-rooted form).\n",
+        )
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool(
+            "vault_health",
+            {"project": "testproject", "checks": ["links"]},
+        ))
+        assert "with-meta-link.md" not in result, (
+            f"Wikilink to existing meta-scope target must resolve; "
+            f"got: {result}"
+        )
+
+    async def test_cross_project_vault_rooted_wikilink_resolves(
+        self, mock_vault: Path,
+    ) -> None:
+        """`[[other-project/30-architecture/adr-X]]` must resolve to the
+        existing file under another project in the same scope. This is the
+        standard Obsidian disambiguation form for cross-project references.
+
+        Regression for #94 category 2.
+        """
+        kubelab = mock_vault / "10_projects" / "kubelab"
+        kubelab.mkdir()
+        (kubelab / "00-context.md").write_text(
+            "---\nid: kubelab\ntype: project\nstatus: active\n---\n\n"
+            "# Kubelab\n",
+        )
+        adrs = kubelab / "30-architecture" / "adrs"
+        adrs.mkdir(parents=True)
+        (adrs / "adr-038-orchestrator-architecture.md").write_text(
+            "---\nid: adr-038\ntype: adr\nstatus: accepted\n---\n\n"
+            "# ADR-038\n",
+        )
+
+        doc = mock_vault / "10_projects" / "testproject" / "with-xproj-link.md"
+        doc.write_text(
+            "---\nid: with-xproj-link\ntype: note\nstatus: active\n---\n\n"
+            "Driven by "
+            "[[kubelab/30-architecture/adrs/adr-038-orchestrator-architecture"
+            "|ADR-038]].\n",
+        )
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool(
+            "vault_health", {"checks": ["links"]},
+        ))
+        assert "with-xproj-link.md" not in result, (
+            f"Cross-project vault-rooted wikilink must resolve; got: {result}"
+        )
+
+    async def test_posix_class_in_heading_not_flagged(
+        self, mock_vault: Path,
+    ) -> None:
+        """POSIX character classes (`[[:space:]]`, `[[:digit:]]`, etc.) that
+        appear in markdown headings or prose (outside fenced/inline code) must
+        not be reported as broken wikilinks. No valid Obsidian filename matches
+        the shape `:<lowercase>:`.
+
+        Regression for #94 category 3.
+        """
+        doc = mock_vault / "10_projects" / "testproject" / "posix-heading.md"
+        doc.write_text(
+            "---\nid: posix-heading\ntype: note\nstatus: active\n---\n\n"
+            "### \\s is not POSIX — use [[:space:]] in bash regex\n\n"
+            "And the digit class [[:digit:]] is similar.\n",
+        )
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool(
+            "vault_health",
+            {"project": "testproject", "checks": ["links"]},
+        ))
+        assert "posix-heading.md" not in result, (
+            f"POSIX character classes outside code must not be flagged; "
+            f"got: {result}"
+        )
+
 
 # ── _setup_file_logging ─────────────────────────────────────────────
 
