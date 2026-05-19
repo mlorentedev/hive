@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.10](https://github.com/mlorentedev/hive/compare/v1.12.9...v1.12.10) (2026-05-19)
+
+
+### Bug Fixes
+
+* **vault_health:** resolve cross-scope and project-prefixed wikilinks ([#94](https://github.com/mlorentedev/hive/issues/94)) ([#95](https://github.com/mlorentedev/hive/issues/95)) ([2c94e1c](https://github.com/mlorentedev/hive/commit/2c94e1c8e9bc6d8f2f3b51662dd6f1b161741b8f))
+
 ## [1.12.9](https://github.com/mlorentedev/hive/compare/v1.12.8...v1.12.9) (2026-05-18)
 
 
