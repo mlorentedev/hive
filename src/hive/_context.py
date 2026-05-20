@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from hive._lesson_reinforcement import LessonReinforcementTracker
     from hive.budget import BudgetTracker
     from hive.clients import OllamaClient, OpenRouterClient
     from hive.relevance import RelevanceTracker
@@ -25,6 +26,7 @@ class ServerContext:
     ollama: OllamaClient
     openrouter: OpenRouterClient | None
     relevance: RelevanceTracker
+    lessons: LessonReinforcementTracker
     stale_days: int
     openrouter_budget: float
     openrouter_paid_model: str
@@ -35,3 +37,4 @@ class ServerContext:
         self.tracker.close()
         self.budget.close()
         self.relevance.close()
+        self.lessons.close()
