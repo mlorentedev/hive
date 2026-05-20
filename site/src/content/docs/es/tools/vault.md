@@ -88,6 +88,11 @@ vault_search(since_days=7, project="mi-proyecto")
 
 # Restringir búsqueda a un scope
 vault_search(query="LVDS", scope="work")
+
+# Ranking por refuerzo de lecciones (HIVE-97)
+vault_search(query="timeout", rank_by="reinforcements")  # más leídas primero
+vault_search(query="timeout", rank_by="confidence")      # mayor confianza decaída
+vault_search(query="timeout", rank_by="hybrid")          # α=0.7 BM25 + 0.3 confianza
 ```
 
 **Modo estándar:** Devuelve líneas coincidentes agrupadas por archivo, con cabeceras de metadatos. Cuando `use_regex=True`, la query se compila como expresión regular de Python (case-insensitive).
@@ -97,6 +102,8 @@ vault_search(query="LVDS", scope="work")
 **Modo reciente** (`since_days > 0`): Combina historial de git con fechas `created` del frontmatter para encontrar archivos modificados en los últimos N días. Filtro opcional por `project`.
 
 **Filtro de scope** (`scope`): Restringe la búsqueda a un solo scope (ej. `"work"`, `"projects"`). Funciona en los tres modos. Sin `scope`, busca en todo el vault.
+
+**Modo rank-de-lecciones** (`rank_by != "bm25"`): Filtra coincidencias a `90-lessons.md` únicamente y rankea por la señal de uso elegida — cada lección surfaceada se incrementa una vez por llamada. `hybrid` mezcla BM25 (α=0.7) con confianza (1−α=0.3). Valores `rank_by` desconocidos devuelven un error claro en lugar de caer silenciosamente a BM25.
 
 ## vault_health
 
@@ -189,7 +196,7 @@ Reemplaza exactamente una ocurrencia de `find` con `replace`. Rechaza coincidenc
 
 ## capture_lesson
 
-Captura lecciones inline o extracción por lotes desde texto usando un worker.
+Captura lecciones inline, extracción por lotes desde texto, o look-up de lecciones existentes por palabra clave.
 
 ```python
 # Captura inline (estructurada, una lección)
@@ -209,10 +216,20 @@ capture_lesson(
     min_confidence=0.7,
     max_lessons=5
 )
+
+# Modo look-up — recuperar lecciones existentes por palabra clave (HIVE-97)
+capture_lesson(
+    project="mi-proyecto",
+    find="cache",
+    rank_by="reinforcements",   # o "confidence", "hybrid"
+    max_lessons=5
+)
 ```
 
-**Modo inline** (sin `text`): Agrega una entrada estructurada a `90-lessons.md` con fecha, contexto, problema y solución. Crea el archivo con frontmatter si no existe. Deduplicación por título. Auto-commit a git.
+**Modo inline** (sin `text`, sin `find`): Agrega una entrada estructurada a `90-lessons.md` con fecha, contexto, problema y solución. Crea el archivo con frontmatter si no existe. Deduplicación por título. Auto-commit a git. Cada inline write también siembra una fila baseline en la tabla de refuerzo a `confidence=0.7`.
 
-**Modo por lotes** (`text` proporcionado): Envía el texto a un modelo worker (Ollama/OpenRouter) que extrae lecciones estructuradas (título, contexto, problema, solución, tags, confianza). Las lecciones por encima del umbral de confianza se escriben en `90-lessons.md` con deduplicación.
+**Modo por lotes** (`text` proporcionado): Envía el texto a un modelo worker (Ollama/OpenRouter) que extrae lecciones estructuradas (título, contexto, problema, solución, tags, confianza). Las lecciones por encima del umbral de confianza se escriben en `90-lessons.md` con deduplicación y se siembran en la tabla de refuerzo.
 
-**Cuándo usar:** Inmediatamente después de descubrir la causa raíz de un bug, un insight arquitectónico o un truco de depuración — no esperes al final de la sesión.
+**Modo look-up** (`find` proporcionado): Grepea headings de lecciones (consciente de bloques de código) por la palabra clave, rankea las coincidencias por `rank_by` (default `reinforcements`), incrementa cada lección surfaceada una vez, y devuelve las top `max_lessons`. Simetría tool-única: `capture_lesson` ESCRIBE lecciones Y las consulta.
+
+**Cuándo usar:** Inmediatamente después de descubrir la causa raíz de un bug, un insight arquitectónico o un truco de depuración — no esperes al final de la sesión. Usa `find=` para recuperar lecciones pasadas por tema.

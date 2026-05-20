@@ -88,6 +88,11 @@ vault_search(since_days=7, project="my-project")
 
 # Restrict search to a scope
 vault_search(query="LVDS", scope="work")
+
+# Lesson reinforcement ranking (HIVE-97)
+vault_search(query="timeout", rank_by="reinforcements")  # most-read first
+vault_search(query="timeout", rank_by="confidence")      # highest decayed confidence
+vault_search(query="timeout", rank_by="hybrid")          # α=0.7 BM25 + 0.3 confidence
 ```
 
 **Standard mode:** Returns matching lines grouped by file, with metadata headers. When `use_regex=True`, the query is compiled as a Python regular expression (case-insensitive).
@@ -97,6 +102,8 @@ vault_search(query="LVDS", scope="work")
 **Recent mode** (`since_days > 0`): Combines git history with frontmatter `created` dates to find files changed in the last N days. Optional `project` filter.
 
 **Scope filter** (`scope`): Restricts the search to a single scope (e.g. `"work"`, `"projects"`). Works in all three modes. Without `scope`, searches the entire vault.
+
+**Lesson-rank mode** (`rank_by != "bm25"`): Filters matches to `90-lessons.md` only and ranks by the chosen usage signal — every surfaced lesson is incremented once per call. `hybrid` blends BM25 (α=0.7) with confidence (1−α=0.3). Unknown `rank_by` values return a clear error rather than silently falling back to BM25.
 
 ## vault_health
 
@@ -189,7 +196,7 @@ Replaces exactly one occurrence of `find` with `replace`. Rejects ambiguous matc
 
 ## capture_lesson
 
-Capture lessons inline or batch-extract from text using a worker.
+Capture lessons inline, batch-extract from text, or look up existing lessons by keyword.
 
 ```python
 # Inline capture (structured, single lesson)
@@ -209,10 +216,20 @@ capture_lesson(
     min_confidence=0.7,
     max_lessons=5
 )
+
+# Lookup mode — surface existing lessons by keyword (HIVE-97)
+capture_lesson(
+    project="my-project",
+    find="cache",
+    rank_by="reinforcements",   # or "confidence", "hybrid"
+    max_lessons=5
+)
 ```
 
-**Inline mode** (no `text`): Appends a structured entry to `90-lessons.md` with date, context, problem, and solution. Creates the file with frontmatter if it doesn't exist. Deduplicates by title. Auto-commits to git.
+**Inline mode** (no `text`, no `find`): Appends a structured entry to `90-lessons.md` with date, context, problem, and solution. Creates the file with frontmatter if it doesn't exist. Deduplicates by title. Auto-commits to git. Each inline write also seeds a baseline row in the reinforcement table at `confidence=0.7`.
 
-**Batch mode** (`text` provided): Sends the text to a worker model (Ollama/OpenRouter) which extracts structured lessons (title, context, problem, solution, tags, confidence). Lessons above the confidence threshold are written to `90-lessons.md` with deduplication.
+**Batch mode** (`text` provided): Sends the text to a worker model (Ollama/OpenRouter) which extracts structured lessons (title, context, problem, solution, tags, confidence). Lessons above the confidence threshold are written to `90-lessons.md` with deduplication and seeded in the reinforcement table.
 
-**When to use:** Immediately after discovering a bug root cause, architectural insight, or debugging trick — don't wait until session end.
+**Lookup mode** (`find` provided): Greps lesson headings (codeblock-aware) for the keyword, ranks the matches by `rank_by` (default `reinforcements`), increments each surfaced lesson once, and returns the top `max_lessons`. Single-tool symmetry: `capture_lesson` writes lessons AND queries them.
+
+**When to use:** Immediately after discovering a bug root cause, architectural insight, or debugging trick — don't wait until session end. Use `find=` to recover past lessons by topic.
