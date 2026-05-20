@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0](https://github.com/mlorentedev/hive/compare/v1.12.10...v1.13.0) (2026-05-20)
+
+
+### Features
+
+* lesson reinforcement counter with confidence decay (HIVE-97) ([#98](https://github.com/mlorentedev/hive/issues/98)) ([e37c7e2](https://github.com/mlorentedev/hive/commit/e37c7e2b5ca0c9c77a0513c630e0102280d88cb2))
+
 ## [1.12.10](https://github.com/mlorentedev/hive/compare/v1.12.9...v1.12.10) (2026-05-19)
 
 
