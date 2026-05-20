@@ -48,6 +48,23 @@ SECTION_SHORTCUTS: dict[str, str] = {
 
 _DEFAULT_SCOPES: dict[str, str] = {"projects": "10_projects", "meta": "00_meta", "work": "50_work"}
 
+_FENCED_CODE_RE = re.compile(
+    r"(?ms)^(?P<fence>`{3,}|~{3,})[^\n]*\n.*?^(?P=fence)[^\n]*$",
+)
+_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+
+
+def _strip_code(text: str) -> str:
+    """Remove fenced and inline code from markdown text.
+
+    Used by link-validator and lesson-heading parsers to skip wikilink-
+    or heading-like syntax that appears inside code blocks (bash regex
+    `[[:space:]]`, shell `[[ -z "$1" ]]`, code-block examples of lesson
+    syntax, etc.).
+    """
+    text = _FENCED_CODE_RE.sub("", text)
+    return _INLINE_CODE_RE.sub("", text)
+
 _VAULT_NOT_FOUND_MSG = (
     "Vault not found at {path}.\n\n"
     "Set the vault path when registering the MCP server:\n\n"
