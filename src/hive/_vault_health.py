@@ -12,6 +12,7 @@ from hive._helpers import (
     SECTION_SHORTCUTS,
     _resolve_project_dir,
     _safe_read,
+    _strip_code,
     _vault_guard,
     count_stale_from,
     project_not_found,
@@ -35,20 +36,7 @@ if TYPE_CHECKING:
 
 _ALL_CHECKS = frozenset({"frontmatter", "stale", "links"})
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+?)(?:[|#][^\]]*?)?\]\]")
-_FENCED_CODE_RE = re.compile(
-    r"(?ms)^(?P<fence>`{3,}|~{3,})[^\n]*\n.*?^(?P=fence)[^\n]*$",
-)
-_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 _POSIX_CLASS_RE = re.compile(r"^:[a-z]+:$")
-
-
-def _strip_code(text: str) -> str:
-    """Remove fenced and inline code so wikilink-like syntax inside code
-    (e.g. bash regex `[[:space:]]`, shell `[[ -z "$1" ]]`) is not parsed
-    as a wikilink.
-    """
-    text = _FENCED_CODE_RE.sub("", text)
-    return _INLINE_CODE_RE.sub("", text)
 
 
 def _find_duplicate_names(scope_dir: Path) -> list[tuple[str, list[str]]]:

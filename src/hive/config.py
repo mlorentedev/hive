@@ -29,6 +29,9 @@ class HiveSettings(BaseSettings):
     relevance_db_path: str = str(
         Path.home() / ".local" / "share" / "hive" / "relevance.db",
     )
+    lesson_db_path: str = str(
+        Path.home() / ".local" / "share" / "hive" / "lesson_reinforcement.db",
+    )
     stale_threshold_days: int = 180
     http_timeout: float = 60.0
     tool_timeout: float = 60.0

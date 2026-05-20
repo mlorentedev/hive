@@ -22,6 +22,7 @@ from hive._helpers import (  # noqa: E402
     _safe_read,
     _truncate,
 )
+from hive._lesson_reinforcement import LessonReinforcementTracker  # noqa: E402
 from hive._vault_health import health_report_text, register_vault_health  # noqa: E402
 from hive._vault_read import list_projects_text, register_vault_read  # noqa: E402
 from hive._vault_write import register_vault_write  # noqa: E402
@@ -41,6 +42,7 @@ def create_server(
     openrouter_client: OpenRouterClient | None = None,
     vault_scopes: dict[str, str] | None = None,
     relevance_tracker: RelevanceTracker | None = None,
+    lesson_tracker: LessonReinforcementTracker | None = None,
 ) -> FastMCP:
     """Create and configure the Hive MCP server."""
     resolved_path = vault_path or settings.vault_path
@@ -65,6 +67,9 @@ def create_server(
         decay_factor=settings.relevance_decay,
         epsilon=settings.relevance_epsilon,
     )
+    lessons = lesson_tracker or LessonReinforcementTracker(
+        db_path=settings.lesson_db_path,
+    )
 
     ctx = ServerContext(
         vault=resolved_path,
@@ -74,6 +79,7 @@ def create_server(
         ollama=ollama,
         openrouter=openrouter,
         relevance=relevance,
+        lessons=lessons,
         stale_days=settings.stale_threshold_days,
         openrouter_budget=settings.openrouter_budget,
         openrouter_paid_model=settings.openrouter_paid_model,

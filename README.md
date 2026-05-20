@@ -51,17 +51,33 @@ Then ask your assistant: *"Use vault_list to see my vault"*
 | Tool | What it does |
 |---|---|
 | `vault_query` | Load project context, tasks, roadmap, lessons — or any file by path |
-| `vault_search` | Full-text search with metadata filters, regex, ranked results, recent changes |
+| `vault_search` | Full-text search with metadata filters, regex, ranked results, recent changes, lesson-usage ranking (`rank_by`) |
 | `vault_list` | Browse projects and files with glob filtering |
 | `vault_health` | Health metrics, drift detection, usage stats |
 | `vault_write` | Create, append, or replace vault files with auto git commit |
 | `vault_patch` | Surgical find-and-replace with auto git commit |
-| `capture_lesson` | Capture lessons inline or batch-extract from text via worker |
+| `capture_lesson` | Capture lessons inline / batch-extract from text / look up existing lessons by keyword (`find=`) |
 | `session_briefing` | Tasks + lessons + git log + health in one call |
 | `delegate_task` | Route tasks to cheaper models or summarize vault files |
 | `worker_status` | Budget, connectivity, available models |
 
 Plus 5 [resources](https://mlorentedev.github.io/hive/reference/resources/) and 4 [prompts](https://mlorentedev.github.io/hive/guides/prompts/) for guided workflows.
+
+### Lesson reinforcement
+
+Every read of a lesson via `vault_query`, `vault_search`, or `capture_lesson(find=…)` increments a counter and grows that lesson's confidence asymptotically toward 1.0. Validated lessons rank higher than one-shot captures over time.
+
+```bash
+# Surface the top-ranked lessons matching a keyword
+capture_lesson(project="hive", find="multi-process")
+
+# Search lessons ranked by usage signal (not BM25)
+vault_search(query="timeout", rank_by="reinforcements")    # most-reinforced first
+vault_search(query="timeout", rank_by="confidence")        # highest decayed confidence
+vault_search(query="timeout", rank_by="hybrid")            # α=0.7 BM25 + 0.3 confidence
+```
+
+Storage: SQLite side-table at `HIVE_LESSON_DB_PATH` (default `~/.local/share/hive/lesson_reinforcement.db`). WAL mode + busy_timeout make it cross-process safe.
 
 ## Architecture
 
@@ -78,7 +94,7 @@ MCP Host (Claude Code, Gemini CLI, Codex CLI, Cursor, ...)
 Full documentation at **[mlorentedev.github.io/hive](https://mlorentedev.github.io/hive/)**:
 
 - [Getting Started](https://mlorentedev.github.io/hive/getting-started/) — install for all MCP clients
-- [Configuration](https://mlorentedev.github.io/hive/configuration/) — all 18 environment variables
+- [Configuration](https://mlorentedev.github.io/hive/configuration/) — all 19 environment variables
 - [Vault Structure](https://mlorentedev.github.io/hive/guides/vault-structure/) — how to organize your vault
 - [Use Cases](https://mlorentedev.github.io/hive/guides/use-cases/) — real-world workflows
 - [Architecture](https://mlorentedev.github.io/hive/reference/architecture/) — module map and design decisions
@@ -91,7 +107,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and PR workflow.
 ```bash
 git clone https://github.com/mlorentedev/hive.git && cd hive
 make install   # create venv + install deps
-make check     # lint + typecheck + test (423 tests, 91% coverage)
+make check     # lint + typecheck + test (478 tests, 90% coverage)
 ```
 
 ## License

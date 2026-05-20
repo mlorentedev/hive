@@ -18,6 +18,7 @@ All configuration is done through environment variables, passed when registering
 | `HIVE_OPENROUTER_BUDGET` | `1.0` | Monthly budget cap in USD |
 | `HIVE_DB_PATH` | `~/.local/share/hive/worker.db` | SQLite database for budget/usage tracking |
 | `HIVE_RELEVANCE_DB_PATH` | `~/.local/share/hive/relevance.db` | SQLite database for adaptive context scoring |
+| `HIVE_LESSON_DB_PATH` | `~/.local/share/hive/lesson_reinforcement.db` | SQLite database for lesson reinforcement counters + decayed confidence |
 | `HIVE_STALE_THRESHOLD_DAYS` | `180` | Days before a vault file is flagged as stale |
 | `HIVE_HTTP_TIMEOUT` | `60.0` | HTTP timeout (seconds) for Ollama and OpenRouter |
 | `HIVE_TOOL_TIMEOUT` | `60.0` | Tool-level timeout (seconds) for async worker tools (capture_lesson, delegate_task, worker_status) |

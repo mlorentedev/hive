@@ -19,7 +19,9 @@ from hive._helpers import (
     _make_frontmatter,
     _resolve_file,
     _resolve_project_dir,
+    _safe_read,
     _vault_guard,
+    extract_lesson_headings,
     format_io_error,
     project_not_found,
     tool_span,
@@ -125,6 +127,79 @@ def _parse_lessons_json(raw: str) -> list[dict[str, object]]:
     return json.loads(text)  # type: ignore[no-any-return]
 
 
+def _capture_lesson_lookup(
+    ctx: ServerContext,
+    project_dir: Path,
+    project: str,
+    find: str,
+    rank_by: str,
+    max_lessons: int,
+) -> str:
+    """capture_lesson lookup mode (HIVE-97 find=).
+
+    Greps the project's 90-lessons.md headings for ``find`` (case-
+    insensitive), validates ``rank_by``, increments each surfaced
+    lesson once, and renders the top-N matches ordered by the chosen
+    usage signal via ``ctx.lessons.top``.
+    """
+    if rank_by not in {"reinforcements", "confidence", "hybrid"}:
+        return track(
+            ctx, "capture_lesson",
+            f"Unknown rank_by={rank_by!r}. Expected one of: "
+            f"reinforcements, confidence, hybrid.",
+            project,
+        )
+
+    lessons_file = project_dir / "90-lessons.md"
+    if not lessons_file.exists():
+        return track(
+            ctx, "capture_lesson",
+            f"No 90-lessons.md found for project '{project}'.",
+            project, "lessons",
+        )
+    content = _safe_read(lessons_file)
+    if content is None:
+        return track(
+            ctx, "capture_lesson",
+            f"Could not read 90-lessons.md for project '{project}'.",
+            project, "lessons",
+        )
+
+    find_lower = find.lower()
+    matched = [
+        h for h in extract_lesson_headings(content)
+        if find_lower in h.lower()
+    ]
+    if not matched:
+        return track(
+            ctx, "capture_lesson",
+            f"No lessons matching '{find}' in project '{project}'.",
+            project, "lessons",
+        )
+
+    # Per-call dedup + increment (one read per surfaced lesson).
+    matched_set = set(matched)
+    for heading in dict.fromkeys(matched):
+        ctx.lessons.increment(project, heading)
+
+    bm25_scores = {h: 1.0 for h in matched_set}
+    ranked = ctx.lessons.top(
+        project, by=rank_by, limit=max_lessons,
+        bm25_scores=bm25_scores,
+    )
+    ordered = [h for h in ranked if h in matched_set][:max_lessons]
+
+    rendered = [
+        f"# Lessons matching '{find}' ({rank_by}, top {len(ordered)}):",
+        "",
+    ]
+    for heading in ordered:
+        rendered.append(f"- {heading}")
+    return track(
+        ctx, "capture_lesson", "\n".join(rendered), project, "lessons",
+    )
+
+
 def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
     """Register worker tools on the MCP server."""
 
@@ -187,11 +262,15 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
         text: str = "",
         min_confidence: float = 0.7,
         max_lessons: int = 5,
+        find: str = "",
+        rank_by: str = "reinforcements",
     ) -> str:
-        """Capture lessons: inline (structured fields) or batch (raw text via worker).
+        """Capture lessons: inline / batch write, or lookup by keyword.
 
         Inline mode (default): provide title, context, problem, solution.
         Batch mode: provide text to extract lessons automatically via worker.
+        Lookup mode: provide ``find`` to surface top-ranked existing
+        lessons whose heading matches the keyword.
 
         Args:
             project: Project slug (directory under 10_projects/).
@@ -202,7 +281,10 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
             tags: Optional tags (e.g. ["python", "testing"]).
             text: Raw text to extract lessons from (batch mode).
             min_confidence: Minimum confidence for batch extraction. Default 0.7.
-            max_lessons: Maximum lessons to extract in batch mode. Default 5.
+            max_lessons: Maximum lessons to extract / surface. Default 5.
+            find: Keyword to look up in existing lesson headings (lookup mode).
+            rank_by: Lookup ranking — 'reinforcements' (default), 'confidence',
+                or 'hybrid'. Ignored unless ``find`` is set.
         """
         guard = _vault_guard(ctx)
         if guard:
@@ -218,6 +300,13 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                         project,
                     )
                 project_dir, _ = resolved
+
+                # ── Lookup mode (HIVE-97 find=) ──
+                if find:
+                    return _capture_lesson_lookup(
+                        ctx, project_dir, project, find,
+                        rank_by, max_lessons,
+                    )
 
                 # ── Batch mode (worker extraction) ──
                 if text:
@@ -323,6 +412,11 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                         )
                         if status == "written":
                             written.append(l_title)
+                            ctx.lessons.ensure(
+                                project,
+                                f"[{date.today().isoformat()}] {l_title}",
+                                confidence,
+                            )
                         elif status == "skipped":
                             skipped.append(f"{l_title} (duplicate)")
                         elif status == "error":
@@ -376,6 +470,10 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                     return track(ctx, "capture_lesson", msg, project)
                 if status == "skipped":
                     return track(ctx, "capture_lesson", msg, project, "lessons")
+
+                ctx.lessons.ensure(
+                    project, f"[{date.today().isoformat()}] {title}",
+                )
 
                 rel = (project_dir / "90-lessons.md").relative_to(ctx.vault)
                 _git_commit(
