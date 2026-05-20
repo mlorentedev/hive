@@ -8,7 +8,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from hive._helpers import _match_and_replace, _resolve_project_dir, _vault_guard, tool_span
+from hive._helpers import (
+    _match_and_replace,
+    _resolve_project_dir,
+    _strip_code,
+    _vault_guard,
+    find_lesson_heading,
+    tool_span,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -238,3 +245,118 @@ class TestResolveProjectDir:
         assert result is not None
         assert result[0] == mock_vault / "00_meta"
         assert result[1] == "meta"
+
+
+class TestStripCode:
+    """Tests for _strip_code — relocated from _vault_health (HIVE-97)."""
+
+    def test_removes_fenced_block(self) -> None:
+        text = "before\n```\ninside\n```\nafter\n"
+        result = _strip_code(text)
+        assert "inside" not in result
+        assert "before" in result
+        assert "after" in result
+
+    def test_removes_tilde_fenced_block(self) -> None:
+        text = "before\n~~~\ninside\n~~~\nafter\n"
+        result = _strip_code(text)
+        assert "inside" not in result
+
+    def test_removes_inline_code(self) -> None:
+        text = "use `[[wikilink]]` for links"
+        result = _strip_code(text)
+        assert "[[wikilink]]" not in result
+        assert "use" in result
+
+    def test_leaves_plain_markdown_intact(self) -> None:
+        text = "# Title\n\n[[real link]] outside any code\n"
+        result = _strip_code(text)
+        assert "[[real link]]" in result
+
+
+class TestFindLessonHeading:
+    """Tests for find_lesson_heading — walk-back from a line_no to the
+    nearest `### [YYYY-MM-DD] …` heading, code-block-aware (HIVE-97)."""
+
+    def test_returns_heading_when_match_above(self) -> None:
+        content = "### [2026-05-18] foo\n\nbody line A\nbody line B\n"
+        # line 3 = "body line A"
+        assert find_lesson_heading(content, 3) == "[2026-05-18] foo"
+
+    def test_returns_heading_when_line_is_the_heading_itself(self) -> None:
+        content = "### [2026-05-18] foo\nbody\n"
+        assert find_lesson_heading(content, 1) == "[2026-05-18] foo"
+
+    def test_returns_none_when_no_heading_above(self) -> None:
+        content = "just some prose\nwith no heading\n"
+        assert find_lesson_heading(content, 2) is None
+
+    def test_clamps_when_line_no_past_eof(self) -> None:
+        """line_no past EOF clamps to last line — degrade gracefully so
+        callers with off-by-one match numbers still get the closest
+        valid heading instead of dropping the increment."""
+        content = "### [2026-05-18] foo\nbody\n"
+        assert find_lesson_heading(content, 99) == "[2026-05-18] foo"
+
+    def test_returns_none_past_eof_when_no_headings(self) -> None:
+        """Clamping must NOT invent a heading where none exists."""
+        content = "just prose\nno heading\n"
+        assert find_lesson_heading(content, 99) is None
+
+    def test_skips_heading_inside_fenced_codeblock(self) -> None:
+        """Heading inside ``` ... ``` must NOT be returned."""
+        content = (
+            "intro\n"
+            "```\n"                    # line 2  fence open
+            "### [2026-01-01] fake\n"  # line 3  fake heading
+            "```\n"                    # line 4  fence close
+            "body\n"                   # line 5  match line
+        )
+        assert find_lesson_heading(content, 5) is None
+
+    def test_real_heading_wins_when_fake_heading_inside_codeblock(self) -> None:
+        content = (
+            "### [2026-05-18] real heading\n"  # line 1
+            "intro\n"                            # line 2
+            "```\n"                              # line 3
+            "### [2026-01-01] fake\n"            # line 4
+            "```\n"                              # line 5
+            "body\n"                             # line 6  match line
+        )
+        assert find_lesson_heading(content, 6) == "[2026-05-18] real heading"
+
+    def test_returns_most_recent_heading_when_multiple_above(self) -> None:
+        content = (
+            "### [2026-01-01] older\n"
+            "body A\n"
+            "### [2026-05-18] newer\n"
+            "body B\n"
+            "body C\n"  # line 5
+        )
+        assert find_lesson_heading(content, 5) == "[2026-05-18] newer"
+
+    def test_ignores_malformed_heading_without_date(self) -> None:
+        content = (
+            "### no date here\n"   # line 1  malformed heading
+            "body line\n"           # line 2
+        )
+        assert find_lesson_heading(content, 2) is None
+
+    def test_ignores_h1_h2_h4_only_matches_h3(self) -> None:
+        """Only `### ` (h3) headings count — h1/h2/h4 are not lessons."""
+        content = (
+            "# [2026-05-18] h1 fake\n"
+            "## [2026-05-18] h2 fake\n"
+            "#### [2026-05-18] h4 fake\n"
+            "body line\n"
+        )
+        assert find_lesson_heading(content, 4) is None
+
+    def test_tilde_fence_also_skipped(self) -> None:
+        content = (
+            "~~~\n"
+            "### [2026-01-01] fake\n"
+            "~~~\n"
+            "body\n"  # line 4
+        )
+        assert find_lesson_heading(content, 4) is None

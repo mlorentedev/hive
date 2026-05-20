@@ -65,6 +65,55 @@ def _strip_code(text: str) -> str:
     text = _FENCED_CODE_RE.sub("", text)
     return _INLINE_CODE_RE.sub("", text)
 
+
+_LESSON_HEADING_RE = re.compile(r"^### (\[\d{4}-\d{2}-\d{2}\] .+)$")
+_FENCE_LINE_RE = re.compile(r"^(`{3,}|~{3,})")
+
+
+def find_lesson_heading(content: str, line_no: int) -> str | None:
+    """Walk back from ``line_no`` to the nearest lesson heading.
+
+    A lesson heading is exactly ``### [YYYY-MM-DD] title`` (h3, ISO date
+    in brackets). Headings inside fenced code blocks (``` or ~~~) are
+    skipped — they are documentation about lessons, not lessons.
+
+    Returns the heading text WITHOUT the ``### `` prefix (e.g.
+    ``"[2026-05-18] foo"``) so it matches the DB-key convention used by
+    ``LessonReinforcementTracker``. Returns ``None`` when no valid
+    heading is found at or above ``line_no``.
+    """
+    lines = content.splitlines()
+    if not lines:
+        return None
+    # First pass: mark each line with whether it sits inside a fenced
+    # code block. Walking back without this would let a fake heading
+    # inside a fenced example shadow the real one above it.
+    in_block: list[bool] = [False] * len(lines)
+    open_fence: str | None = None
+    for idx, raw in enumerate(lines):
+        match = _FENCE_LINE_RE.match(raw)
+        if match:
+            fence = match.group(1)
+            if open_fence is None:
+                open_fence = fence[0]  # `'`'` or `'~'`
+                in_block[idx] = True
+                continue
+            if raw.startswith(open_fence):
+                in_block[idx] = True
+                open_fence = None
+                continue
+        in_block[idx] = open_fence is not None
+    # Walk back from min(line_no, len) to line 1, return the first real
+    # heading outside any code block.
+    start = min(line_no, len(lines))
+    for idx in range(start - 1, -1, -1):
+        if in_block[idx]:
+            continue
+        m = _LESSON_HEADING_RE.match(lines[idx])
+        if m:
+            return m.group(1)
+    return None
+
 _VAULT_NOT_FOUND_MSG = (
     "Vault not found at {path}.\n\n"
     "Set the vault path when registering the MCP server:\n\n"
