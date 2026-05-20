@@ -323,6 +323,11 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                         )
                         if status == "written":
                             written.append(l_title)
+                            ctx.lessons.ensure(
+                                project,
+                                f"[{date.today().isoformat()}] {l_title}",
+                                confidence,
+                            )
                         elif status == "skipped":
                             skipped.append(f"{l_title} (duplicate)")
                         elif status == "error":
@@ -376,6 +381,10 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                     return track(ctx, "capture_lesson", msg, project)
                 if status == "skipped":
                     return track(ctx, "capture_lesson", msg, project, "lessons")
+
+                ctx.lessons.ensure(
+                    project, f"[{date.today().isoformat()}] {title}",
+                )
 
                 rel = (project_dir / "90-lessons.md").relative_to(ctx.vault)
                 _git_commit(

@@ -19,6 +19,8 @@ from hive._helpers import (
     _truncate,
     _vault_guard,
     count_stale_from,
+    extract_lesson_headings,
+    find_lesson_heading,
     format_io_error,
     project_not_found,
     scan_project,
@@ -28,9 +30,91 @@ from hive._helpers import (
 from hive.frontmatter import extract_body, parse_date, parse_frontmatter
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from fastmcp import FastMCP
 
     from hive._context import ServerContext
+
+
+def _vault_search_by_rank(
+    ctx: ServerContext,
+    search_root: Path,
+    query: str,
+    rank_by: str,
+    max_lines: int,
+) -> str:
+    """Lessons-only ranked search (HIVE-97).
+
+    Filters matches to ``90-lessons.md`` files, walks back from each
+    matching line to the nearest ``### [date]`` heading, increments
+    each surfaced heading once (per-call dedup), then ranks via
+    ``ctx.lessons.top(by=rank_by)``.
+    """
+    query_lower = query.lower()
+    # (project_slug, heading) -> file_rel
+    hits: dict[tuple[str, str], str] = {}
+    bm25_per_project: dict[str, dict[str, float]] = {}
+
+    for md_file in sorted(search_root.rglob("90-lessons.md")):
+        content = _safe_read(md_file)
+        if content is None:
+            continue
+        body = extract_body(content)
+        rel = md_file.relative_to(ctx.vault).as_posix()
+        rel_parts = md_file.relative_to(ctx.vault).parts
+        # Layout: <scope>/<project_slug>/90-lessons.md (project lessons).
+        if len(rel_parts) < 3:
+            continue
+        project_slug = rel_parts[-2]
+
+        body_lines = body.splitlines()
+        per_heading_hits: dict[str, int] = {}
+        for idx, line in enumerate(body_lines, start=1):
+            if query_lower not in line.lower():
+                continue
+            heading = find_lesson_heading(body, idx)
+            if heading is None:
+                continue
+            per_heading_hits[heading] = per_heading_hits.get(heading, 0) + 1
+            hits.setdefault((project_slug, heading), rel)
+
+        if per_heading_hits:
+            # Normalise raw hit counts to [0, 1] per project for hybrid blend.
+            max_h = max(per_heading_hits.values())
+            bm25_per_project[project_slug] = {
+                h: cnt / max_h for h, cnt in per_heading_hits.items()
+            }
+
+    if not hits:
+        return track(
+            ctx, "vault_search",
+            f"No lessons found for '{query}'.",
+        )
+
+    # Increment each surfaced heading once (per-tool-call dedup).
+    for project_slug, heading in hits:
+        ctx.lessons.increment(project_slug, heading)
+
+    # Rank within each project, emit in project-then-rank order.
+    rendered: list[str] = [f"# Lesson search ({rank_by}): '{query}'", ""]
+    for project_slug in sorted({p for p, _ in hits}):
+        relevant_headings = {h for p, h in hits if p == project_slug}
+        bm25_scores = bm25_per_project.get(project_slug, {})
+        ranked = ctx.lessons.top(
+            project_slug, by=rank_by, limit=len(relevant_headings),
+            bm25_scores=bm25_scores,
+        )
+        ordered = [h for h in ranked if h in relevant_headings]
+        if not ordered:
+            continue
+        rel = hits[(project_slug, ordered[0])]
+        rendered.append(f"### {rel}")
+        for heading in ordered:
+            rendered.append(f"  - {heading}")
+
+    output = "\n".join(rendered)
+    return track(ctx, "vault_search", _truncate(output, max_lines))
 
 
 def list_projects_text(ctx: ServerContext) -> str:
@@ -205,7 +289,13 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             if meta:
                 content = f"**Metadata:** {meta}\n\n{content}"
 
-        return track(ctx, "vault_query", _truncate(content, max_lines),
+        truncated = _truncate(content, max_lines)
+
+        if filepath.name == "90-lessons.md":
+            for heading in dict.fromkeys(extract_lesson_headings(truncated)):
+                ctx.lessons.increment(project, heading)
+
+        return track(ctx, "vault_query", truncated,
                      project, resolved_section)
 
     @mcp.tool(annotations=_READ_ONLY)
@@ -222,12 +312,14 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         since_days: int = 0,
         project: str = "",
         scope: str = "",
+        rank_by: str = "bm25",
     ) -> str:
         """Search the vault: full-text, ranked, or recent changes.
 
         Default mode: flat full-text search across all vault files.
         Ranked mode (ranked=True): results scored by relevance.
         Recent mode (since_days>0): files changed in the last N days.
+        rank_by mode (rank_by != 'bm25'): lessons-only, ranked by usage.
 
         Args:
             query: Text to search for (case-insensitive).
@@ -241,10 +333,22 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             since_days: Show recent changes (0 = disabled). Default 0.
             project: Filter to this project (recent mode only).
             scope: Restrict search to a scope (e.g. 'work', 'projects'). Empty = all.
+            rank_by: Lesson ranking ('bm25' default keeps current
+                behaviour; 'reinforcements', 'confidence', 'hybrid' filter
+                to 90-lessons.md only and rank by usage signal).
         """
         guard = _vault_guard(ctx)
         if guard:
             return track(ctx, "vault_search", guard)
+
+        if rank_by != "bm25" and rank_by not in {
+            "reinforcements", "confidence", "hybrid",
+        }:
+            return track(
+                ctx, "vault_search",
+                f"Unknown rank_by={rank_by!r}. Expected one of: "
+                f"bm25, reinforcements, confidence, hybrid.",
+            )
 
         # ── Scope filter ──
         search_root = ctx.vault
@@ -386,6 +490,17 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             output = "\n".join(results)
             return track(
                 ctx, "vault_search", _truncate(output, max_lines),
+            )
+
+        # ── rank_by mode (HIVE-97) — lessons-only ranked by usage signal ──
+        if rank_by != "bm25":
+            if not query:
+                return track(
+                    ctx, "vault_search",
+                    f"Query is required for rank_by={rank_by!r} search.",
+                )
+            return _vault_search_by_rank(
+                ctx, search_root, query, rank_by, max_lines,
             )
 
         # ── Standard search ──
