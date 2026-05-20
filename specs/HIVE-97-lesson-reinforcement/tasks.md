@@ -15,16 +15,18 @@ created: 2026-05-18
 
 Pure `LessonReinforcementTracker` behavior. In-memory DB. No MCP, no filesystem.
 
-- [ ] **T1.1** `test_schema_init` — fresh tracker has table with 7 columns + PK `(project, heading)`.
-- [ ] **T1.2** `test_ensure_baseline` — `ensure()` then SELECT returns reinforcements=0, confidence=arg.
-- [ ] **T1.3** `test_ensure_is_idempotent` — `ensure()` twice does NOT reset reinforcements (uses INSERT OR IGNORE, not REPLACE).
-- [ ] **T1.4** `test_increment_arithmetic` — 5 increments from c0=0.7 → counter=5, `confidence ∈ [0.8218, 0.8238]`. Verifies `c_5 = 1 - 0.3 × 0.9^5`.
-- [ ] **T1.5** `test_increment_ceiling` — 100 increments → `confidence ≤ 1.0` strict (never overflows).
-- [ ] **T1.6** `test_increment_creates_row_if_missing` — `increment()` on unknown lesson lazy-creates at c=0.7, count=1.
-- [ ] **T1.7** `test_concurrent_threads` — `threading.Thread × 20` on one row → final count == 20 (intra-process atomicity).
-- [ ] **T1.8** `test_top_by_reinforcements` — 3 rows with counts [1, 5, 10] → top() returns [10, 5, 1].
-- [ ] **T1.9** `test_top_by_confidence_tie_recency` — equal confidence, different `last_referenced` → more-recent first.
-- [ ] **T1.10** `test_top_by_hybrid_blend` — `alpha=0.7` blend: lesson with high BM25 low-conf ranks above low BM25 high-conf iff `0.7·Δbm25 > 0.3·Δconf`.
+- [x] **T1.1** `test_schema_init` — fresh tracker has table with 7 columns + PK `(project, heading)`. ✅ 2026-05-19
+- [x] **T1.2** `test_ensure_baseline` — `ensure()` then SELECT returns reinforcements=0, confidence=arg. ✅
+- [x] **T1.3** `test_ensure_is_idempotent` — `ensure()` twice does NOT reset reinforcements (uses INSERT OR IGNORE, not REPLACE). ✅
+- [x] **T1.4** `test_increment_arithmetic` — 5 increments from c0=0.7 → counter=5, `confidence ∈ [0.8218, 0.8238]`. Verifies `c_5 = 1 - 0.3 × 0.9^5`. ✅ (split into 2 tests: 1-inc + 5-inc)
+- [x] **T1.5** `test_increment_ceiling` — 100 increments → `confidence ≤ 1.0` strict (never overflows). ✅
+- [x] **T1.6** `test_increment_creates_row_if_missing` — `increment()` on unknown lesson lazy-creates at c=0.7, count=1. ✅
+- [x] **T1.7** `test_concurrent_threads` — `threading.Thread × 20` on one row → final count == 20 (intra-process atomicity). ✅
+- [x] **T1.8** `test_top_by_reinforcements` — 3 rows with counts [1, 5, 10] → top() returns [10, 5, 1]. ✅ (+ `test_top_respects_limit`)
+- [x] **T1.9** `test_top_by_confidence_tie_recency` — equal confidence, different `last_referenced` → more-recent first. ✅
+- [x] **T1.10** `test_top_by_hybrid_blend` — `alpha=0.7` blend. ✅ (split into 2 tests: high-BM25-wins + high-conf-tiebreaker)
+
+**Tier 1 complete: 16/16 tests pass (commit `aeedf7d` RED + `9a3b87e` GREEN).**
 
 ### Tier 2: Integration — `tests/test_lesson_reinforcement_hooks.py` (10 tests)
 
@@ -59,9 +61,9 @@ Spin up FastMCP server in-memory per existing pattern (see `tests/test_integrati
 
 ## GREEN — Implementation
 
-- [ ] **T2.** `src/hive/_lesson_reinforcement.py` — `LessonReinforcementTracker(_SqliteTracker)` with `_SCHEMA`, `ensure`, `increment`, `top`, `lookup` methods. Pure unit, no MCP coupling.
-- [ ] **T3.** `src/hive/config.py` — add `lesson_db_path` field (default `~/.local/share/hive/lesson_reinforcement.db`). README env-var count 18→19 (track for docs task T8).
-- [ ] **T4.** `src/hive/_context.py` — `ServerContext.lessons: LessonReinforcementTracker` field + `close()` adds it. `src/hive/server.py` — wire into `create_server()`.
+- [x] **T2.** `src/hive/_lesson_reinforcement.py` — `LessonReinforcementTracker(_SqliteTracker)` with `_SCHEMA`, `ensure`, `increment`, `top`, `lookup`, `get` methods. ✅ commit `9a3b87e`.
+- [x] **T3.** `src/hive/config.py` — added `lesson_db_path` field. ✅ commit `c15a36f`. README env-var count 18→19 still pending in T9.
+- [x] **T4.** `src/hive/_context.py` — `ServerContext.lessons` field + `close()` teardown. `src/hive/server.py` — `create_server()` instantiates tracker + accepts `lesson_tracker` kwarg. ✅ commit `c15a36f`.
 - [ ] **T5.** `src/hive/_workers.py` `capture_lesson`:
   - After successful `_write_lesson` in inline + batch branches: `ctx.lessons.ensure(project, heading, confidence)`.
   - New `find: str = ""` param. When set: parse `90-lessons.md` headings, filter by keyword, rank by `rank_by` (default `reinforcements`), return top N, `ctx.lessons.increment` each once (per-call set dedup).
