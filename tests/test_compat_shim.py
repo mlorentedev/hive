@@ -192,14 +192,15 @@ async def test_classify_cancellation_race(tmp_path: Path) -> None:
     finally:
         await _shutdown(proc)
 
+    n = iterations
     print("\n" + "=" * 70)
-    print(f"HIVE-104 cancellation-race classifier (N={iterations})")
+    print(f"HIVE-104 cancellation-race classifier (N={n})")
     print("=" * 70)
-    print(f"  (a)  ErrorData wins (cancel ack delivered, success suppressed): {counts['a']}/{iterations}")
-    print(f"  (a+) DUPLICATE responses (both delivered):                      {counts['a+']}/{iterations}")
-    print(f"  (b)  Our success wins (cancel ack lost mid-flight):             {counts['b']}/{iterations}")
-    print(f"  (c)  Both lost (silent):                                        {counts['c']}/{iterations}")
-    print(f"  (?)  Unknown frame shape:                                       {counts['?']}/{iterations}")
+    print(f"  (a)  ErrorData wins (cancel ack delivered):    {counts['a']}/{n}")
+    print(f"  (a+) DUPLICATE responses (both delivered):     {counts['a+']}/{n}")
+    print(f"  (b)  Our success wins (cancel ack mid-flight): {counts['b']}/{n}")
+    print(f"  (c)  Both lost (silent):                       {counts['c']}/{n}")
+    print(f"  (?)  Unknown frame shape:                      {counts['?']}/{n}")
     print("\nFirst observed sample per scenario:")
     for sc, (idx, detail, msgs) in samples.items():
         print(f"\n  [{sc}] iter={idx} — {detail}")

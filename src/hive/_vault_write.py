@@ -123,7 +123,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     rel = filepath.relative_to(ctx.vault)
                     display = "00_meta" if project == "_meta" else project
                     _git_commit(
-                        ctx.vault, rel,
+                        ctx.vault, [rel],
                         f"vault: create {display}/{path}",
                     )
             except WriteLockTimeout as exc:
@@ -190,7 +190,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
                 rel = filepath.relative_to(ctx.vault)
                 _git_commit(
-                    ctx.vault, rel, f"vault: update {project}/{section}",
+                    ctx.vault, [rel], f"vault: update {project}/{section}",
                 )
         except WriteLockTimeout as exc:
             return track(
@@ -329,7 +329,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 rel = filepath.relative_to(ctx.vault)
                 n = len(patch_list)
                 _git_commit(
-                    ctx.vault, rel, f"vault: patch {project}/{path}",
+                    ctx.vault, [rel], f"vault: patch {project}/{path}",
                 )
         except WriteLockTimeout as exc:
             return track(

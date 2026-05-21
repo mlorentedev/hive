@@ -699,8 +699,18 @@ def wrap_sync_tool(
     return decorator
 
 
-def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
-    """Stage a file and commit it in the vault git repo.
+def _git_commit(
+    vault_path: Path, rel_paths: list[Path], message: str,
+) -> None:
+    """Stage one or more files and commit them in a single git invocation.
+
+    Accepts a list of paths so a multi-write tool (``vault_patch`` with N
+    patches, ``capture_lesson`` batch with N lessons) issues exactly one
+    ``git add`` + one ``git commit`` instead of N pairs — per-call cost
+    drops from ~150ms*N to ~150ms total (HIVE-104 Fase A).
+
+    Empty list is a logged no-op so callers may pass an empty result of
+    a filter pass without guarding at every site.
 
     This is a best-effort side-effect: failures are logged but never
     propagated, so a git problem cannot crash the MCP server or prevent
@@ -714,18 +724,22 @@ def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
     and time out (see hive.log history: 5+ ``git commit timed out``
     warnings from concurrent sessions).
     """
+    if not rel_paths:
+        _log.debug("git commit no-op: empty path list")
+        return
     safe_msg = message.replace("\n", " ").replace("\r", " ")
+    path_strs = [str(p) for p in rel_paths]
     if not _GIT_LOCK.acquire(timeout=_LOCK_TIMEOUT):
         _log.warning(
             "git commit skipped for %s: thread lock timeout (%ds)",
-            rel_path, _LOCK_TIMEOUT,
+            path_strs, _LOCK_TIMEOUT,
         )
         return
     try:
         try:
             with _git_filelock(vault_path).acquire(timeout=_LOCK_TIMEOUT):
                 subprocess.run(
-                    ["git", "add", str(rel_path)],
+                    ["git", "add", *path_strs],
                     cwd=vault_path,
                     capture_output=True,
                     check=True,
@@ -741,14 +755,16 @@ def _git_commit(vault_path: Path, rel_path: Path, message: str) -> None:
         except filelock.Timeout:
             _log.warning(
                 "git commit skipped for %s: inter-process lock timeout (%ds)",
-                rel_path, _LOCK_TIMEOUT,
+                path_strs, _LOCK_TIMEOUT,
             )
         except subprocess.CalledProcessError as exc:
-            _log.warning("git commit failed for %s: %s", rel_path, exc)
+            _log.warning("git commit failed for %s: %s", path_strs, exc)
         except subprocess.TimeoutExpired as exc:
-            _log.warning("git commit timed out for %s: %s", rel_path, exc)
+            _log.warning("git commit timed out for %s: %s", path_strs, exc)
         except Exception as exc:
-            _log.warning("git commit unexpected error for %s: %s", rel_path, exc)
+            _log.warning(
+                "git commit unexpected error for %s: %s", path_strs, exc,
+            )
     finally:
         _GIT_LOCK.release()
 
