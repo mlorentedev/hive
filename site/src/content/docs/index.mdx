@@ -92,10 +92,10 @@ No cloning, no venv, no setup. [Learn more →](/hive/getting-started/)
 The highest-value setup:
 
 1. **[Obsidian](https://obsidian.md/)** — local-first knowledge base, Markdown native, 1M+ community
-2. **[Obsidian Git](https://github.com/Vinzent03/obsidian-git)** — auto-commits vault changes on a schedule
+2. **[Obsidian Git](https://github.com/Vinzent03/obsidian-git)** — auto-commits vault changes on a schedule (5–10 min recommended)
 3. **Hive** — bridges your vault to any AI coding assistant via MCP
 
-Your assistant writes to the vault → Obsidian Git auto-commits → next session, everything is there. No manual sync.
+Your assistant writes to the vault → Obsidian Git auto-commits → next session, everything is there. No manual sync. For write-heavy flows, pair `vault_write(commit=False)` with the plugin — Hive defers each commit, the plugin batches them; see [Configuration → Recommended configuration](/configuration/#recommended-configuration).
 
 > Hive works with any Markdown directory — Obsidian is recommended, not required.
 

@@ -92,10 +92,10 @@ Sin clonar, sin venv, sin configuración. [Saber más →](/hive/es/getting-star
 La configuración de mayor valor:
 
 1. **[Obsidian](https://obsidian.md/)** — base de conocimiento local-first, nativa en Markdown, 1M+ de comunidad
-2. **[Obsidian Git](https://github.com/Vinzent03/obsidian-git)** — auto-commit de cambios del vault en un horario programado
+2. **[Obsidian Git](https://github.com/Vinzent03/obsidian-git)** — auto-commit de cambios del vault en un horario programado (5–10 min recomendado)
 3. **Hive** — conecta tu vault con cualquier asistente de IA vía MCP
 
-Tu asistente escribe en el vault → Obsidian Git hace auto-commit → en la siguiente sesión, todo está ahí. Sin sincronización manual.
+Tu asistente escribe en el vault → Obsidian Git hace auto-commit → en la siguiente sesión, todo está ahí. Sin sincronización manual. Para flujos con muchas escrituras, combina `vault_write(commit=False)` con el plugin — Hive difiere cada commit, el plugin los agrupa; ver [Configuración → Configuración recomendada](/es/configuration/#configuración-recomendada).
 
 > Hive funciona con cualquier directorio de Markdown — Obsidian es recomendado, no obligatorio.
 
