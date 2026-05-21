@@ -62,6 +62,21 @@ Real vault (493K tokens): 5 project context queries consumed 2,925 tokens total,
 | vault_query | 87-90% | Full section reads |
 | session_briefing | 78.5% | Cold start context assembly |
 
+### Write Throughput (HIVE-104)
+
+Wall-clock cost of vault writes with and without the commit coalescer and the `commit=False` opt-in. Measured against the `git_vault` test fixture (fresh repo, 10 writes per scenario, `pytest tests/test_benchmark.py::TestWriteThroughputBenchmark -v -s`). Absolute numbers vary with repo size and disk speed; the ratios are the load-bearing signal.
+
+| Scenario | Total wall-clock | Per call (avg) | vs baseline |
+|---|---|---|---|
+| 10 writes, `commit=True` (baseline) | 71.7 ms | 7.2 ms | 1.0x |
+| 10 writes, `commit=False` + 1 `vault_commit` flush | 15.1 ms (4.9 writes + 10.1 flush) | 1.5 ms | **4.8x** |
+| 10 sequential `vault_patch` calls, one edit each | 72.3 ms | 7.2 ms | 1.0x |
+| 1 `vault_patch` call with 10 patches (coalescer) | 7.0 ms | 0.7 ms | **10.4x** |
+
+The 10.4x multi-patch result lands automatically — no API change is required; passing `patches=[{...}, {...}]` already issues exactly one `git add` and one `git commit` since HIVE-104. The 4.8x opt-in batching requires passing `commit=False` and calling `vault_commit` at the end; pair it with the obsidian-git plugin to push the flush off the synchronous tool path entirely (see [Configuration → Recommended configuration](/configuration/#recommended-configuration)).
+
+> On a vault under contention (multiple Hive processes, large `.git/index`, slow disk), the baseline per-call cost can climb to ~150 ms; the same speed-up ratios still apply.
+
 ## Recommendations
 
 Based on these results:
@@ -71,6 +86,7 @@ Based on these results:
 3. **session_briefing for cold starts** -- despite lower S/N (78.5%), it assembles context, tasks, and health in one call (~1,300 tokens).
 4. **Saturation at 500-1000 lines** -- values above 1000 add zero benefit with current vault sizes. The largest real vault file is 878 lines.
 5. **Override max_lines per query** -- for quick lookups, pass `max_lines=200`. For comprehensive reads, use `max_lines=0` (unlimited).
+6. **Batch bulk writes** -- for any flow that performs more than two vault writes in sequence, pass `commit=False` and finish with a single `vault_commit`. The multi-patch form of `vault_patch` is always batched.
 
 ## Running the Benchmarks
 
