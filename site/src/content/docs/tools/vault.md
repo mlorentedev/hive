@@ -166,7 +166,7 @@ vault_write(
 - **replace**: Replaces the entire file. Requires valid YAML frontmatter with `id`, `type`, `status`
 - **create**: Creates a new file. Auto-generates frontmatter with `id`, `type`, `status: draft`, `created: today`
 
-All operations auto-commit to git.
+All operations auto-commit to git by default. Pass `commit=False` to defer the commit — the file is written to disk but `git status` will still show it dirty. Flush a batch later with [`vault_commit`](#vault_commit), or let an external committer (e.g. obsidian-git auto-commit) pick it up. See [Configuration → Recommended configuration](/configuration/#recommended-configuration) for the durability contract.
 
 ## vault_patch
 
@@ -192,7 +192,17 @@ vault_patch(
 )
 ```
 
-Replaces exactly one occurrence of `find` with `replace`. Rejects ambiguous matches — if `find` appears more than once, the operation fails with an error asking for more context. Uses 3-pass cascading match: exact → body-only → whitespace-normalized. Auto-commits to git.
+Replaces exactly one occurrence of `find` with `replace`. Rejects ambiguous matches — if `find` appears more than once, the operation fails with an error asking for more context. Uses 3-pass cascading match: exact → body-only → whitespace-normalized. Auto-commits to git by default; pass `commit=False` to defer the commit (same contract as `vault_write`).
+
+## vault_commit
+
+Flush every pending write into one git commit. Companion to `vault_write(commit=False)` and `vault_patch(commit=False)`.
+
+```python
+vault_commit(message="vault: end-of-session checkpoint")
+```
+
+Stages everything dirty in the vault (`git add -A`) and creates a single commit. Returns the new SHA, a clean-tree notice if nothing is dirty, or a human-readable error. Best paired with the obsidian-git plugin (see [Configuration → Recommended configuration](/configuration/#recommended-configuration)).
 
 ## capture_lesson
 

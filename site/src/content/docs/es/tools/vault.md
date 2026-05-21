@@ -166,7 +166,7 @@ vault_write(
 - **replace**: Reemplaza el archivo completo. Requiere frontmatter YAML válido con `id`, `type`, `status`
 - **create**: Crea un nuevo archivo. Auto-genera frontmatter con `id`, `type`, `status: draft`, `created: hoy`
 
-Todas las operaciones hacen auto-commit a git.
+Todas las operaciones hacen auto-commit a git por defecto. Pasa `commit=False` para diferir el commit — el archivo se escribe en disco pero `git status` lo seguirá mostrando como modificado. Haz flush de un lote más tarde con [`vault_commit`](#vault_commit), o deja que un committer externo (p. ej. el auto-commit de obsidian-git) lo recoja. Ver [Configuración → Configuración recomendada](/es/configuration/#configuración-recomendada) para el contrato de durabilidad.
 
 ## vault_patch
 
@@ -192,7 +192,17 @@ vault_patch(
 )
 ```
 
-Reemplaza exactamente una ocurrencia de `find` con `replace`. Rechaza coincidencias ambiguas — si `find` aparece más de una vez, la operación falla con un error pidiendo más contexto. Usa coincidencia en cascada de 3 pasadas: exacta → solo cuerpo → normalizada por espacios. Auto-commit a git.
+Reemplaza exactamente una ocurrencia de `find` con `replace`. Rechaza coincidencias ambiguas — si `find` aparece más de una vez, la operación falla con un error pidiendo más contexto. Usa coincidencia en cascada de 3 pasadas: exacta → solo cuerpo → normalizada por espacios. Auto-commit a git por defecto; pasa `commit=False` para diferir el commit (mismo contrato que `vault_write`).
+
+## vault_commit
+
+Hace flush de todas las escrituras pendientes en un único commit de git. Compañera de `vault_write(commit=False)` y `vault_patch(commit=False)`.
+
+```python
+vault_commit(message="vault: checkpoint fin de sesión")
+```
+
+Stage todo lo modificado en el vault (`git add -A`) y crea un único commit. Devuelve el nuevo SHA, un aviso de árbol limpio si no hay nada modificado, o un error legible. Idealmente combinado con el plugin obsidian-git (ver [Configuración → Configuración recomendada](/es/configuration/#configuración-recomendada)).
 
 ## capture_lesson
 

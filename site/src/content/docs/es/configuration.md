@@ -5,6 +5,37 @@ description: Variables de entorno del servidor MCP Hive.
 
 Toda la configuración se realiza mediante variables de entorno, pasadas al registrar el servidor MCP.
 
+## Requisitos
+
+Hive se degrada de forma elegante — cada dependencia recomendada u opcional añade capacidad sin romper la línea base.
+
+- **Requerido**
+  - Python **3.12+** (funciona en 3.13).
+  - Un directorio de archivos markdown. La estructura `00_meta` / `10_projects` / `50_work` es opcional — sin ella, las herramientas de vault siguen funcionando pero el enrutamiento por scope es plano.
+
+- **Recomendado**
+  - `git` inicializado dentro del vault. Sin él, `vault_write` / `vault_patch` siguen escribiendo en disco; simplemente omiten el commit por escritura (y `vault_commit` reporta el árbol de trabajo como no rastreado).
+  - La aplicación de escritorio [Obsidian](https://obsidian.md) para escribir el vault a mano.
+  - El [plugin obsidian-git](https://github.com/Vinzent03/obsidian-git) con auto-commit configurado a **5–10 minutos**. Combínalo con `vault_write(commit=False)` / `vault_patch(commit=False)` para sacar la carga de git de la ruta sincrónica de la herramienta; ver *Configuración recomendada* abajo.
+
+- **Opcional**
+  - [Ollama](https://ollama.com/) ejecutando `qwen2.5-coder:7b` (o compatible) para llamadas locales y gratuitas de `delegate_task` / `capture_lesson`.
+  - Una API key de OpenRouter (`OPENROUTER_API_KEY`) como worker de respaldo (tier gratuito y de pago).
+  - Un remote git de respaldo (por ejemplo, un repo privado en GitHub) para que el historial del vault sobreviva a una pérdida de disco.
+
+### Configuración recomendada
+
+Según [ADR-006 (política de commits)](https://github.com/mlorentedev/hive/blob/master/docs/architecture/adr-006-commit-policy.md), el pairing recomendado para flujos con muchas escrituras es:
+
+1. Instala y activa el plugin obsidian-git en tu vault.
+2. Configura su intervalo de auto-commit a 5 o 10 minutos.
+3. Llama a `vault_write(..., commit=False)` y `vault_patch(..., commit=False)` para todas las operaciones masivas.
+4. Opcionalmente, llama a `vault_commit(message="...")` al final de una sesión para forzar un checkpoint antes del siguiente tick de obsidian-git.
+
+`vault_health` muestra un bloque `## external_committer` cuando detecta obsidian-git en el vault. El contrato de durabilidad de `commit=False` es explícito: los archivos se persisten en disco siempre; solo el *commit* se difiere. Un crash antes del siguiente flush pierde el commit, no el contenido.
+
+Cuando una llamada a una herramienta se cancela a mitad de ejecución (worker lento, timeout del cliente), el servidor puede haber mutado el disco antes de que el ack de cancelación llegue al wire. `vault_health` expone un contador `## ghost_responses` y emite un WARNING `mcp.ghost_response.suppressed_after_cancel_ack` por cada evento — verifica el estado vía `vault_query` en lugar de reintentar, ya que el ack ErrorData **no** implica rollback ([ADR-007](https://github.com/mlorentedev/hive/blob/master/docs/architecture/adr-007-mcp-cancellation-response.md)).
+
 ## Variables de Entorno
 
 | Variable | Valor por defecto | Descripción |
