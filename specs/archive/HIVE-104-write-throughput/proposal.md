@@ -1,7 +1,7 @@
 ---
 id: "HIVE-104-write-throughput"
 type: spec
-status: verifying # draft | implementing | verifying | archived
+status: archived # draft | implementing | verifying | archived
 created: "2026-05-20"
 tags: [spec, proposal]
 template_version: "1.0"

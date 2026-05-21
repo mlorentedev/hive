@@ -30,9 +30,9 @@ created: "2026-05-20"
 
 ## Archive checklist
 
-- [ ] `proposal.md` frontmatter set to `status: archived`
-- [ ] Folder moved: `specs/HIVE-104-write-throughput/` -> `specs/archive/HIVE-104-write-throughput/`
-- [ ] Backlog entry in vault `11-tasks.md` ticked with PR link
-- [ ] Promotions above executed (if any)
+- [x] `proposal.md` frontmatter set to `status: archived`
+- [x] Folder moved: `specs/HIVE-104-write-throughput/` -> `specs/archive/HIVE-104-write-throughput/`
+- [x] Backlog entry in vault `11-tasks.md` ticked with PR link
+- [x] Promotions above executed (lesson + ADR-006/007 already in vault)
 
-> Archive after PR merge.
+> Archived 2026-05-20 after PR #104 merged in commit `953b608`.
