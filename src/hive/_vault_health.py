@@ -15,6 +15,7 @@ from hive._helpers import (
     _strip_code,
     _vault_guard,
     count_stale_from,
+    detect_obsidian_git,
     project_not_found,
     scan_project,
     track,
@@ -123,6 +124,35 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
         found_any = True
         lines.append("## Duplicate Names (BFS resolution warning)")
         lines.extend(dup_lines)
+        lines.append("")
+
+    # ── External committer (HIVE-104 Fase B1) ──
+    obsidian_git = detect_obsidian_git(ctx.vault)
+    if obsidian_git is not None:
+        found_any = True
+        lines.append("## external_committer")
+        lines.append('- name: "obsidian-git"')
+        lines.append(f"- commit_interval: {obsidian_git['commit_interval']} min")
+        lines.append(
+            "- note: obsidian-git is active — `vault_write(commit=False)` "
+            "and `vault_patch(commit=False)` are safe; the plugin will "
+            "auto-commit on its interval."
+        )
+        lines.append("")
+
+    # ── Ghost-response counter (HIVE-104 Fase C) ──
+    from hive._compat import GHOST_RESPONSES
+    snap = GHOST_RESPONSES.snapshot()
+    if isinstance(snap.get("total"), int) and snap["total"] > 0:  # type: ignore[operator]
+        found_any = True
+        lines.append("## ghost_responses")
+        lines.append(f"- total: {snap['total']}")
+        lines.append(f"- last_seen: {snap['last_seen']}")
+        lines.append(f"- last_tool: {snap['last_tool'] or '<unknown>'}")
+        lines.append(
+            "- note: ErrorData ack does NOT imply rollback — verify state "
+            "via `vault_query`, do not retry."
+        )
         lines.append("")
 
     if not found_any:

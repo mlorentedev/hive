@@ -29,6 +29,8 @@ If ``RequestResponder`` is renamed/removed in a future ``mcp`` release,
 from __future__ import annotations
 
 import logging
+import threading
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -40,6 +42,51 @@ _log = logging.getLogger(__name__)
 
 _PATCH_APPLIED_ATTR = "_hive_cancellation_patch_applied"
 _REQUIRED_ATTRS = ("_completed", "_on_complete", "_entered", "_cancel_scope")
+
+
+class _GhostResponseCounter:
+    """Thread-safe counter for responses suppressed after client cancellation.
+
+    Surfaces the otherwise-invisible Fase C event ("handler finished after
+    notifications/cancelled; ErrorData ack already on the wire; our late
+    success would create a duplicate response") so callers and operators
+    can detect when the disk state may have mutated despite the
+    cancellation ack the client received.
+
+    Semantic mismatch (ADR-007 Amendment #2): an ErrorData ack does NOT
+    imply rollback. The correct client behavior is to verify state via
+    ``vault_query`` rather than retry the operation.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._total = 0
+        self._last_seen: str | None = None
+        self._last_tool: str | None = None
+
+    def record(self, tool: str | None = None) -> None:
+        with self._lock:
+            self._total += 1
+            self._last_seen = datetime.now(UTC).isoformat()
+            if tool:
+                self._last_tool = tool
+
+    def snapshot(self) -> dict[str, object]:
+        with self._lock:
+            return {
+                "total": self._total,
+                "last_seen": self._last_seen,
+                "last_tool": self._last_tool,
+            }
+
+    def reset(self) -> None:
+        with self._lock:
+            self._total = 0
+            self._last_seen = None
+            self._last_tool = None
+
+
+GHOST_RESPONSES = _GhostResponseCounter()
 
 
 def _make_patched_exit(original_exit: Any) -> Any:  # noqa: ARG001 (kept for symmetry)
@@ -74,20 +121,69 @@ def _make_patched_exit(original_exit: Any) -> Any:  # noqa: ARG001 (kept for sym
 
 def _make_patched_respond(original_respond: Any) -> Any:
     async def _patched_respond(self: Any, response: Any) -> None:
+        """Suppress respond() when the responder was cancelled mid-flight.
+
+        When the client has already sent ``notifications/cancelled``,
+        the upstream ``RequestResponder.cancel()`` synchronously writes
+        an ``ErrorData`` frame to the wire (empirically observed in
+        20/20 race iterations on Linux — see ADR-007 §1 Amendment #2
+        and ``tests/test_compat_shim.py::test_classify_cancellation_race``).
+        Our late success here would create a duplicate response under the
+        same ``request_id``, which some MCP clients treat as a protocol
+        error. So we silently drop the late response.
+
+        Semantic mismatch: the client receives an ErrorData ack but the
+        disk state may already be mutated by the handler that ran to
+        completion. The ack does NOT imply rollback. Correct client
+        behavior is to verify state via ``vault_query`` rather than
+        retry the operation.
+
+        Observability: every suppression bumps the module-level
+        :data:`GHOST_RESPONSES` counter and emits a WARNING log line
+        with the literal prefix
+        ``mcp.ghost_response.suppressed_after_cancel_ack`` so operators
+        can correlate user-visible "ghost response" reports with server
+        events.
+        """
         if not self._entered:
             raise RuntimeError(
                 "RequestResponder must be used as a context manager",
             )
         if self._completed:
-            _log.debug(
-                "Suppressed respond() on already-completed responder %s "
-                "(handler finished after client cancellation)",
-                self.request_id,
+            tool = _tool_name_from_responder(self)
+            GHOST_RESPONSES.record(tool)
+            _log.warning(
+                "mcp.ghost_response.suppressed_after_cancel_ack "
+                "request_id=%s tool=%s — disk state may be mutated; "
+                "verify via vault_query, do not retry.",
+                self.request_id, tool or "<unknown>",
             )
             return
         await original_respond(self, response)
 
     return _patched_respond
+
+
+def _tool_name_from_responder(responder: Any) -> str | None:
+    """Best-effort extraction of the tool name from a RequestResponder.
+
+    The MCP ``RequestResponder`` carries the original request as
+    ``self.request`` (a ``ClientRequest`` union). For tool calls, the
+    inner model's ``params`` has a ``name`` attribute. The chain may
+    differ across mcp versions, so every dereference is guarded — on
+    any miss we return ``None`` and the counter records the event
+    without a tool label.
+    """
+    try:
+        request = getattr(responder, "request", None)
+        if request is None:
+            return None
+        root = getattr(request, "root", request)
+        params = getattr(root, "params", None)
+        name = getattr(params, "name", None)
+        return name if isinstance(name, str) else None
+    except Exception:
+        return None
 
 
 def apply() -> None:

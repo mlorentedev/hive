@@ -107,7 +107,7 @@ def _commit_worker(vault: str, file_name: str) -> str:
     vault_path = _Path(vault)
     file_path = vault_path / file_name
     file_path.write_text(f"content for {file_name}\n", encoding="utf-8")
-    _git_commit(vault_path, _Path(file_name), f"add {file_name}")
+    _git_commit(vault_path, [_Path(file_name)], f"add {file_name}")
     return file_name
 
 
@@ -130,7 +130,7 @@ def _append_to_shared_file_worker(vault: str, shared_file: str, line: str) -> st
             if file_path.exists() else ""
         )
         file_path.write_text(existing + line + "\n", encoding="utf-8")
-        _git_commit(vault_path, _Path(shared_file), f"append: {line}")
+        _git_commit(vault_path, [_Path(shared_file)], f"append: {line}")
     return line
 
 

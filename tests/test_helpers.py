@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from hive._helpers import (
+    _git_commit,
     _match_and_replace,
     _resolve_project_dir,
     _strip_code,
@@ -360,3 +361,62 @@ class TestFindLessonHeading:
             "body\n"  # line 4
         )
         assert find_lesson_heading(content, 4) is None
+
+
+class TestGitCommitCoalesce:
+    """Tests for the multi-path coalescer in _git_commit (HIVE-104 Fase A).
+
+    The coalescer changes the signature from ``rel_path: Path`` to
+    ``rel_paths: list[Path]`` so that a multi-write tool (vault_patch with
+    N patches, capture_lesson batch with N lessons) can issue exactly one
+    ``git add`` + one ``git commit`` instead of N each. Per-call cost drops
+    from ~150ms*N to ~150ms total.
+    """
+
+    def test_coalesces_multi_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``_git_commit(vault, [p1, p2, p3], msg)`` → 1 add + 1 commit."""
+        from pathlib import Path as _Path
+
+        calls: list[list[str]] = []
+
+        def fake_run(cmd: list[str], **_kwargs: object) -> MagicMock:
+            calls.append(list(cmd))
+            mock = MagicMock()
+            mock.returncode = 0
+            mock.stdout = b""
+            mock.stderr = b""
+            return mock
+
+        monkeypatch.setattr("hive._helpers.subprocess.run", fake_run)
+
+        _git_commit(
+            tmp_path,
+            [_Path("a.md"), _Path("b.md"), _Path("c.md")],
+            "vault: batch update",
+        )
+
+        add_calls = [c for c in calls if c[:2] == ["git", "add"]]
+        commit_calls = [c for c in calls if c[:2] == ["git", "commit"]]
+        assert len(add_calls) == 1, f"expected 1 add, got {len(add_calls)}: {calls}"
+        assert len(commit_calls) == 1, (
+            f"expected 1 commit, got {len(commit_calls)}: {calls}"
+        )
+        assert add_calls[0] == ["git", "add", "a.md", "b.md", "c.md"]
+
+    def test_noop_on_empty_paths(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Empty path list must skip subprocess entirely (no git invocation)."""
+        calls: list[list[str]] = []
+
+        def fake_run(cmd: list[str], **_kwargs: object) -> MagicMock:
+            calls.append(list(cmd))
+            return MagicMock(returncode=0, stdout=b"", stderr=b"")
+
+        monkeypatch.setattr("hive._helpers.subprocess.run", fake_run)
+
+        _git_commit(tmp_path, [], "vault: noop")
+
+        assert calls == [], f"expected no subprocess calls, got: {calls}"

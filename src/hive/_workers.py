@@ -431,7 +431,7 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                             project_dir / "90-lessons.md"
                         ).relative_to(ctx.vault)
                         _git_commit(
-                            ctx.vault, rel,
+                            ctx.vault, [rel],
                             f"vault: capture_lesson {project} "
                             f"— {len(written)} lessons",
                         )
@@ -477,7 +477,7 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
 
                 rel = (project_dir / "90-lessons.md").relative_to(ctx.vault)
                 _git_commit(
-                    ctx.vault, rel,
+                    ctx.vault, [rel],
                     f"vault: capture_lesson {project} — {title}",
                 )
 
