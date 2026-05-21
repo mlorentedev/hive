@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.1](https://github.com/mlorentedev/hive/compare/v1.14.0...v1.14.1) (2026-05-21)
+
+
+### Documentation
+
+* post-merge cleanup for commit-policy + ghost-response (HIVE-104) ([#107](https://github.com/mlorentedev/hive/issues/107)) ([277702f](https://github.com/mlorentedev/hive/commit/277702f91b2cd6544f6e4d71aaefe94aa3130f13))
+
 ## [1.14.0](https://github.com/mlorentedev/hive/compare/v1.13.0...v1.14.0) (2026-05-21)
 
 
