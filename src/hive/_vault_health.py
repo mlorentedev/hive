@@ -15,6 +15,7 @@ from hive._helpers import (
     _strip_code,
     _vault_guard,
     count_stale_from,
+    detect_obsidian_git,
     project_not_found,
     scan_project,
     track,
@@ -123,6 +124,20 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
         found_any = True
         lines.append("## Duplicate Names (BFS resolution warning)")
         lines.extend(dup_lines)
+        lines.append("")
+
+    # ── External committer (HIVE-104 Fase B1) ──
+    obsidian_git = detect_obsidian_git(ctx.vault)
+    if obsidian_git is not None:
+        found_any = True
+        lines.append("## external_committer")
+        lines.append('- name: "obsidian-git"')
+        lines.append(f"- commit_interval: {obsidian_git['commit_interval']} min")
+        lines.append(
+            "- note: obsidian-git is active — `vault_write(commit=False)` "
+            "and `vault_patch(commit=False)` are safe; the plugin will "
+            "auto-commit on its interval."
+        )
         lines.append("")
 
     # ── Ghost-response counter (HIVE-104 Fase C) ──

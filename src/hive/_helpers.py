@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import json
 import logging
 import re
 import subprocess
@@ -767,6 +768,102 @@ def _git_commit(
             )
     finally:
         _GIT_LOCK.release()
+
+
+def _git_commit_all(
+    vault_path: Path, message: str,
+) -> tuple[str, str]:
+    """Stage every change in the vault and create one commit.
+
+    Returns ``(status, detail)`` where ``status`` is one of:
+    - ``"committed"`` — a new commit was created; ``detail`` is the SHA.
+    - ``"clean"`` — nothing to commit; ``detail`` is an empty string.
+    - ``"error"`` — git failed; ``detail`` is the human-readable reason.
+
+    Used by the ``vault_commit`` MCP tool to flush the working tree
+    accumulated by ``commit=False`` writes (HIVE-104 Fase B1).
+    """
+    safe_msg = message.replace("\n", " ").replace("\r", " ") or "vault: batch update"
+    if not _GIT_LOCK.acquire(timeout=_LOCK_TIMEOUT):
+        return "error", "thread lock timeout"
+    try:
+        try:
+            with _git_filelock(vault_path).acquire(timeout=_LOCK_TIMEOUT):
+                porcelain = subprocess.run(
+                    ["git", "status", "--porcelain"],
+                    cwd=vault_path,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=30,
+                )
+                if not porcelain.stdout.strip():
+                    return "clean", ""
+                subprocess.run(
+                    ["git", "add", "-A"],
+                    cwd=vault_path,
+                    capture_output=True,
+                    check=True,
+                    timeout=30,
+                )
+                subprocess.run(
+                    ["git", "commit", "-m", safe_msg],
+                    cwd=vault_path,
+                    capture_output=True,
+                    check=True,
+                    timeout=30,
+                )
+                rev = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=vault_path,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=30,
+                )
+                return "committed", rev.stdout.strip()
+        except filelock.Timeout:
+            return "error", "inter-process lock timeout"
+        except subprocess.CalledProcessError as exc:
+            stderr = exc.stderr.decode("utf-8", "replace") if exc.stderr else ""
+            return "error", f"git failed: {stderr.strip() or exc!s}"
+        except subprocess.TimeoutExpired:
+            return "error", "git command timed out"
+        except Exception as exc:
+            return "error", f"unexpected: {type(exc).__name__}: {exc}"
+    finally:
+        _GIT_LOCK.release()
+
+
+def detect_obsidian_git(vault_path: Path) -> dict[str, int] | None:
+    """Return obsidian-git config when the plugin is active in this vault.
+
+    Reads ``<vault>/.obsidian/plugins/obsidian-git/data.json`` (the
+    plugin's persisted settings file). Returns ``{"commit_interval": N}``
+    when the file is present, parseable, and ``commitInterval > 0``.
+    Returns ``None`` otherwise.
+
+    All path joining goes through :class:`pathlib.Path` so the same
+    code works on POSIX and Windows hosts (Risk #4: the maintainer
+    rotates across Linux, macOS, and Windows daily; a hardcoded
+    forward-slash would silently miss the file on Windows and disable
+    the auto-detection feature without any error).
+    """
+    data_file = vault_path / ".obsidian" / "plugins" / "obsidian-git" / "data.json"
+    try:
+        raw = data_file.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        cfg = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    interval = cfg.get("commitInterval")
+    if not isinstance(interval, int) or interval <= 0:
+        return None
+    return {"commit_interval": interval}
 
 
 _GIT_CACHE_TTL_S = 300.0  # 5 min — invalidated earlier if HEAD changes

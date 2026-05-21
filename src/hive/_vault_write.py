@@ -10,6 +10,7 @@ from hive._helpers import (
     WriteLockTimeout,
     _check_path_boundary,
     _git_commit,
+    _git_commit_all,
     _make_frontmatter,
     _match_and_replace,
     _resolve_project_dir,
@@ -42,6 +43,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         section: str = "",
         path: str = "",
         doc_type: str = "",
+        commit: bool = True,
     ) -> str:
         """Write to the vault: append, replace a section, or create a new file.
 
@@ -56,6 +58,13 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             section: Section shortcut (context, tasks, roadmap, lessons). For append/replace.
             path: Relative path for new file. For create mode.
             doc_type: Document type for frontmatter. For create mode.
+            commit: If True (default), auto-commit to git. If False, write to
+                disk but leave the file dirty so the caller can batch many
+                writes into one commit via the ``vault_commit`` tool, or let
+                obsidian-git's auto-commit pick it up. Durability contract:
+                files are persisted to disk regardless; only the *commit* is
+                deferred. A crash before the next flush loses the commit, not
+                the file content.
         """  # noqa: E501
         guard = _vault_guard(ctx)
         if guard:
@@ -122,10 +131,11 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
                     rel = filepath.relative_to(ctx.vault)
                     display = "00_meta" if project == "_meta" else project
-                    _git_commit(
-                        ctx.vault, [rel],
-                        f"vault: create {display}/{path}",
-                    )
+                    if commit:
+                        _git_commit(
+                            ctx.vault, [rel],
+                            f"vault: create {display}/{path}",
+                        )
             except WriteLockTimeout as exc:
                 return track(
                     ctx, "vault_write",
@@ -133,9 +143,10 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     project,
                 )
 
+            suffix = "" if commit else " (uncommitted — call vault_commit to flush)"
             return track(
                 ctx, "vault_write",
-                f"Created {project}/{path} (type: {doc_type}).",
+                f"Created {project}/{path} (type: {doc_type}).{suffix}",
                 project, path,
             )
 
@@ -189,9 +200,11 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     )
 
                 rel = filepath.relative_to(ctx.vault)
-                _git_commit(
-                    ctx.vault, [rel], f"vault: update {project}/{section}",
-                )
+                if commit:
+                    _git_commit(
+                        ctx.vault, [rel],
+                        f"vault: update {project}/{section}",
+                    )
         except WriteLockTimeout as exc:
             return track(
                 ctx, "vault_write",
@@ -199,9 +212,10 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 project,
             )
 
+        suffix = "" if commit else " (uncommitted — call vault_commit to flush)"
         return track(
             ctx, "vault_write",
-            f"Updated {project}/{section} ({operation}).",
+            f"Updated {project}/{section} ({operation}).{suffix}",
             project, section,
         )
 
@@ -213,6 +227,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         find: str = "",
         replace: str = "",
         patches: list[dict[str, str]] = [],  # noqa: B006
+        commit: bool = True,
     ) -> str:
         """Surgical find-and-replace in a vault file with auto git commit.
 
@@ -233,6 +248,10 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             find: Exact text to find (single mode). Empty = not set.
             replace: Replacement text (single mode). Empty = not set.
             patches: List of {"find", "replace"} dicts (multi mode).
+            commit: If True (default), auto-commit. If False, write to disk
+                without committing — useful for batching many patches into
+                one ``vault_commit`` flush. See ``vault_write`` docstring for
+                the durability contract.
         """
         guard = _vault_guard(ctx)
         if guard:
@@ -328,9 +347,11 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
                 rel = filepath.relative_to(ctx.vault)
                 n = len(patch_list)
-                _git_commit(
-                    ctx.vault, [rel], f"vault: patch {project}/{path}",
-                )
+                if commit:
+                    _git_commit(
+                        ctx.vault, [rel],
+                        f"vault: patch {project}/{path}",
+                    )
         except WriteLockTimeout as exc:
             return track(
                 ctx, "vault_patch",
@@ -339,6 +360,45 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             )
 
         noun = "patch" if n == 1 else "patches"
+        suffix = "" if commit else " (uncommitted — call vault_commit to flush)"
         return track(ctx, "vault_patch",
-                     f"Applied {n} {noun} to {project}/{path}.",
+                     f"Applied {n} {noun} to {project}/{path}.{suffix}",
                      project, path)
+
+    @mcp.tool(annotations=_WRITE)
+    @wrap_sync_tool(ctx, "vault_commit")
+    def vault_commit(message: str = "") -> str:
+        """Stage everything in the vault and create one commit.
+
+        Companion to ``vault_write(commit=False)`` and
+        ``vault_patch(commit=False)``: callers that opt out of per-write
+        commits batch many writes and then flush with a single
+        ``vault_commit`` call.
+
+        Returns the new commit SHA on success, a clean-tree notice when
+        there is nothing to commit, or a human-readable error.
+
+        Args:
+            message: Commit message. Empty defaults to "vault: batch update".
+        """
+        guard = _vault_guard(ctx)
+        if guard:
+            return track(ctx, "vault_commit", guard)
+
+        try:
+            with vault_write_lock(ctx.vault):
+                status, detail = _git_commit_all(ctx.vault, message)
+        except WriteLockTimeout as exc:
+            return track(
+                ctx, "vault_commit",
+                f"Server busy — {exc.reason}. Retry shortly.",
+            )
+
+        if status == "committed":
+            return track(ctx, "vault_commit", f"Committed {detail}.")
+        if status == "clean":
+            return track(
+                ctx, "vault_commit",
+                "Working tree clean — nothing to commit.",
+            )
+        return track(ctx, "vault_commit", f"Commit failed: {detail}")
