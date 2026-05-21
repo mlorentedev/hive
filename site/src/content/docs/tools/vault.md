@@ -133,7 +133,7 @@ Issues are categorized as `[error]` or `[warning]` with file path and descriptio
 
 ## vault_write
 
-Create, append, or replace vault files with validation and auto git commit.
+Create, append, or replace vault files with frontmatter validation. Auto-commits to git by default; pass `commit=False` to defer the commit and flush a batch later via [`vault_commit`](#vault_commit).
 
 ```python
 # Append to an existing file

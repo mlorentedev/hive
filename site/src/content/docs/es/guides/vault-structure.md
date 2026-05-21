@@ -116,10 +116,14 @@ tags: [python, architecture]
 
 ## Integración con Git
 
-Todas las operaciones de escritura (`vault_write`, `vault_patch`, `capture_lesson`) hacen auto-commit a git. Esto asegura:
+Por defecto, todas las operaciones de escritura (`vault_write`, `vault_patch`, `capture_lesson`) hacen auto-commit a git. Esto asegura:
 
 - Historial completo de cambios
 - `vault_search(since_days=N)` puede encontrar archivos modificados recientemente
 - No se necesita gestión manual de git
 
 Tu directorio del vault debe ser un repositorio git. Si no lo es, ejecuta `git init` en la raíz de tu vault.
+
+### Diferir commits para escrituras en lote
+
+Para operaciones masivas (refactors grandes, scaffolding de specs, importación de muchas lecciones), pasar `commit=False` a `vault_write` / `vault_patch` escribe a disco pero omite el `git commit` por llamada. Haz flush de los cambios acumulados más tarde con `vault_commit(message="...")`. Esto reduce el coste por llamada de ~150ms a ~5–15ms; ver [Configuración → Configuración recomendada](/es/configuration/#configuración-recomendada) para el pairing con el plugin obsidian-git y el contrato de durabilidad.

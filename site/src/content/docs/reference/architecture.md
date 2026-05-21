@@ -68,7 +68,9 @@ Vault and worker functionality are served from a single FastMCP instance. Intern
 
 ### Git Auto-Commit
 
-All vault writes auto-commit to git. This provides full history and enables `vault_search(since_days=N)` to detect changes via `git log`.
+By default, all vault writes auto-commit to git. This provides full history and enables `vault_search(since_days=N)` to detect changes via `git log`.
+
+For bulk flows, `vault_write(commit=False)` and `vault_patch(commit=False)` write to disk but defer the commit; a later `vault_commit(message=...)` call flushes the working tree in one shot. When the obsidian-git plugin is detected in the vault (via `.obsidian/plugins/obsidian-git/data.json`), `vault_health` surfaces an `external_committer` block so callers know the auto-commit interval is already covered by the plugin.
 
 ### Budget Controls
 
