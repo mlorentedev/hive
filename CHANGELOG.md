@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.0](https://github.com/mlorentedev/hive/compare/v1.13.0...v1.14.0) (2026-05-21)
+
+
+### Features
+
+* **hive:** HIVE-104 write throughput (commit coalescer + observable shim + opt-in batching) ([#104](https://github.com/mlorentedev/hive/issues/104)) ([953b608](https://github.com/mlorentedev/hive/commit/953b60837b24334130aaa57010b2b7489dbcf552))
+
 ## [1.13.0](https://github.com/mlorentedev/hive/compare/v1.12.10...v1.13.0) (2026-05-20)
 
 
