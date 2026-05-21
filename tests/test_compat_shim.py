@@ -210,3 +210,79 @@ async def test_classify_cancellation_race(tmp_path: Path) -> None:
 
     total = sum(counts.values())
     assert total == iterations, f"lost iterations: total={total}, expected={iterations}"
+
+
+# ── Fase C: observable suppression counter ─────────────────────────────
+#
+# Counter state is reset around every test by the autouse
+# ``_reset_ghost_response_counter`` fixture in ``conftest.py``.
+
+
+class _FakeResponder:
+    """Minimal stand-in for mcp.shared.session.RequestResponder.
+
+    The shim only reads ``_entered``, ``_completed`` and ``request_id``;
+    everything else upstream is irrelevant for the suppression path.
+    """
+
+    def __init__(self, request_id: int = 7, *, completed: bool = True) -> None:
+        self._entered = True
+        self._completed = completed
+        self.request_id = request_id
+
+
+@pytest.mark.asyncio
+async def test_ghost_response_counter_records_and_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Suppressed late respond() emits WARNING and increments counter."""
+    import logging
+
+    from hive import _compat as _hc
+
+    async def _noop_original(self: object, response: object) -> None:
+        raise AssertionError("original respond should not be called")
+
+    patched = _hc._make_patched_respond(_noop_original)
+    responder = _FakeResponder(request_id=42, completed=True)
+
+    with caplog.at_level(logging.WARNING, logger="hive._compat"):
+        await patched(responder, response=object())
+
+    snap = _hc.GHOST_RESPONSES.snapshot()
+    assert snap["total"] == 1
+    assert snap["last_tool"] is None or isinstance(snap["last_tool"], str)
+    assert isinstance(snap["last_seen"], str)
+    assert any(
+        "mcp.ghost_response.suppressed_after_cancel_ack" in rec.message
+        for rec in caplog.records
+    ), [r.message for r in caplog.records]
+
+
+@pytest.mark.asyncio
+async def test_ghost_response_counter_passes_through_when_not_completed(
+) -> None:
+    """Not-yet-completed responder must call original respond — no count bump."""
+    from hive import _compat as _hc
+
+    seen: list[object] = []
+
+    async def _capture(self: object, response: object) -> None:
+        seen.append(response)
+
+    patched = _hc._make_patched_respond(_capture)
+    responder = _FakeResponder(request_id=1, completed=False)
+
+    payload = object()
+    await patched(responder, response=payload)
+
+    assert seen == [payload]
+    assert _hc.GHOST_RESPONSES.snapshot()["total"] == 0
+
+
+def test_ghost_response_snapshot_defaults_empty() -> None:
+    """Fresh counter snapshot has total=0 and null last_* fields."""
+    from hive import _compat as _hc
+
+    snap = _hc.GHOST_RESPONSES.snapshot()
+    assert snap == {"total": 0, "last_seen": None, "last_tool": None}

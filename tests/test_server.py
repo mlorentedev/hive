@@ -554,6 +554,34 @@ class TestVaultHealth:
         assert "stale files" in _text(result).lower()
         assert "no-created.md" in _text(result)
 
+    # -- ghost-response counter surface (HIVE-104 Fase C) --
+
+    async def test_ghost_responses_block_when_counter_nonzero(
+        self, vault_mcp: FastMCP,
+    ) -> None:
+        """When _compat.GHOST_RESPONSES has entries, vault_health surfaces them."""
+        from hive import _compat as _hc
+
+        _hc.GHOST_RESPONSES.reset()
+        try:
+            _hc.GHOST_RESPONSES.record("vault_patch")
+            result = _text(await vault_mcp.call_tool("vault_health", {}))
+            assert "ghost_responses" in result
+            assert "total: 1" in result
+            assert "vault_patch" in result
+        finally:
+            _hc.GHOST_RESPONSES.reset()
+
+    async def test_ghost_responses_block_omitted_when_zero(
+        self, vault_mcp: FastMCP,
+    ) -> None:
+        """When no ghost responses recorded, the block is omitted."""
+        from hive import _compat as _hc
+
+        _hc.GHOST_RESPONSES.reset()
+        result = _text(await vault_mcp.call_tool("vault_health", {}))
+        assert "ghost_responses" not in result
+
 
 # ── vault_write (update operations, with real YAML frontmatter validation) ────
 

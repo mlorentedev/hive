@@ -125,6 +125,21 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
         lines.extend(dup_lines)
         lines.append("")
 
+    # ── Ghost-response counter (HIVE-104 Fase C) ──
+    from hive._compat import GHOST_RESPONSES
+    snap = GHOST_RESPONSES.snapshot()
+    if isinstance(snap.get("total"), int) and snap["total"] > 0:  # type: ignore[operator]
+        found_any = True
+        lines.append("## ghost_responses")
+        lines.append(f"- total: {snap['total']}")
+        lines.append(f"- last_seen: {snap['last_seen']}")
+        lines.append(f"- last_tool: {snap['last_tool'] or '<unknown>'}")
+        lines.append(
+            "- note: ErrorData ack does NOT imply rollback — verify state "
+            "via `vault_query`, do not retry."
+        )
+        lines.append("")
+
     if not found_any:
         return "No projects found in vault."
     return "\n".join(lines)

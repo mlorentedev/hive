@@ -194,3 +194,18 @@ def ollama() -> OllamaClient:
 def openrouter() -> OpenRouterClient:
     """OpenRouter client for worker tests (methods are mocked per-test)."""
     return OpenRouterClient(api_key="sk-test", default_model="qwen/qwen3-coder:free")
+
+
+@pytest.fixture(autouse=True)
+def _reset_ghost_response_counter() -> Generator[None, None, None]:
+    """Reset the module-level ghost-response counter around every test.
+
+    Prevents leakage of the singleton state (``hive._compat.GHOST_RESPONSES``)
+    across tests — a test that records a suppression must not affect a later
+    test that asserts the absence of the ``ghost_responses`` block.
+    """
+    from hive import _compat as _hc
+
+    _hc.GHOST_RESPONSES.reset()
+    yield
+    _hc.GHOST_RESPONSES.reset()
