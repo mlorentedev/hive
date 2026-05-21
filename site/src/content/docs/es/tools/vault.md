@@ -133,7 +133,7 @@ Los problemas se categorizan como `[error]` o `[warning]` con ruta del archivo y
 
 ## vault_write
 
-Crea, agrega o reemplaza archivos del vault con validación y auto-commit a git.
+Crea, agrega o reemplaza archivos del vault con validación de frontmatter. Hace auto-commit a git por defecto; pasa `commit=False` para diferir el commit y hacer flush de un lote más tarde vía [`vault_commit`](#vault_commit).
 
 ```python
 # Agregar a un archivo existente

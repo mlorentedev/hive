@@ -432,6 +432,170 @@ class TestSessionSimulations:
             assert total < static_tokens, f"{session_name} exceeded static baseline"
 
 
+# ── 4b. Write throughput (HIVE-104 commit-policy benchmark) ────────
+
+
+class TestWriteThroughputBenchmark:
+    """Measures the per-call cost of vault writes with and without coalescing.
+
+    Reproduces the data shown in ``guides/benchmarks.md``. Each test prints a
+    structured line so ``pytest tests/test_benchmark.py -v -s`` can be diffed
+    against earlier runs.
+    """
+
+    @staticmethod
+    def _baseline_write_count() -> int:
+        return 10
+
+    async def test_per_write_vs_batched_commit(
+        self, git_vault: Path,
+    ) -> None:
+        """N writes with default commit=True vs commit=False + one vault_commit."""
+        import time
+
+        n = self._baseline_write_count()
+        mcp = create_server(vault_path=git_vault)
+
+        # Baseline: commit=True per write
+        t0 = time.perf_counter()
+        for i in range(n):
+            await mcp.call_tool(
+                "vault_write",
+                {
+                    "project": "medium-project" if (git_vault / "10_projects"
+                                                   / "medium-project").exists()
+                               else "testproject",
+                    "section": "tasks",
+                    "operation": "append",
+                    "content": f"\n- [ ] baseline write {i}\n",
+                },
+            )
+        baseline_total = time.perf_counter() - t0
+        baseline_per_call = baseline_total / n
+
+        # Batched: commit=False then a single vault_commit flush
+        t0 = time.perf_counter()
+        for i in range(n):
+            await mcp.call_tool(
+                "vault_write",
+                {
+                    "project": "medium-project" if (git_vault / "10_projects"
+                                                   / "medium-project").exists()
+                               else "testproject",
+                    "section": "tasks",
+                    "operation": "append",
+                    "content": f"\n- [ ] batched write {i}\n",
+                    "commit": False,
+                },
+            )
+        batched_writes_total = time.perf_counter() - t0
+        t0 = time.perf_counter()
+        await mcp.call_tool(
+            "vault_commit", {"message": "vault: batched throughput bench"},
+        )
+        flush_total = time.perf_counter() - t0
+        batched_total = batched_writes_total + flush_total
+        batched_per_call_avg = batched_total / n
+        speedup = baseline_total / batched_total if batched_total > 0 else 0.0
+
+        print(f"\n{'=' * 72}")
+        print("HIVE-104 write throughput — per-write vs batched commit")
+        print(f"{'=' * 72}")
+        print(f"  N writes              : {n}")
+        print(f"  Baseline (commit=True): "
+              f"{baseline_total * 1000:.1f} ms total "
+              f"({baseline_per_call * 1000:.1f} ms / call)")
+        print(f"  Batched (commit=False): "
+              f"{batched_writes_total * 1000:.1f} ms writes + "
+              f"{flush_total * 1000:.1f} ms flush = "
+              f"{batched_total * 1000:.1f} ms total "
+              f"({batched_per_call_avg * 1000:.1f} ms / call avg)")
+        print(f"  Speed-up              : {speedup:.1f}x")
+
+        assert baseline_total > 0
+        assert batched_total > 0
+
+    async def test_multi_patch_vs_sequential_patches(
+        self, git_vault: Path,
+    ) -> None:
+        """One vault_patch with N patches vs N vault_patch calls."""
+        import time
+
+        n = self._baseline_write_count()
+
+        # Sequential: N independent vault_patch calls (each does add+commit)
+        mcp_seq = create_server(vault_path=git_vault)
+        # Seed N unique tokens we can patch back later.
+        seed_content = "\n".join(f"BENCH-MARKER-{i}=before" for i in range(n))
+        await mcp_seq.call_tool(
+            "vault_write",
+            {
+                "project": "testproject",
+                "section": "tasks",
+                "operation": "append",
+                "content": f"\n{seed_content}\n",
+            },
+        )
+        t0 = time.perf_counter()
+        for i in range(n):
+            await mcp_seq.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "find": f"BENCH-MARKER-{i}=before",
+                    "replace": f"BENCH-MARKER-{i}=after",
+                },
+            )
+        sequential_total = time.perf_counter() - t0
+
+        # Multi-patch: same N edits in one vault_patch call (one add+commit)
+        mcp_multi = create_server(vault_path=git_vault)
+        seed_content2 = "\n".join(f"BENCH2-MARKER-{i}=before" for i in range(n))
+        await mcp_multi.call_tool(
+            "vault_write",
+            {
+                "project": "testproject",
+                "section": "tasks",
+                "operation": "append",
+                "content": f"\n{seed_content2}\n",
+            },
+        )
+        patches = [
+            {
+                "find": f"BENCH2-MARKER-{i}=before",
+                "replace": f"BENCH2-MARKER-{i}=after",
+            }
+            for i in range(n)
+        ]
+        t0 = time.perf_counter()
+        await mcp_multi.call_tool(
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "11-tasks.md",
+                "patches": patches,
+            },
+        )
+        multi_total = time.perf_counter() - t0
+        speedup = sequential_total / multi_total if multi_total > 0 else 0.0
+
+        print(f"\n{'=' * 72}")
+        print("HIVE-104 write throughput — N sequential patches vs 1 multi-patch")
+        print(f"{'=' * 72}")
+        print(f"  N edits              : {n}")
+        print(f"  Sequential (N calls) : "
+              f"{sequential_total * 1000:.1f} ms total "
+              f"({(sequential_total / n) * 1000:.1f} ms / patch)")
+        print(f"  Multi-patch (1 call) : "
+              f"{multi_total * 1000:.1f} ms total "
+              f"({(multi_total / n) * 1000:.1f} ms / patch avg)")
+        print(f"  Speed-up             : {speedup:.1f}x")
+
+        assert sequential_total > 0
+        assert multi_total > 0
+
+
 # ── 5. Real vault benchmark (smoke) ───────────────────────────────
 
 REAL_VAULT = os.environ.get("VAULT_PATH", os.path.expanduser("~/Projects/knowledge"))

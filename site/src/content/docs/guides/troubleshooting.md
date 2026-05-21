@@ -201,17 +201,53 @@ claude mcp add -s user hive \
 
 **Symptom:** In Claude Code (and likely other MCP hosts), rejecting the very first `mcp__hive__*` permission prompt poisons the transport for the rest of the conversation. Subsequent calls to any Hive tool return `MCP error -32000: Connection closed`, then `No such tool available`. Restarting the conversation recovers, and `claude mcp list` still reports the server as connected at the process level.
 
-**Cause:** A race condition in the upstream `mcp` Python SDK (`mcp.shared.session.RequestResponder.__exit__`). When the client sends `notifications/cancelled` for an in-flight request, the responder's anyio `CancelScope` re-raises a `CancelledError` after the cancellation response has already been sent. That spurious exception propagates to the server's receive loop `task_group` and kills it — the process stays alive but stops reading stdin.
+**Cause:** A race condition in the upstream `mcp` Python SDK around `mcp.shared.session.RequestResponder`. When the client sends `notifications/cancelled` for an in-flight request, two failure modes can fire:
 
-**Fix:** Hive applies a targeted monkey-patch at startup (`src/hive/_compat.py`) that swallows the spurious `CancelledError` once the responder is marked completed. The patch is self-gated: it only triggers in the exact failure mode, so it remains inert once upstream fixes the bug.
+1. The responder's anyio `CancelScope` re-raises a `CancelledError` after the cancellation response has already been sent. That spurious exception propagates to the server's receive loop `task_group` and kills it — the process stays alive but stops reading stdin.
+2. The handler finishes *after* the client has already sent the cancellation, and the late call into `RequestResponder.respond()` fails with `AssertionError("Request already responded to")`. The exception escapes the receive loop and kills the same `task_group`.
 
-Tracked in [issue #75](https://github.com/mlorentedev/hive/issues/75). Regression test in [`tests/test_transport_recovery.py`](https://github.com/mlorentedev/hive/blob/master/tests/test_transport_recovery.py).
+**Fix:** Hive applies two targeted monkey-patches at startup in [`src/hive/_compat.py`](https://github.com/mlorentedev/hive/blob/master/src/hive/_compat.py):
+
+- `RequestResponder.__exit__` — swallows the spurious `CancelledError` once the responder is marked completed.
+- `RequestResponder.respond` — short-circuits the late call with a WARNING log line (`mcp.ghost_response.suppressed_after_cancel_ack`) and bumps a counter exposed in `vault_health`.
+
+Both patches are self-gated to the exact failure mode (`_completed=True`), so they remain inert once upstream fixes the bug.
+
+Tracked in [issue #75](https://github.com/mlorentedev/hive/issues/75) and [upstream python-sdk#2610](https://github.com/modelcontextprotocol/python-sdk/issues/2610). Regression tests: [`tests/test_transport_recovery.py`](https://github.com/mlorentedev/hive/blob/master/tests/test_transport_recovery.py) + [`tests/test_compat_shim.py`](https://github.com/mlorentedev/hive/blob/master/tests/test_compat_shim.py).
 
 **If you still see the disconnect:**
 
-1. Confirm you are on `hive-vault >= 1.13.0` — earlier versions did not ship the patch.
-2. Check `~/.local/share/hive/hive.log` for `Swallowed spurious cancellation on completed responder` debug lines (set `HIVE_LOG_LEVEL=DEBUG` to enable).
+1. Confirm you are on `hive-vault >= 1.14.0` — earlier versions did not ship the second (respond-after-cancel) patch.
+2. Check `~/.local/share/hive/hive.log` for `mcp.ghost_response.suppressed_after_cancel_ack` WARNING lines (always logged) or `Swallowed spurious cancellation on completed responder` debug lines (set `HIVE_LOG_LEVEL=DEBUG` to enable).
 3. As a workaround, always accept the first Hive tool call in a fresh conversation. Later rejections do not break the transport.
+
+## Cancelled a Tool Call but the Vault Changed Anyway
+
+**Symptom:** You (or your client) cancelled a `vault_write` / `vault_patch` / `capture_lesson` call mid-flight — got an `ErrorData` response back saying *"Request cancelled"* — but on the next `vault_query` the file shows the new content as if the operation had succeeded.
+
+**Cause:** This is not a bug, it is a documented semantic mismatch ([ADR-007](https://github.com/mlorentedev/hive/blob/master/docs/architecture/adr-007-mcp-cancellation-response.md), amended twice). When the cancel arrives, the upstream `RequestResponder.cancel()` writes the `ErrorData` frame to the wire immediately — empirically 20/20 times on Linux, see [`tests/test_compat_shim.py::test_classify_cancellation_race`](https://github.com/mlorentedev/hive/blob/master/tests/test_compat_shim.py). But the underlying handler thread keeps running to completion; Hive cannot safely interrupt a partial write (Python `asyncio.timeout` cancels the awaiting coroutine but cannot interrupt the blocking thread). So the disk is mutated **after** the cancel ack reaches the client.
+
+**The ErrorData ack does NOT imply rollback.** The client correctness rule is: *verify state via `vault_query` instead of retrying.* Retrying a `vault_write(operation="append", ...)` after a ghost-response duplicates content; retrying `vault_patch` may produce ambiguous-match errors against the already-applied result.
+
+**How to detect this in your sessions:** call `vault_health` — when ghost responses have occurred, the output includes a block like:
+
+```
+## ghost_responses
+- total: 3
+- last_seen: 2026-05-20T22:14:07+00:00
+- last_tool: vault_patch
+- note: ErrorData ack does NOT imply rollback — verify state via `vault_query`, do not retry.
+```
+
+The counter resets when the server restarts. Each event is also logged at WARNING level with the prefix `mcp.ghost_response.suppressed_after_cancel_ack` plus the tool name and request id.
+
+**Mitigations:**
+
+- Increase `HIVE_TOOL_TIMEOUT` (default 60s) so slow worker calls finish before the client cancels.
+- For batch writes, prefer `vault_write(commit=False)` + `vault_commit` — the per-write cost drops from ~150ms to ~5–15ms, shrinking the cancellation window.
+- After any cancellation: `vault_query(project=..., path=...)` the affected file to inspect the actual disk state before issuing another write.
+
+Available from `hive-vault >= 1.14.0`. The empirical wire-behavior classifier ran 20 iterations on Linux and confirmed scenario (a) — ErrorData wins the race — in 20/20 cases; see ADR-007 Amendment #2 for the full retraction of the earlier "raw send" plan.
 
 ## Getting Help
 

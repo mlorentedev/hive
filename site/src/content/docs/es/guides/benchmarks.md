@@ -62,6 +62,21 @@ Vault real (493K tokens): 5 consultas de contexto de proyecto consumieron 2,925 
 | vault_query | 87-90% | Lecturas completas de sección |
 | session_briefing | 78.5% | Ensamblaje de contexto en cold start |
 
+### Throughput de Escritura (HIVE-104)
+
+Coste wall-clock de escrituras al vault con y sin el coalescer de commits y la opción opt-in `commit=False`. Medido contra el fixture de tests `git_vault` (repo recién inicializado, 10 escrituras por escenario, `pytest tests/test_benchmark.py::TestWriteThroughputBenchmark -v -s`). Los valores absolutos varían con el tamaño del repo y la velocidad del disco; las **ratios** son la señal load-bearing.
+
+| Escenario | Wall-clock total | Por llamada (media) | vs línea base |
+|---|---|---|---|
+| 10 escrituras, `commit=True` (baseline) | 71.7 ms | 7.2 ms | 1.0x |
+| 10 escrituras, `commit=False` + 1 flush `vault_commit` | 15.1 ms (4.9 writes + 10.1 flush) | 1.5 ms | **4.8x** |
+| 10 llamadas `vault_patch` secuenciales, una edición cada una | 72.3 ms | 7.2 ms | 1.0x |
+| 1 llamada `vault_patch` con 10 patches (coalescer) | 7.0 ms | 0.7 ms | **10.4x** |
+
+La ganancia 10.4x del multi-patch llega de forma automática — no requiere cambio de API; pasar `patches=[{...}, {...}]` ya emite exactamente un `git add` y un `git commit` desde HIVE-104. La ganancia 4.8x del batching opt-in requiere pasar `commit=False` y llamar a `vault_commit` al final; combínalo con el plugin obsidian-git para sacar el flush completamente de la ruta sincrónica de la herramienta (ver [Configuración → Configuración recomendada](/es/configuration/#configuración-recomendada)).
+
+> En un vault bajo contención (varios procesos Hive, `.git/index` grande, disco lento), el coste base por llamada puede subir a ~150 ms; las mismas ratios de speed-up siguen aplicándose.
+
 ## Recomendaciones
 
 Basado en estos resultados:
@@ -71,6 +86,7 @@ Basado en estos resultados:
 3. **session_briefing para cold starts** — a pesar de menor S/N (78.5%), ensambla contexto, tareas y salud en una llamada (~1,300 tokens).
 4. **Saturación en 500-1000 líneas** — valores por encima de 1000 no aportan beneficio con los tamaños actuales de vault. El archivo más grande del vault real tiene 878 líneas.
 5. **Sobreescribir max_lines por consulta** — para consultas rápidas, usa `max_lines=200`. Para lecturas completas, usa `max_lines=0` (sin límite).
+6. **Agrupa escrituras masivas** — para cualquier flujo que haga más de dos escrituras consecutivas al vault, pasa `commit=False` y termina con un único `vault_commit`. La forma multi-patch de `vault_patch` siempre va batched.
 
 ## Ejecutar los Benchmarks
 
