@@ -315,13 +315,14 @@ Vault Sync Plan:
 **Wait for explicit user approval before proceeding.**
 
 ### Step 5 — Apply Updates
-- Context/tasks: `vault_write(operation="replace", ...)` for factual updates
-- Lessons: `vault_write(operation="append", ...)` for new entries only
+- Context/tasks: `vault_write(operation="replace", commit=False, ...)` for factual updates
+- Lessons: `vault_write(operation="append", commit=False, ...)` for new entries only
+- After all updates, flush with a single `vault_commit(message="vault-sync: <project> <date>")`
 - Never delete vault content without explicit user request
 
 ### Step 6 — Verify
 - `vault_query` the updated sections to confirm changes applied correctly
-- Report what was updated
+- Report what was updated and the commit SHA returned by `vault_commit`
 
 ## Rules
 
@@ -329,7 +330,9 @@ Vault Sync Plan:
 - Use `replace` for context and tasks (factual state)
 - Use `append` for lessons (never modify existing)
 - All content in English
-- One vault_write call per section to minimize git commits"""
+- Batch with `commit=False` plus one `vault_commit` flush at the end —
+  avoids N round-trips through `git add` / `git commit` and keeps the
+  vault history tidy"""
 
     @mcp.prompt
     def benchmark() -> str:
