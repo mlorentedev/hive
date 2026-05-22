@@ -39,6 +39,35 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
+# HIVE-115 / issue #114 — defensive validation against XML-tag leakage
+# from malformed agent tool invocations (e.g. mixing
+# ``<parameter name="X">...</X>`` with proper ``...</parameter>``).
+# Warn-don't-reject: flag the corruption, keep the write so the agent's
+# mid-turn context is not lost; the HTML comment marker is visible
+# during manual review of 90-lessons.md.
+SUSPECT_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"</context>"),
+    re.compile(r"</parameter>"),
+    re.compile(r"<parameter\s+name="),
+    re.compile(r"</invoke>"),
+)
+_CORRUPTION_COMMENT = (
+    "<!-- POSSIBLE_CORRUPTION: detected XML-tag leak in input; "
+    "review and clean manually -->\n"
+)
+
+
+def _scan_for_xml_leak(*fields: str) -> bool:
+    """Return True if any SUSPECT pattern appears in any field."""
+    for value in fields:
+        if not value:
+            continue
+        for pattern in SUSPECT_PATTERNS:
+            if pattern.search(value):
+                return True
+    return False
+
+
 _EXTRACT_PROMPT = (
     "Extract key lessons from the following text. A lesson is a decision, "
     "bug root cause, or pattern choice worth remembering.\n\n"
@@ -86,15 +115,24 @@ def _write_lesson(
     if f"] {title}\n" in existing:
         return "skipped", f"Lesson already exists: '{title}'. Skipping."
 
+    # HIVE-115 / issue #114: scan inputs for XML-leak shapes BEFORE
+    # building the entry. Warn-don't-reject preserves the agent's
+    # mid-turn context; the HTML comment marker is visible during
+    # manual review.
+    corruption_detected = _scan_for_xml_leak(title, context, problem, solution)
+
     tag_str = " ".join(f"`#{t}`" for t in tags)
-    entry = (
-        f"\n### [{date.today().isoformat()}] {title}\n"
-        f"**Context:** {context}\n"
-        f"**Problem:** {problem}\n"
-        f"**Solution:** {solution}\n"
-    )
+    entry_lines = [f"\n### [{date.today().isoformat()}] {title}\n"]
+    if corruption_detected:
+        entry_lines.append(_CORRUPTION_COMMENT)
+    entry_lines.extend([
+        f"**Context:** {context}\n",
+        f"**Problem:** {problem}\n",
+        f"**Solution:** {solution}\n",
+    ])
     if tag_str:
-        entry += f"**Tags:** {tag_str}\n"
+        entry_lines.append(f"**Tags:** {tag_str}\n")
+    entry = "".join(entry_lines)
 
     try:
         if not lessons_file.exists():
@@ -108,7 +146,16 @@ def _write_lesson(
     except OSError as exc:
         return "error", format_io_error(exc, f"{project}/90-lessons.md", "write")
 
-    return "written", f"Lesson captured: '{title}' → {project}/90-lessons.md"
+    suffix = (
+        " [WARNING: POSSIBLE_CORRUPTION marker added — XML-tag leak detected "
+        "in input fields; review 90-lessons.md and clean manually]"
+        if corruption_detected
+        else ""
+    )
+    return (
+        "written",
+        f"Lesson captured: '{title}' → {project}/90-lessons.md{suffix}",
+    )
 
 
 def _parse_lessons_json(raw: str) -> list[dict[str, object]]:

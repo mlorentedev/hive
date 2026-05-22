@@ -1076,6 +1076,93 @@ class TestCaptureLesson:
         assert "capture_lesson" in log.stdout or "lesson" in log.stdout.lower()
 
 
+class TestCaptureLessonXmlDefense:
+    """HIVE-115 / issue #114: defensive validation against XML-tag leakage.
+
+    Malformed agent tool invocations can mix ``<parameter name="X">...</X>``
+    with the proper ``<parameter name="X">...</parameter>`` syntax. When the
+    closing tag never matches, the parser swallows subsequent XML into the
+    field value, producing corrupted vault entries. Hive does not control
+    the parser, but it CAN detect known-bad shapes at the input boundary
+    and warn the caller without rejecting the write (warn-don't-reject so
+    the agent's mid-turn context is preserved).
+    """
+
+    @pytest.mark.parametrize(
+        ("field_name", "field_value"),
+        [
+            ("context", "Some context </context> leaked"),
+            ("problem", "Issue with <parameter name='foo'> sneaking in"),
+            ("solution", "Fixed by </parameter> handling"),
+            ("title", "Bad title with </invoke> tag"),
+        ],
+    )
+    async def test_xml_leak_emits_warning_and_corruption_marker(
+        self,
+        git_vault: Path,
+        field_name: str,
+        field_value: str,
+    ) -> None:
+        """SUSPECT pattern in any field → warning surfaced + marker in body.
+
+        Lesson is still written (warn-don't-reject). The HTML comment
+        marker makes the corruption visible during manual review of
+        90-lessons.md.
+        """
+        mcp = create_server(vault_path=git_vault)
+        payload = {
+            "project": "testproject",
+            "title": f"Lesson with leak via {field_name}",
+            "context": "ctx",
+            "problem": "prob",
+            "solution": "sol",
+            "tags": [],
+        }
+        payload[field_name] = field_value
+
+        result = await mcp.call_tool("capture_lesson", payload)
+        text = _text(result)
+
+        # Response surfaces a warning that the agent / operator can see.
+        assert "WARNING" in text or "POSSIBLE_CORRUPTION" in text, (
+            f"expected XML-leak warning in response, got: {text}"
+        )
+
+        # The lesson WAS written (warn-don't-reject contract).
+        lessons = (
+            git_vault / "10_projects" / "testproject" / "90-lessons.md"
+        ).read_text()
+        # HTML comment marker visible during manual review.
+        assert "POSSIBLE_CORRUPTION" in lessons, (
+            "expected POSSIBLE_CORRUPTION marker in lessons file"
+        )
+
+    async def test_clean_lesson_has_no_warning_or_marker(
+        self, git_vault: Path,
+    ) -> None:
+        """Normal lesson body without suspect patterns → no warning, no marker."""
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "capture_lesson",
+            {
+                "project": "testproject",
+                "title": "Clean lesson without XML",
+                "context": "Normal context with no suspicious tags",
+                "problem": "Normal problem statement",
+                "solution": "Normal solution text",
+                "tags": ["clean"],
+            },
+        )
+        text = _text(result)
+        assert "WARNING" not in text
+        assert "POSSIBLE_CORRUPTION" not in text
+
+        lessons = (
+            git_vault / "10_projects" / "testproject" / "90-lessons.md"
+        ).read_text()
+        assert "POSSIBLE_CORRUPTION" not in lessons
+
+
 # ── vault_write (create operations) ──────────────────────────────────
 
 
