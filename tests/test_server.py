@@ -736,6 +736,86 @@ class TestVaultHealthRuntime:
             or "Total calls:" in result
         )
 
+    async def test_runtime_block_includes_wal_size_bytes(
+        self, vault_mcp: FastMCP,
+    ) -> None:
+        """HIVE-115 / ADR-009: wal_size_bytes field present as non-negative int."""
+        import re
+
+        result = _text(
+            await vault_mcp.call_tool(
+                "vault_health", {"include_runtime": True},
+            ),
+        )
+        m = re.search(r"wal_size_bytes:\s*(\d+)", result)
+        assert m is not None, f"wal_size_bytes field missing in:\n{result}"
+        assert int(m.group(1)) >= 0
+
+    async def test_runtime_block_includes_competing_pid_count(
+        self, vault_mcp: FastMCP,
+    ) -> None:
+        """HIVE-115 / ADR-009: competing_pid_count field present (non-negative int)."""
+        import re
+
+        result = _text(
+            await vault_mcp.call_tool(
+                "vault_health", {"include_runtime": True},
+            ),
+        )
+        m = re.search(r"competing_pid_count:\s*(\d+)", result)
+        assert m is not None, f"competing_pid_count field missing in:\n{result}"
+        assert int(m.group(1)) >= 0
+
+    async def test_runtime_block_includes_last_git_lock_wait_ms(
+        self, vault_mcp: FastMCP,
+    ) -> None:
+        """HIVE-115 / ADR-010: last_git_lock_wait_ms surfaces mean + p99 + samples."""
+        result = _text(
+            await vault_mcp.call_tool(
+                "vault_health", {"include_runtime": True},
+            ),
+        )
+        assert "last_git_lock_wait_ms:" in result
+        assert "mean:" in result
+        assert "p99:" in result
+        assert "samples:" in result
+
+    async def test_runtime_block_includes_obsidian_git_present(
+        self, vault_mcp: FastMCP,
+    ) -> None:
+        """HIVE-115 / ADR-010: obsidian_git_present field is true/false."""
+        import re
+
+        result = _text(
+            await vault_mcp.call_tool(
+                "vault_health", {"include_runtime": True},
+            ),
+        )
+        m = re.search(r"obsidian_git_present:\s*(true|false)", result)
+        assert m is not None, f"obsidian_git_present field missing in:\n{result}"
+
+    async def test_runtime_block_obsidian_git_present_when_plugin_active(
+        self, mock_vault: Path,
+    ) -> None:
+        """When the obsidian-git plugin config exists, presence flips to true."""
+        import json
+
+        plugin_dir = mock_vault / ".obsidian" / "plugins" / "obsidian-git"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "data.json").write_text(
+            json.dumps({"commitInterval": 10}), encoding="utf-8",
+        )
+        mcp = create_server(vault_path=mock_vault)
+        try:
+            result = _text(
+                await mcp.call_tool(
+                    "vault_health", {"include_runtime": True},
+                ),
+            )
+            assert "obsidian_git_present: true" in result
+        finally:
+            _close_server(mcp)
+
     async def test_runtime_budget_does_not_leak_api_key(
         self, mock_vault: Path,
     ) -> None:

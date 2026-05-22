@@ -249,11 +249,102 @@ El contador se reinicia cuando el servidor reinicia. Cada evento también se log
 
 Disponible desde `hive-vault >= 1.14.0`. El clasificador empírico de comportamiento del wire corrió 20 iteraciones en Linux y confirmó el escenario (a) — gana el ErrorData — en 20/20 casos; ver ADR-007 Amendment #2 para la retractación completa del plan "raw send" anterior.
 
-## Obtener Ayuda
+## Contención multi-sesión (3-5 sesiones de Claude Code en paralelo)
+
+**Baseline:** Hive se usa habitualmente con 3-5 sesiones de Claude Code abiertas en paralelo contra el mismo vault. Este es el uso diario base, no un caso extremo. El modelo MCP stdio lanza un subproceso `hive-vault` por sesión, así que 4 ventanas = 4 procesos hermanos compartiendo las mismas DBs SQLite (`~/.local/share/hive/*.db`) y el mismo repo git del vault.
+
+Si esos procesos se acumulan, o si además usas [obsidian-git](https://github.com/Vinzent03/obsidian-git) para auto-backups, pueden aparecer tres síntomas:
+
+- **Bloat del fichero WAL.** `~/.local/share/hive/relevance.db-wal` crece 10-100× el tamaño de la DB en reposo porque los lectores concurrentes impiden que SQLite haga checkpoint del WAL.
+- **Congelaciones silenciosas durante escrituras.** Un `vault_write` o `capture_lesson` tarda 10-30 segundos cuando obsidian-git está auto-comprometiendo en segundo plano (su intervalo de 10 minutos retiene `.git/index.lock` durante pull + commit + push).
+- **Procesos hive zombi.** Una ventana de Claude Code crasheó o se forzó a cerrar, pero su hijo `uvx hive-vault` siguió vivo manteniendo file handles abiertos.
+
+### Inspeccionar el estado actual
+
+Ejecuta `vault_health(include_runtime=True)` desde cualquier sesión. El bloque `## runtime` reporta:
+
+```yaml
+- wal_size_bytes: 4137984          # >5 MB sostenido = contención
+- competing_pid_count: 3            # otros PIDs hive-vault (mismo usuario)
+- last_git_lock_wait_ms:
+  - mean: 12.5
+  - p99: 8234.0                     # p99 > 5000ms = contención
+  - samples: 47
+- obsidian_git_present: true        # committer externo detectado
+```
+
+Sano: `wal_size_bytes` bajo unos pocos MB, `last_git_lock_wait_ms.p99` por debajo de 100ms.
+
+### Detectar un proceso hive zombi
+
+**POSIX (Linux, macOS)** — listar todos los procesos hive y su antigüedad:
+
+```bash
+ps -eo pid,etime,cmd | grep hive-vault | grep -v grep
+```
+
+Inspeccionar qué file handles mantiene un PID específico:
+
+```bash
+lsof -p <PID> | grep hive
+```
+
+Matar un zombi:
+
+```bash
+kill <PID>          # grácil
+kill -9 <PID>       # forzado
+```
+
+**Windows (PowerShell)** — listar procesos hive:
+
+```powershell
+Get-Process | Where-Object { $_.ProcessName -match "hive-vault|python" } |
+  Select-Object Id, StartTime, ProcessName, Path
+```
+
+Matar por PID:
+
+```powershell
+Stop-Process -Id <PID>           # grácil
+Stop-Process -Id <PID> -Force    # forzado
+```
+
+### Ajustar `HIVE_LOCK_TIMEOUT_S`
+
+Valor por defecto `30` segundos. Es el timeout de adquisición del lock usado cuando hive compite por el filelock de git. Limitado a 600 para evitar pies de plomo.
+
+| Escenario | Recomendado | Por qué |
+|---|---|---|
+| Por defecto | `30` | Coincide con el timeout de subprocess; absorbe ticks típicos de obsidian-git |
+| Vault grande + disco lento | `60-90` | El pull + commit + push de obsidian-git puede retener el lock 15-30s en un vault de 50 MB |
+| Red lenta + autoPull=true | `90-120` | El pull de red domina; subir para evitar abandonos |
+| Vault rápido, preferencia fail-fast | `10` | Si prefieres ver errores antes que esperar |
+
+Configurar vía variable de entorno `HIVE_LOCK_TIMEOUT_S=60`.
+
+### Ajustar `HIVE_WAL_CHECKPOINT_INTERVAL_S`
+
+Por defecto `30.0` segundos. Frecuencia con la que cada proceso hive ejecuta `PRAGMA wal_checkpoint(PASSIVE)` para drenar su WAL de SQLite. Menor = drenaje más agresivo; mayor = menos CPU en ticks ociosos.
+
+El default es apropiado para la mayoría. Sube a `120` si observas CPU excesiva en procesos hive ociosos (p. ej. en máquinas con recursos limitados); el trade-off es drenaje del WAL más lento.
+
+### Patrón de cooperación con obsidian-git
+
+Si tu vault usa obsidian-git para auto-backups, las dos herramientas cooperan limpiamente cuando se configuran correctamente:
+
+- Configura el `autoSaveInterval` de obsidian-git a 5-10 minutos (el default está bien).
+- Para flujos con muchas escrituras, prefiere `vault_write(commit=False)` / `vault_patch(commit=False)`. Hive escribe el fichero; obsidian-git lo commitea en su siguiente tick. El coste por escritura baja de ~150ms a ~5-15ms.
+- Usa `vault_commit` solo cuando necesites un flush explícito antes del siguiente tick de obsidian-git (p. ej. antes de cerrar Obsidian).
+- Vigila `vault_health.runtime.last_git_lock_wait_ms.p99`. Si se mantiene por encima de 5000ms, sube `HIVE_LOCK_TIMEOUT_S` para absorber las ventanas más largas.
+
+Una release futura hará la cooperación automática (auto-defer cuando el committer externo esté sano); por ahora es opt-in vía `commit=False`.
+
+## Obtener ayuda
 
 Si tu problema no está listado aquí:
 
-1. Ejecuta `vault_health` para comprobar conectividad del vault y recuentos de archivos — el bloque `## server` al principio reporta la versión en ejecución, python, ruta del vault y presencia de backends, así puedes incluirlo literal en un bug report (no se expone ninguna API key). Añade `include_runtime=True` para uptime, nombres de tools registrados y snapshot del presupuesto OpenRouter.
+1. Ejecuta `vault_health` para comprobar conectividad del vault y recuentos de archivos — el bloque `## server` al principio reporta la versión en ejecución, python, ruta del vault y presencia de backends, así puedes incluirlo literal en un bug report (no se expone ninguna API key). Añade `include_runtime=True` para uptime, nombres de tools registrados, métricas de contención multi-sesión y snapshot del presupuesto OpenRouter.
 2. Ejecuta `worker_status` para comprobar conectividad de proveedores y presupuesto
 3. Revisa `~/.local/share/hive/hive.log` para detalles de errores
 4. Consulta la página de [Configuración](/hive/es/configuration/) para todas las variables de entorno
