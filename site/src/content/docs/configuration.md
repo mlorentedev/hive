@@ -53,6 +53,8 @@ When a tool call is cancelled mid-flight (slow worker, client timeout), the serv
 | `HIVE_STALE_THRESHOLD_DAYS` | `180` | Days before a vault file is flagged as stale |
 | `HIVE_HTTP_TIMEOUT` | `60.0` | HTTP timeout (seconds) for Ollama and OpenRouter |
 | `HIVE_TOOL_TIMEOUT` | `60.0` | Tool-level timeout (seconds) for async worker tools (capture_lesson, delegate_task, worker_status) |
+| `HIVE_LOCK_TIMEOUT_S` | `30` | Git filelock acquire timeout (seconds). Raise to 60-90 on large vaults or under heavy obsidian-git contention. Validated 1..600. |
+| `HIVE_WAL_CHECKPOINT_INTERVAL_S` | `30.0` | Interval between `PRAGMA wal_checkpoint(PASSIVE)` ticks per hive process. Lower = more aggressive WAL drain. Validated >0..3600. |
 | `HIVE_RELEVANCE_ALPHA` | `0.3` | EMA learning rate for adaptive context scoring |
 | `HIVE_RELEVANCE_DECAY` | `0.9` | Session decay factor for relevance scores |
 | `HIVE_RELEVANCE_EPSILON` | `0.15` | Exploration ratio for session_briefing (epsilon-greedy) |
