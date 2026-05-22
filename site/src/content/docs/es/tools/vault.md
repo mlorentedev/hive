@@ -107,10 +107,10 @@ vault_search(query="timeout", rank_by="hybrid")          # α=0.7 BM25 + 0.3 con
 
 ## vault_health
 
-Métricas de salud, detección de drift y estadísticas de uso.
+Identidad del servidor, métricas de salud, detección de drift y estadísticas de uso.
 
 ```python
-# Reporte de salud de todos los proyectos
+# Reporte de salud de todos los proyectos (siempre incluye el bloque ## server)
 vault_health()
 
 # Validar un proyecto específico
@@ -118,7 +118,23 @@ vault_health(project="mi-proyecto", checks=["frontmatter", "stale", "links"], ma
 
 # Incluir estadísticas de uso
 vault_health(include_usage=True, usage_days=30)
+
+# Incluir metadatos de runtime (uptime, tools registrados, presupuesto OpenRouter)
+vault_health(include_runtime=True)
 ```
+
+**Bloque de identidad** (siempre activo, ~5 líneas): Prepended a cada respuesta correcta para que los hosts MCP y operadores puedan responder *"¿qué versión de hive-vault sirve esta sesión?"* sin salir de la conversación.
+
+```text
+## server
+- version: 1.15.0
+- python: 3.12.10
+- vault_path: /home/me/Projects/knowledge
+- backends: {"ollama": true, "openrouter": false}
+- started_at: 2026-05-21T20:33:20+00:00
+```
+
+Los backends se reportan como booleanos de presencia únicamente — **las API keys nunca se embeben**. `ollama` refleja la probe de disponibilidad cacheada; `openrouter` es true cuando se configuró una API key al arrancar.
 
 **Reporte de salud** (por defecto): Recuento de archivos por proyecto, total de líneas, archivos obsoletos (>180 días, configurable vía `HIVE_STALE_THRESHOLD_DAYS`), cobertura de secciones. También detecta **nombres de directorio duplicados** en scopes jerárquicos y advierte qué ruta resolverá BFS.
 
@@ -130,6 +146,8 @@ vault_health(include_usage=True, usage_days=30)
 Los problemas se categorizan como `[error]` o `[warning]` con ruta del archivo y descripción.
 
 **Estadísticas de uso** (`include_usage=True`): Recuento de llamadas a herramientas por herramienta y proyecto, con ahorro estimado de tokens.
+
+**Bloque de runtime** (`include_runtime=True`, opt-in): Diagnósticos dinámicos al final del reporte — uptime en segundos, número + nombres de tools MCP registrados (sanity check de que ningún módulo falló al registrarse), y snapshot del presupuesto OpenRouter (`spent_usd`, `cap_usd`, `period`). Independiente de `include_usage`; ambos pueden combinarse en una sola llamada.
 
 ## vault_write
 

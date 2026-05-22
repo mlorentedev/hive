@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import re
-from datetime import date, timedelta
+import sys
+import time
+from datetime import UTC, date, datetime, timedelta
+from importlib import metadata
 from typing import TYPE_CHECKING
 
 from hive._helpers import (
@@ -40,6 +43,85 @@ _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+?)(?:[|#][^\]]*?)?\]\]")
 _POSIX_CLASS_RE = re.compile(r"^:[a-z]+:$")
 
 
+def _hive_version() -> str:
+    """Return the installed hive-vault version, or a marker for editable installs."""
+    try:
+        return metadata.version("hive-vault")
+    except metadata.PackageNotFoundError:
+        return "unknown"
+
+
+def identity_block_text(ctx: ServerContext) -> str:
+    """Always-on server identity block — issue #109 acceptance criterion 1.
+
+    Renders ~5 lines: version, python, vault_path, backends (presence
+    booleans only — never API keys), started_at. Stable across calls
+    since started_at is captured at server construction.
+    """
+    # Ollama backend: report the cached availability probe. Unprobed →
+    # False (we cannot claim presence we haven't verified). OpenRouter:
+    # presence boolean derived from whether the client was constructed
+    # (which requires an api_key) — the key itself is never embedded.
+    ollama_present = bool(
+        getattr(ctx.ollama, "_availability_cached", None),
+    )
+    openrouter_present = ctx.openrouter is not None
+    backends = (
+        '{"ollama": ' + ("true" if ollama_present else "false")
+        + ', "openrouter": ' + ("true" if openrouter_present else "false")
+        + "}"
+    )
+    return "\n".join([
+        "## server",
+        f"- version: {_hive_version()}",
+        f"- python: {sys.version.split()[0]}",
+        f"- vault_path: {ctx.vault}",
+        f"- backends: {backends}",
+        f"- started_at: {ctx.started_at_iso}",
+        "",
+    ])
+
+
+def _registered_tool_names(mcp: FastMCP) -> list[str]:
+    """Extract sorted tool names from the FastMCP local provider.
+
+    Falls back to [] if the internal structure changes — runtime block
+    must never crash vault_health.
+    """
+    try:
+        components = getattr(mcp.providers[0], "_components", {})
+    except (AttributeError, IndexError):
+        return []
+    names: set[str] = set()
+    for key in components:
+        if not isinstance(key, str) or not key.startswith("tool:"):
+            continue
+        # key shape is `tool:<name>@<scope>` — strip both prefix and suffix.
+        rest = key[len("tool:"):]
+        names.add(rest.split("@", 1)[0])
+    return sorted(names)
+
+
+def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
+    """Opt-in runtime block — issue #109 acceptance criterion 2."""
+    uptime_s = max(0.0, time.monotonic() - ctx.started_at_monotonic)
+    tools = _registered_tool_names(mcp)
+    period = datetime.now(UTC).strftime("%Y-%m")
+    stats = ctx.budget.month_stats(ctx.openrouter_budget)
+    lines = [
+        "## runtime",
+        f"- uptime_s: {uptime_s:.1f}",
+        f"- tools_registered: {len(tools)} "
+        f"({', '.join(tools) if tools else '<empty>'})",
+        "- openrouter_budget:",
+        f"  - spent_usd: {float(stats['spent']):.4f}",
+        f"  - cap_usd: {ctx.openrouter_budget}",
+        f"  - period: {period}",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def _find_duplicate_names(scope_dir: Path) -> list[tuple[str, list[str]]]:
     """Find directory names that appear at multiple depths within a scope.
 
@@ -62,9 +144,18 @@ def _find_duplicate_names(scope_dir: Path) -> list[tuple[str, list[str]]]:
 
 
 def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
-    """Build health report text (shared by resource and tool)."""
+    """Build health report text (shared by resource and tool).
+
+    Always prepends the ``## server`` identity block (issue #109) so the
+    ``hive://health`` resource and ``vault_health()`` tool agree on the
+    static metadata exposed to MCP hosts.
+    """
     stale_threshold = date.today() - timedelta(days=ctx.stale_days)
-    lines = ["# Vault Health Report", ""]
+    lines: list[str] = [
+        "# Vault Health Report",
+        "",
+        identity_block_text(ctx),
+    ]
     found_any = False
 
     for scope_name, dir_name in ctx.scopes.items():
@@ -156,7 +247,7 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
         lines.append("")
 
     if not found_any:
-        return "No projects found in vault."
+        lines.append("No projects found in vault.")
     return "\n".join(lines)
 
 
@@ -171,12 +262,17 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
         max_issues: int = 50,
         include_usage: bool = False,
         usage_days: int = 30,
+        include_runtime: bool = False,
     ) -> str:
         """Return vault health metrics, validation, and optional usage analytics.
+
+        Always emits the ``## server`` identity block (version, python,
+        vault path, backend presence, started_at) at the top.
 
         Without parameters, returns a health summary for all projects.
         When checks are specified, runs drift detection (frontmatter, stale, links).
         When include_usage is True, appends tool usage analytics.
+        When include_runtime is True, appends runtime metadata (uptime, tools, budget).
 
         Args:
             project: Project slug to validate. Empty = all projects.
@@ -184,6 +280,7 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
             max_issues: Maximum validation issues to report. Default 50.
             include_usage: Append vault tool usage analytics. Default False.
             usage_days: Usage look-back window in days. Default 30.
+            include_runtime: Append runtime metadata block. Default False.
         """  # noqa: E501
         guard = _vault_guard(ctx)
         if guard:
@@ -194,6 +291,11 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
         if not checks:
             parts.append(health_report_text(ctx, filter_project=project))
         else:
+            # Identity block is part of every successful vault_health
+            # response — prepend before the validation summary so MCP
+            # hosts can read the running server version even when only
+            # checks=[...] is requested.
+            parts.append("# Vault Health Report\n\n" + identity_block_text(ctx))
             active_checks = frozenset(checks) & _ALL_CHECKS
             unknown = frozenset(checks) - _ALL_CHECKS
             if unknown:
@@ -409,5 +511,8 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                     for proj, count in stats["by_project"].items():
                         usage_parts.append(f"- {proj}: {count} calls")
                 parts.append("\n".join(usage_parts))
+
+        if include_runtime:
+            parts.append(runtime_block_text(ctx, mcp))
 
         return track(ctx, "vault_health", "\n".join(parts), project)
