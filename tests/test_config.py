@@ -36,6 +36,39 @@ class TestDefaults:
 
 
 class TestEnvOverride:
+    def test_hive_lock_timeout_s_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """HIVE_LOCK_TIMEOUT_S env honored end-to-end (HIVE-115 / ADR-010)."""
+        monkeypatch.setenv("HIVE_LOCK_TIMEOUT_S", "60")
+        s = HiveSettings()
+        assert s.lock_timeout_s == 60
+
+    def test_hive_lock_timeout_s_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("HIVE_LOCK_TIMEOUT_S", raising=False)
+        assert HiveSettings().lock_timeout_s == 30
+
+    def test_hive_lock_timeout_s_validation_low(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Reject HIVE_LOCK_TIMEOUT_S=0 (must be ≥1)."""
+        monkeypatch.setenv("HIVE_LOCK_TIMEOUT_S", "0")
+        with pytest.raises(ValidationError):
+            HiveSettings()
+
+    def test_hive_lock_timeout_s_validation_high(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Reject HIVE_LOCK_TIMEOUT_S>600 (foot-gun protection)."""
+        monkeypatch.setenv("HIVE_LOCK_TIMEOUT_S", "601")
+        with pytest.raises(ValidationError):
+            HiveSettings()
+
+    def test_hive_wal_checkpoint_interval_s_env(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """HIVE_WAL_CHECKPOINT_INTERVAL_S env honored (HIVE-115 / ADR-009)."""
+        monkeypatch.setenv("HIVE_WAL_CHECKPOINT_INTERVAL_S", "15.5")
+        assert HiveSettings().wal_checkpoint_interval_s == 15.5
+
     def test_hive_prefix_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("HIVE_OLLAMA_MODEL", "llama3:8b")
         assert HiveSettings().ollama_model == "llama3:8b"

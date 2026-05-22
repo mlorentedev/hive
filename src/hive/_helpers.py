@@ -548,7 +548,75 @@ def track(
 _GIT_LOCK = threading.Lock()
 _WRITE_LOCK = threading.Lock()
 
-_LOCK_TIMEOUT = 30  # seconds — matches subprocess timeout
+
+def _lock_timeout() -> int:
+    """Current lock-acquire timeout in seconds (HIVE-115 / ADR-010).
+
+    Lazy read of ``settings.lock_timeout_s`` so tests can monkeypatch the
+    settings object after import. Env: ``HIVE_LOCK_TIMEOUT_S`` (default 30,
+    validated 1..600).
+    """
+    from hive.config import settings
+
+    return settings.lock_timeout_s
+
+
+def _acquire_with_telemetry(
+    lock: threading.Lock,
+    lock_name: str,
+    timeout: float | None = None,
+) -> bool:
+    """Acquire a threading.Lock and emit structured ``mcp.lock_contention`` log.
+
+    Records ``waited_ms`` and ``abandoned`` (true on timeout). Feeds the
+    Phase B gate decision per HIVE-115 (see vault backlog HIVE-115 entry +
+    [[adr-010-external-committer-coexistence]]).
+    """
+    actual_timeout = float(timeout) if timeout is not None else float(_lock_timeout())
+    start = time.monotonic()
+    acquired = lock.acquire(timeout=actual_timeout)
+    waited_ms = int((time.monotonic() - start) * 1000)
+    _log.info(
+        "mcp.lock_contention lock=%s waited_ms=%d abandoned=%s",
+        lock_name,
+        waited_ms,
+        "false" if acquired else "true",
+    )
+    return acquired
+
+
+@contextmanager
+def _filelock_with_telemetry(
+    lock: filelock.BaseFileLock,
+    lock_name: str,
+    timeout: float | None = None,
+) -> Iterator[None]:
+    """Acquire a filelock as a context manager with structured telemetry.
+
+    Mirror of :func:`_acquire_with_telemetry` for inter-process locks.
+    Emits exactly one ``mcp.lock_contention`` log line per attempt; on
+    timeout, emits ``abandoned=true`` and re-raises ``filelock.Timeout``
+    so callers can fall through to their existing error path unchanged.
+    """
+    actual_timeout = float(timeout) if timeout is not None else float(_lock_timeout())
+    start = time.monotonic()
+    try:
+        with lock.acquire(timeout=actual_timeout):
+            waited_ms = int((time.monotonic() - start) * 1000)
+            _log.info(
+                "mcp.lock_contention lock=%s waited_ms=%d abandoned=false",
+                lock_name,
+                waited_ms,
+            )
+            yield
+    except filelock.Timeout:
+        waited_ms = int((time.monotonic() - start) * 1000)
+        _log.info(
+            "mcp.lock_contention lock=%s waited_ms=%d abandoned=true",
+            lock_name,
+            waited_ms,
+        )
+        raise
 
 
 class WriteLockTimeout(Exception):  # noqa: N818  # mirrors stdlib TimeoutError naming
@@ -572,11 +640,11 @@ def vault_write_lock(vault_path: Path) -> Iterator[None]:
     The filelock is the singleton from :func:`_git_filelock`, so a nested
     ``_git_commit`` inside this block re-enters the same lock cleanly.
     """
-    if not _WRITE_LOCK.acquire(timeout=_LOCK_TIMEOUT):
+    if not _acquire_with_telemetry(_WRITE_LOCK, "_WRITE_LOCK"):
         raise WriteLockTimeout("write lock timeout")
     try:
         try:
-            with _git_filelock(vault_path).acquire(timeout=_LOCK_TIMEOUT):
+            with _filelock_with_telemetry(_git_filelock(vault_path), "_git_filelock"):
                 yield
         except filelock.Timeout as exc:
             raise WriteLockTimeout("inter-process lock timeout") from exc
@@ -730,15 +798,15 @@ def _git_commit(
         return
     safe_msg = message.replace("\n", " ").replace("\r", " ")
     path_strs = [str(p) for p in rel_paths]
-    if not _GIT_LOCK.acquire(timeout=_LOCK_TIMEOUT):
+    if not _acquire_with_telemetry(_GIT_LOCK, "_GIT_LOCK"):
         _log.warning(
             "git commit skipped for %s: thread lock timeout (%ds)",
-            path_strs, _LOCK_TIMEOUT,
+            path_strs, _lock_timeout(),
         )
         return
     try:
         try:
-            with _git_filelock(vault_path).acquire(timeout=_LOCK_TIMEOUT):
+            with _filelock_with_telemetry(_git_filelock(vault_path), "_git_filelock"):
                 subprocess.run(
                     ["git", "add", *path_strs],
                     cwd=vault_path,
@@ -756,7 +824,7 @@ def _git_commit(
         except filelock.Timeout:
             _log.warning(
                 "git commit skipped for %s: inter-process lock timeout (%ds)",
-                path_strs, _LOCK_TIMEOUT,
+                path_strs, _lock_timeout(),
             )
         except subprocess.CalledProcessError as exc:
             _log.warning("git commit failed for %s: %s", path_strs, exc)
@@ -784,11 +852,11 @@ def _git_commit_all(
     accumulated by ``commit=False`` writes (HIVE-104 Fase B1).
     """
     safe_msg = message.replace("\n", " ").replace("\r", " ") or "vault: batch update"
-    if not _GIT_LOCK.acquire(timeout=_LOCK_TIMEOUT):
+    if not _acquire_with_telemetry(_GIT_LOCK, "_GIT_LOCK"):
         return "error", "thread lock timeout"
     try:
         try:
-            with _git_filelock(vault_path).acquire(timeout=_LOCK_TIMEOUT):
+            with _filelock_with_telemetry(_git_filelock(vault_path), "_git_filelock"):
                 porcelain = subprocess.run(
                     ["git", "status", "--porcelain"],
                     cwd=vault_path,
