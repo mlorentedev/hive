@@ -249,11 +249,102 @@ The counter resets when the server restarts. Each event is also logged at WARNIN
 
 Available from `hive-vault >= 1.14.0`. The empirical wire-behavior classifier ran 20 iterations on Linux and confirmed scenario (a) — ErrorData wins the race — in 20/20 cases; see ADR-007 Amendment #2 for the full retraction of the earlier "raw send" plan.
 
+## Multi-Session Contention (3-5 concurrent Claude Code sessions)
+
+**Baseline note:** Hive is commonly used with 3-5 Claude Code sessions open in parallel against the same vault. This is the daily-usage baseline, not edge case. The MCP stdio model spawns one `hive-vault` subprocess per session, so 4 windows = 4 sibling processes sharing the same SQLite DBs (`~/.local/share/hive/*.db`) and the same vault git repo.
+
+If those processes accumulate, or if you also run [obsidian-git](https://github.com/Vinzent03/obsidian-git) for auto-backups, three symptoms can appear:
+
+- **WAL file bloat.** `~/.local/share/hive/relevance.db-wal` grows 10-100× the size of the steady-state DB because concurrent readers prevent SQLite from checkpointing the WAL.
+- **Silent freezes during writes.** A `vault_write` or `capture_lesson` takes 10-30 seconds when obsidian-git is auto-committing in the background (its 10-minute interval holds `.git/index.lock` during pull + commit + push).
+- **Zombie hive processes.** A Claude Code window crashed or was force-quit, but its `uvx hive-vault` child stayed alive holding file handles open.
+
+### Inspect the current state
+
+Run `vault_health(include_runtime=True)` from any session. The `## runtime` block reports:
+
+```yaml
+- wal_size_bytes: 4137984          # >5 MB sustained = contention
+- competing_pid_count: 3            # other hive-vault PIDs (same user)
+- last_git_lock_wait_ms:
+  - mean: 12.5
+  - p99: 8234.0                     # p99 > 5000ms = contention
+  - samples: 47
+- obsidian_git_present: true        # external committer detected
+```
+
+Healthy: `wal_size_bytes` under a few MB, `last_git_lock_wait_ms.p99` under 100ms.
+
+### Spot a zombie hive process
+
+**POSIX (Linux, macOS)** — list all hive processes and their age:
+
+```bash
+ps -eo pid,etime,cmd | grep hive-vault | grep -v grep
+```
+
+Inspect which file handles a specific PID holds:
+
+```bash
+lsof -p <PID> | grep hive
+```
+
+Kill a zombie:
+
+```bash
+kill <PID>          # graceful
+kill -9 <PID>       # force
+```
+
+**Windows (PowerShell)** — list hive processes:
+
+```powershell
+Get-Process | Where-Object { $_.ProcessName -match "hive-vault|python" } |
+  Select-Object Id, StartTime, ProcessName, Path
+```
+
+Kill by PID:
+
+```powershell
+Stop-Process -Id <PID>           # graceful
+Stop-Process -Id <PID> -Force    # force
+```
+
+### Tune `HIVE_LOCK_TIMEOUT_S`
+
+Default `30` seconds. The lock-acquire timeout used when hive contends for the git filelock. Capped at 600 to prevent foot-guns.
+
+| Scenario | Recommended | Why |
+|---|---|---|
+| Default | `30` | Matches subprocess timeout; absorbs typical obsidian-git ticks |
+| Large vault + slow disk | `60-90` | obsidian-git's pull + commit + push can hold the lock 15-30s on a 50 MB vault |
+| Slow network + autoPull=true | `90-120` | Network pull dominates; raise to avoid abandons |
+| Fast vault, fail-fast preference | `10` | If you'd rather see errors than wait |
+
+Set via `HIVE_LOCK_TIMEOUT_S=60` env var.
+
+### Tune `HIVE_WAL_CHECKPOINT_INTERVAL_S`
+
+Default `30.0` seconds. How often each hive process runs `PRAGMA wal_checkpoint(PASSIVE)` to drain its SQLite WAL. Lower = more aggressive draining; higher = less CPU spent on idle ticks.
+
+Default is appropriate for most users. Raise to `120` if you observe excessive CPU on idle hive processes (e.g., on resource-constrained machines); the trade-off is slower WAL drain.
+
+### obsidian-git cooperation pattern
+
+If your vault uses obsidian-git for auto-backups, the two tools cooperate cleanly when configured properly:
+
+- Set obsidian-git's `autoSaveInterval` to 5-10 minutes (default is fine).
+- For write-heavy flows, prefer `vault_write(commit=False)` / `vault_patch(commit=False)`. Hive writes the file; obsidian-git commits on its next tick. Per-write cost drops from ~150ms to ~5-15ms.
+- Use `vault_commit` only when you need an explicit flush before obsidian-git's next tick (e.g., before closing Obsidian).
+- Watch `vault_health.runtime.last_git_lock_wait_ms.p99`. If it stays above 5000ms, raise `HIVE_LOCK_TIMEOUT_S` to absorb the longer windows.
+
+A future release will make the cooperation automatic (auto-defer when external committer healthy); for now it is opt-in via `commit=False`.
+
 ## Getting Help
 
 If your issue isn't listed here:
 
-1. Run `vault_health` to check vault connectivity and file counts — the `## server` identity block at the top reports the running version, python, vault path, and backend presence so you can include them verbatim in a bug report (no API keys are exposed). Add `include_runtime=True` for uptime, registered tool names, and the OpenRouter budget snapshot.
+1. Run `vault_health` to check vault connectivity and file counts — the `## server` identity block at the top reports the running version, python, vault path, and backend presence so you can include them verbatim in a bug report (no API keys are exposed). Add `include_runtime=True` for uptime, registered tool names, multi-session contention metrics, and the OpenRouter budget snapshot.
 2. Run `worker_status` to check provider connectivity and budget
 3. Check `~/.local/share/hive/hive.log` for error details
 4. Check the [Configuration](/hive/configuration/) page for all environment variables

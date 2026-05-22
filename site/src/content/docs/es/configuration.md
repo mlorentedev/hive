@@ -53,6 +53,8 @@ Cuando una llamada a una herramienta se cancela a mitad de ejecución (worker le
 | `HIVE_STALE_THRESHOLD_DAYS` | `180` | Días antes de que un archivo se marque como obsoleto |
 | `HIVE_HTTP_TIMEOUT` | `60.0` | Timeout HTTP (segundos) para Ollama y OpenRouter |
 | `HIVE_TOOL_TIMEOUT` | `60.0` | Timeout a nivel de herramienta (segundos) para tools async de worker (capture_lesson, delegate_task, worker_status) |
+| `HIVE_LOCK_TIMEOUT_S` | `30` | Timeout de adquisición del filelock de git (segundos). Sube a 60-90 en vaults grandes o bajo fuerte contención con obsidian-git. Validado 1..600. |
+| `HIVE_WAL_CHECKPOINT_INTERVAL_S` | `30.0` | Intervalo entre ticks de `PRAGMA wal_checkpoint(PASSIVE)` por proceso hive. Menor = drenaje del WAL más agresivo. Validado >0..3600. |
 | `HIVE_RELEVANCE_ALPHA` | `0.3` | Tasa de aprendizaje EMA para puntuación adaptativa |
 | `HIVE_RELEVANCE_DECAY` | `0.9` | Factor de decaimiento por sesión para puntuaciones de relevancia |
 | `HIVE_RELEVANCE_EPSILON` | `0.15` | Ratio de exploración para session_briefing (epsilon-greedy) |

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.0](https://github.com/mlorentedev/hive/compare/v1.15.0...v1.16.0) (2026-05-22)
+
+
+### Features
+
+* **hive:** HIVE-115 Phase A defensive — WAL drain + telemetry + tunable lock + docs ([#115](https://github.com/mlorentedev/hive/issues/115)) ([f92e040](https://github.com/mlorentedev/hive/commit/f92e0406233982d99553055a5fe4ffec23df4e1d))
+
 ## [1.15.0](https://github.com/mlorentedev/hive/compare/v1.14.1...v1.15.0) (2026-05-22)
 
 
