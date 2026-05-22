@@ -31,6 +31,8 @@ class ServerContext:
     openrouter_budget: float
     openrouter_paid_model: str
     tool_timeout: float
+    started_at_iso: str = ""
+    started_at_monotonic: float = 0.0
 
     def close(self) -> None:
         """Close all database connections held by this context."""

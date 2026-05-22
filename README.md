@@ -84,7 +84,7 @@ When a tool call is cancelled mid-flight (slow worker, client timeout), the serv
 | `vault_query` | Load project context, tasks, roadmap, lessons — or any file by path |
 | `vault_search` | Full-text search with metadata filters, regex, ranked results, recent changes, lesson-usage ranking (`rank_by`) |
 | `vault_list` | Browse projects and files with glob filtering |
-| `vault_health` | Health metrics, drift detection, usage stats |
+| `vault_health` | Server identity (version, vault path, backends), health metrics, drift detection, usage stats, opt-in runtime block |
 | `vault_write` | Create, append, or replace vault files. `commit=False` defers the git commit for batching |
 | `vault_patch` | Surgical find-and-replace. `commit=False` defers the git commit for batching |
 | `vault_commit` | Flush pending `commit=False` writes into one git commit |

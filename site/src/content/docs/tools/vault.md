@@ -107,10 +107,10 @@ vault_search(query="timeout", rank_by="hybrid")          # α=0.7 BM25 + 0.3 con
 
 ## vault_health
 
-Health metrics, drift detection, and usage statistics.
+Server identity, health metrics, drift detection, and usage statistics.
 
 ```python
-# Health report for all projects
+# Health report for all projects (always includes the ## server identity block)
 vault_health()
 
 # Validate a specific project
@@ -118,7 +118,23 @@ vault_health(project="my-project", checks=["frontmatter", "stale", "links"], max
 
 # Include usage statistics
 vault_health(include_usage=True, usage_days=30)
+
+# Include runtime metadata (uptime, registered tools, OpenRouter budget)
+vault_health(include_runtime=True)
 ```
+
+**Identity block** (always-on, ~5 lines): Prepended to every successful response so MCP hosts and operators can answer *"which hive-vault version is serving this session?"* without leaving the conversation.
+
+```text
+## server
+- version: 1.15.0
+- python: 3.12.10
+- vault_path: /home/me/Projects/knowledge
+- backends: {"ollama": true, "openrouter": false}
+- started_at: 2026-05-21T20:33:20+00:00
+```
+
+Backends are reported as presence booleans only — **API keys are never embedded**. `ollama` reflects the cached availability probe; `openrouter` is true when an API key was configured at startup.
 
 **Health report** (default): Per-project file count, total lines, stale files (>180 days, configurable via `HIVE_STALE_THRESHOLD_DAYS`), section coverage. Also detects **duplicate directory names** within hierarchical scopes and warns which path BFS will resolve to.
 
@@ -130,6 +146,8 @@ vault_health(include_usage=True, usage_days=30)
 Issues are categorized as `[error]` or `[warning]` with file path and description.
 
 **Usage stats** (`include_usage=True`): Tool call counts by tool and project, with estimated token savings.
+
+**Runtime block** (`include_runtime=True`, opt-in): Dynamic diagnostics layered after the report — uptime in seconds, count + names of MCP tools currently registered (sanity check that no module failed to register), and the OpenRouter budget snapshot (`spent_usd`, `cap_usd`, `period`). Independent of `include_usage`; both can stack in one call.
 
 ## vault_write
 

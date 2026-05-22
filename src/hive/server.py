@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+import time
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from hive import _compat as _hive_compat
@@ -84,6 +86,8 @@ def create_server(
         openrouter_budget=settings.openrouter_budget,
         openrouter_paid_model=settings.openrouter_paid_model,
         tool_timeout=settings.tool_timeout,
+        started_at_iso=datetime.now(UTC).isoformat(timespec="seconds"),
+        started_at_monotonic=time.monotonic(),
     )
 
     mcp = FastMCP(

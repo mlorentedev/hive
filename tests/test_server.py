@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from hive.clients import ClientResponse, ModelInfo
+from hive.clients import ClientResponse, ModelInfo, OpenRouterClient
 from hive.server import create_server
 
 if TYPE_CHECKING:
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from fastmcp.tools import ToolResult
 
     from hive.budget import BudgetTracker
-    from hive.clients import OllamaClient, OpenRouterClient
+    from hive.clients import OllamaClient
 
 
 def _text(result: ToolResult) -> str:
@@ -524,7 +524,10 @@ class TestVaultHealth:
         )
         mcp = create_server(vault_path=tmp_path)
         result = await mcp.call_tool("vault_health", {})
-        assert "stale" not in _text(result).lower()
+        # Assert against the section label, not the bare substring — the
+        # identity block now embeds ``vault_path`` which may legitimately
+        # contain "stale" inside a pytest tmp dir name.
+        assert "stale files" not in _text(result).lower()
 
     async def test_recent_file_not_stale(self, tmp_path: Path) -> None:
         from datetime import date
@@ -537,7 +540,7 @@ class TestVaultHealth:
         )
         mcp = create_server(vault_path=tmp_path)
         result = await mcp.call_tool("vault_health", {})
-        assert "stale" not in _text(result).lower()
+        assert "stale files" not in _text(result).lower()
 
     async def test_stale_fallback_to_mtime(self, tmp_path: Path) -> None:
         import os
@@ -580,7 +583,180 @@ class TestVaultHealth:
 
         _hc.GHOST_RESPONSES.reset()
         result = _text(await vault_mcp.call_tool("vault_health", {}))
-        assert "ghost_responses" not in result
+        # Anchor on the section header so pytest tmp paths that contain
+        # 'ghost_responses' in their dir name cannot collide.
+        assert "## ghost_responses" not in result
+
+
+# ── vault_health (server identity + runtime, issue #109) ─────────────
+
+
+class TestVaultHealthIdentity:
+    """Identity block is always present at the top of vault_health output."""
+
+    async def test_identity_block_present_no_args(
+        self, vault_mcp: FastMCP,
+    ) -> None:
+        """Default vault_health() includes the ## server identity block."""
+        result = _text(await vault_mcp.call_tool("vault_health", {}))
+        assert "## server" in result
+        assert "- version:" in result
+        assert "- python:" in result
+        assert "- vault_path:" in result
+        assert "- backends:" in result
+        assert "- started_at:" in result
+
+    async def test_identity_appears_before_project_stats(
+        self, vault_mcp: FastMCP,
+    ) -> None:
+        """Identity block is prepended — appears before per-project blocks."""
+        result = _text(await vault_mcp.call_tool("vault_health", {}))
+        idx_server = result.find("## server")
+        idx_project = result.find("testproject")
+        assert idx_server >= 0
+        assert idx_project >= 0
+        assert idx_server < idx_project
+
+    async def test_identity_with_validation_mode(
+        self, vault_mcp: FastMCP,
+    ) -> None:
+        """Identity block also appears when checks=[...] is passed."""
+        result = _text(
+            await vault_mcp.call_tool(
+                "vault_health", {"checks": ["frontmatter"]},
+            ),
+        )
+        assert "## server" in result
+        assert "- version:" in result
+
+    async def test_identity_with_empty_vault(self, tmp_path: Path) -> None:
+        """Identity block appears even when the vault has no projects."""
+        (tmp_path / "10_projects").mkdir()
+        mcp = create_server(vault_path=tmp_path)
+        try:
+            result = _text(await mcp.call_tool("vault_health", {}))
+            assert "## server" in result
+            assert "- version:" in result
+        finally:
+            _close_server(mcp)
+
+    async def test_identity_backends_no_api_keys(
+        self, mock_vault: Path,
+    ) -> None:
+        """The identity block never embeds API key material."""
+        secret = "sk-DO-NOT-LEAK-CANARY-12345"
+        mcp = create_server(
+            vault_path=mock_vault,
+            openrouter_client=OpenRouterClient(
+                api_key=secret, default_model="qwen/qwen3-coder:free",
+            ),
+        )
+        try:
+            result = _text(await mcp.call_tool("vault_health", {}))
+            assert secret not in result
+            assert "## server" in result
+            # presence boolean is exposed instead
+            assert "openrouter" in result.lower()
+        finally:
+            _close_server(mcp)
+
+    async def test_identity_total_length_bounded(
+        self, vault_mcp: FastMCP,
+    ) -> None:
+        """Acceptance: identity block adds <10 lines to the report."""
+        result = _text(await vault_mcp.call_tool("vault_health", {}))
+        # Lines between '## server' (inclusive) and the next '## ' heading
+        lines = result.splitlines()
+        start = next(
+            (i for i, line in enumerate(lines) if line.startswith("## server")),
+            None,
+        )
+        assert start is not None
+        end = next(
+            (
+                i for i, line in enumerate(lines[start + 1 :], start + 1)
+                if line.startswith("## ")
+            ),
+            len(lines),
+        )
+        assert (end - start) < 10
+
+
+class TestVaultHealthRuntime:
+    """include_runtime=True activates the optional ## runtime block."""
+
+    async def test_runtime_block_omitted_by_default(
+        self, vault_mcp: FastMCP,
+    ) -> None:
+        result = _text(await vault_mcp.call_tool("vault_health", {}))
+        assert "## runtime" not in result
+        assert "uptime_s" not in result
+
+    async def test_runtime_block_present_when_opted_in(
+        self, vault_mcp: FastMCP,
+    ) -> None:
+        result = _text(
+            await vault_mcp.call_tool(
+                "vault_health", {"include_runtime": True},
+            ),
+        )
+        assert "## runtime" in result
+        assert "uptime_s" in result
+        assert "tools_registered" in result
+        assert "openrouter_budget" in result
+
+    async def test_runtime_lists_registered_tool_names(
+        self, vault_mcp: FastMCP,
+    ) -> None:
+        """tools_registered must include the known hive tools."""
+        result = _text(
+            await vault_mcp.call_tool(
+                "vault_health", {"include_runtime": True},
+            ),
+        )
+        for expected in (
+            "vault_query", "vault_search", "vault_health", "vault_list",
+        ):
+            assert expected in result
+
+    async def test_runtime_orthogonal_to_include_usage(
+        self, vault_mcp: FastMCP,
+    ) -> None:
+        """include_runtime is independent from include_usage — both can stack."""
+        result = _text(
+            await vault_mcp.call_tool(
+                "vault_health",
+                {"include_runtime": True, "include_usage": True},
+            ),
+        )
+        assert "## runtime" in result
+        # usage block surfaces 'No vault tool calls' or 'Total calls:'
+        assert (
+            "no vault tool calls" in result.lower()
+            or "Total calls:" in result
+        )
+
+    async def test_runtime_budget_does_not_leak_api_key(
+        self, mock_vault: Path,
+    ) -> None:
+        secret = "sk-RUNTIME-NEVER-LEAK-ABCDEF"
+        mcp = create_server(
+            vault_path=mock_vault,
+            openrouter_client=OpenRouterClient(
+                api_key=secret, default_model="qwen/qwen3-coder:free",
+            ),
+        )
+        try:
+            result = _text(
+                await mcp.call_tool(
+                    "vault_health", {"include_runtime": True},
+                ),
+            )
+            assert secret not in result
+            # budget block exposes cap+spent, not credentials
+            assert "openrouter_budget" in result
+        finally:
+            _close_server(mcp)
 
 
 # ── vault_write (update operations, with real YAML frontmatter validation) ────
@@ -3179,7 +3355,11 @@ class TestVaultValidate:
                 "vault_health",
                 {"checks": ["frontmatter", "stale", "links"]},
             ))
-        assert "error" not in result.lower() or "0 errors" in result.lower()
+        # Anchor on the `[error]` issue marker (and the "Vault clean"
+        # all-green message) rather than the bare substring — the
+        # identity block now exposes ``vault_path`` which may contain
+        # "error" inside a pytest tmp dir name (e.g. test_healthy_…0).
+        assert "[error]" not in result or "Vault clean" in result
 
     async def test_missing_frontmatter_detected(self, mock_vault: Path) -> None:
         """File with no frontmatter is flagged."""
@@ -3507,10 +3687,15 @@ class TestVaultValidate:
         Regression for #94 category 3.
         """
         doc = mock_vault / "10_projects" / "testproject" / "posix-heading.md"
+        # Explicit UTF-8 — Path.write_text defaults to platform encoding
+        # (cp1252 on Windows), which encodes em dash as 0x97; _safe_read
+        # then fails to decode as UTF-8 and the file is reported as
+        # unreadable, masking the actual POSIX-class regression check.
         doc.write_text(
             "---\nid: posix-heading\ntype: note\nstatus: active\n---\n\n"
             "### \\s is not POSIX — use [[:space:]] in bash regex\n\n"
             "And the digit class [[:digit:]] is similar.\n",
+            encoding="utf-8",
         )
         mcp = create_server(vault_path=mock_vault)
         result = _text(await mcp.call_tool(

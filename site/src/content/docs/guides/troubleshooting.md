@@ -253,7 +253,7 @@ Available from `hive-vault >= 1.14.0`. The empirical wire-behavior classifier ra
 
 If your issue isn't listed here:
 
-1. Run `vault_health` to check vault connectivity and file counts
+1. Run `vault_health` to check vault connectivity and file counts — the `## server` identity block at the top reports the running version, python, vault path, and backend presence so you can include them verbatim in a bug report (no API keys are exposed). Add `include_runtime=True` for uptime, registered tool names, and the OpenRouter budget snapshot.
 2. Run `worker_status` to check provider connectivity and budget
 3. Check `~/.local/share/hive/hive.log` for error details
 4. Check the [Configuration](/hive/configuration/) page for all environment variables

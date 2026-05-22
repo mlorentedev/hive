@@ -253,7 +253,7 @@ Disponible desde `hive-vault >= 1.14.0`. El clasificador empírico de comportami
 
 Si tu problema no está listado aquí:
 
-1. Ejecuta `vault_health` para comprobar conectividad del vault y recuentos de archivos
+1. Ejecuta `vault_health` para comprobar conectividad del vault y recuentos de archivos — el bloque `## server` al principio reporta la versión en ejecución, python, ruta del vault y presencia de backends, así puedes incluirlo literal en un bug report (no se expone ninguna API key). Añade `include_runtime=True` para uptime, nombres de tools registrados y snapshot del presupuesto OpenRouter.
 2. Ejecuta `worker_status` para comprobar conectividad de proveedores y presupuesto
 3. Revisa `~/.local/share/hive/hive.log` para detalles de errores
 4. Consulta la página de [Configuración](/hive/es/configuration/) para todas las variables de entorno
