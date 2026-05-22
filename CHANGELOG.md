@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/mlorentedev/hive/compare/v1.14.1...v1.15.0) (2026-05-22)
+
+
+### Features
+
+* **hive:** HIVE-109 vault_health server identity + opt-in runtime metadata ([#112](https://github.com/mlorentedev/hive/issues/112)) ([060fbc3](https://github.com/mlorentedev/hive/commit/060fbc38abf593f510e1cd8e6adc893731755f86))
+
 ## [1.14.1](https://github.com/mlorentedev/hive/compare/v1.14.0...v1.14.1) (2026-05-21)
 
 
