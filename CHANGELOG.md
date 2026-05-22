@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.0](https://github.com/mlorentedev/hive/compare/v1.16.0...v1.17.0) (2026-05-22)
+
+
+### Features
+
+* **hive:** HIVE-115 capture_lesson XML-leak defense ([#114](https://github.com/mlorentedev/hive/issues/114) Tier-1) ([#117](https://github.com/mlorentedev/hive/issues/117)) ([5b01bb9](https://github.com/mlorentedev/hive/commit/5b01bb9903f34d05522bc703ceaa6ca7eed38136))
+
 ## [1.16.0](https://github.com/mlorentedev/hive/compare/v1.15.0...v1.16.0) (2026-05-22)
 
 
