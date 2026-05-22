@@ -8,6 +8,7 @@ import sys
 import time
 from datetime import UTC, date, datetime, timedelta
 from importlib import metadata
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from hive._helpers import (
@@ -32,8 +33,6 @@ from hive.frontmatter import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from fastmcp import FastMCP
 
     from hive._context import ServerContext
@@ -103,16 +102,42 @@ def _registered_tool_names(mcp: FastMCP) -> list[str]:
 
 
 def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
-    """Opt-in runtime block — issue #109 acceptance criterion 2."""
+    """Opt-in runtime block — issue #109 + HIVE-115 multi-process telemetry.
+
+    Surfaces (HIVE-115 / ADR-009 + ADR-010):
+    - ``wal_size_bytes`` — sum of ``*.db-wal`` under hive state dir
+    - ``competing_pid_count`` — other ``hive-vault`` processes (same user)
+    - ``last_git_lock_wait_ms`` — rolling-100 mean + p99
+    - ``obsidian_git_present`` — external committer detection
+    """
+    from hive import _helpers
+    from hive.config import settings as _settings
+
     uptime_s = max(0.0, time.monotonic() - ctx.started_at_monotonic)
     tools = _registered_tool_names(mcp)
     period = datetime.now(UTC).strftime("%Y-%m")
     stats = ctx.budget.month_stats(ctx.openrouter_budget)
+
+    # HIVE-115 telemetry. Each computation is defensive: a psutil error
+    # or stat failure must NEVER prevent vault_health from returning.
+    state_dir = Path(_settings.db_path).parent
+    wal_size = _helpers._compute_wal_size_bytes(state_dir)
+    competing = _helpers._count_competing_hive_processes()
+    lock_stats = _helpers._git_lock_stats_snapshot()
+    obsidian = _helpers.detect_obsidian_git(ctx.vault) is not None
+
     lines = [
         "## runtime",
         f"- uptime_s: {uptime_s:.1f}",
         f"- tools_registered: {len(tools)} "
         f"({', '.join(tools) if tools else '<empty>'})",
+        f"- wal_size_bytes: {wal_size}",
+        f"- competing_pid_count: {competing}",
+        "- last_git_lock_wait_ms:",
+        f"  - mean: {lock_stats['mean_ms']:.1f}",
+        f"  - p99: {lock_stats['p99_ms']:.1f}",
+        f"  - samples: {lock_stats['sample_count']}",
+        f"- obsidian_git_present: {str(obsidian).lower()}",
         "- openrouter_budget:",
         f"  - spent_usd: {float(stats['spent']):.4f}",
         f"  - cap_usd: {ctx.openrouter_budget}",

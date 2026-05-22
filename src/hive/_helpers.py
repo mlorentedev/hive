@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import difflib
+import functools
 import json
 import logging
+import os
 import re
 import subprocess
 import threading
@@ -549,6 +552,105 @@ _GIT_LOCK = threading.Lock()
 _WRITE_LOCK = threading.Lock()
 
 
+_GIT_LOCK_WAIT_HISTORY: deque[int] = deque(maxlen=100)
+_GIT_LOCK_WAIT_GUARD = threading.Lock()
+
+
+def _record_lock_wait(waited_ms: int) -> None:
+    """Append a lock-wait sample to the rolling N=100 window (thread-safe)."""
+    with _GIT_LOCK_WAIT_GUARD:
+        _GIT_LOCK_WAIT_HISTORY.append(waited_ms)
+
+
+def _git_lock_stats_snapshot() -> dict[str, float | int]:
+    """Snapshot of last_git_lock_wait_ms rolling window (mean, p99, count).
+
+    HIVE-115 / ADR-010 telemetry — feeds Phase B gate decision. Surfaced
+    in ``vault_health(include_runtime=True)``.
+    """
+    with _GIT_LOCK_WAIT_GUARD:
+        samples = list(_GIT_LOCK_WAIT_HISTORY)
+    n = len(samples)
+    if n == 0:
+        return {"mean_ms": 0.0, "p99_ms": 0.0, "sample_count": 0}
+    mean = sum(samples) / n
+    sorted_s = sorted(samples)
+    p99_idx = min(n - 1, max(0, int(n * 0.99)))
+    return {
+        "mean_ms": float(mean),
+        "p99_ms": float(sorted_s[p99_idx]),
+        "sample_count": n,
+    }
+
+
+def _compute_wal_size_bytes(state_dir: Path) -> int:
+    """Sum size of all ``*.db-wal`` files under ``state_dir`` (stat-only).
+
+    HIVE-115 / ADR-009 telemetry — bounded WAL is the success signal
+    for the periodic ``PRAGMA wal_checkpoint(PASSIVE)`` thread.
+    """
+    total = 0
+    try:
+        for wal in state_dir.glob("*.db-wal"):
+            with contextlib.suppress(OSError):
+                total += wal.stat().st_size
+    except OSError:
+        pass
+    return total
+
+
+def _count_competing_hive_processes() -> int:
+    """Count distinct ``hive-vault`` PIDs (excluding self), same user only.
+
+    Cached for ~30s via an epoch-bucket key on :func:`functools.lru_cache`
+    so ``vault_health`` calls do not pay psutil's process-iter cost on every
+    request (Windows ~100ms, POSIX ~10ms). Filters strictly by process
+    name AND same user to avoid antivirus / backup-tool false positives
+    (HIVE-115 audit MINOR finding).
+    """
+    epoch_bucket = int(time.time() // 30)
+    return _competing_pid_count_cached(epoch_bucket)
+
+
+@functools.lru_cache(maxsize=1)
+def _competing_pid_count_cached(epoch_bucket: int) -> int:  # noqa: ARG001
+    """Real count behind :func:`_count_competing_hive_processes`.
+
+    The ``epoch_bucket`` argument is used solely as the lru_cache key so
+    callers get a fresh result every 30 seconds while not paying for
+    process_iter on every call.
+    """
+    try:
+        import psutil
+    except ImportError:
+        return 0
+
+    self_pid = os.getpid()
+    try:
+        self_user = psutil.Process(self_pid).username()
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        self_user = None
+
+    count = 0
+    try:
+        for proc in psutil.process_iter(attrs=["name", "pid", "username"]):
+            try:
+                info = proc.info
+                if info.get("pid") == self_pid:
+                    continue
+                name = (info.get("name") or "").lower()
+                if "hive-vault" not in name and "hive_vault" not in name:
+                    continue
+                if self_user is not None and info.get("username") != self_user:
+                    continue
+                count += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception:  # noqa: BLE001 — psutil can raise OS-specific errors
+        return 0
+    return count
+
+
 def _lock_timeout() -> int:
     """Current lock-acquire timeout in seconds (HIVE-115 / ADR-010).
 
@@ -582,6 +684,7 @@ def _acquire_with_telemetry(
         waited_ms,
         "false" if acquired else "true",
     )
+    _record_lock_wait(waited_ms)
     return acquired
 
 
@@ -608,6 +711,7 @@ def _filelock_with_telemetry(
                 lock_name,
                 waited_ms,
             )
+            _record_lock_wait(waited_ms)
             yield
     except filelock.Timeout:
         waited_ms = int((time.monotonic() - start) * 1000)
@@ -616,6 +720,7 @@ def _filelock_with_telemetry(
             lock_name,
             waited_ms,
         )
+        _record_lock_wait(waited_ms)
         raise
 
 

@@ -145,3 +145,99 @@ def test_filelock_with_telemetry_timeout_emits_and_reraises(
     assert len(matching) == 1
     assert "lock=_TEST_FILELOCK" in matching[0].getMessage()
     assert "abandoned=true" in matching[0].getMessage()
+
+
+# ── Rolling-window stats + compute helpers (HIVE-115 / ADR-009/010) ─────
+
+
+def test_record_lock_wait_and_snapshot_empty() -> None:
+    """Empty window returns zeros, not errors."""
+    from hive._helpers import _GIT_LOCK_WAIT_HISTORY, _git_lock_stats_snapshot
+
+    _GIT_LOCK_WAIT_HISTORY.clear()
+    snap = _git_lock_stats_snapshot()
+    assert snap == {"mean_ms": 0.0, "p99_ms": 0.0, "sample_count": 0}
+
+
+def test_record_lock_wait_window_stats() -> None:
+    """Window computes mean + p99 + sample_count correctly."""
+    from hive._helpers import (
+        _GIT_LOCK_WAIT_HISTORY,
+        _git_lock_stats_snapshot,
+        _record_lock_wait,
+    )
+
+    _GIT_LOCK_WAIT_HISTORY.clear()
+    samples = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+    for s in samples:
+        _record_lock_wait(s)
+    snap = _git_lock_stats_snapshot()
+    assert snap["sample_count"] == 10
+    assert snap["mean_ms"] == 55.0
+    # p99 with n=10 → index min(9, int(10*0.99)) = min(9, 9) = 9 → 100ms
+    assert snap["p99_ms"] == 100.0
+
+
+def test_record_lock_wait_window_bounded_to_100() -> None:
+    """Rolling window keeps only the last 100 samples."""
+    from hive._helpers import (
+        _GIT_LOCK_WAIT_HISTORY,
+        _git_lock_stats_snapshot,
+        _record_lock_wait,
+    )
+
+    _GIT_LOCK_WAIT_HISTORY.clear()
+    for i in range(150):
+        _record_lock_wait(i)
+    snap = _git_lock_stats_snapshot()
+    assert snap["sample_count"] == 100
+    # Should contain only the latest 100: 50..149, mean = (50+149)/2 = 99.5
+    assert snap["mean_ms"] == 99.5
+
+
+def test_acquire_with_telemetry_records_into_window() -> None:
+    """`_acquire_with_telemetry` populates the rolling window."""
+    import threading as _threading
+
+    from hive._helpers import (
+        _GIT_LOCK_WAIT_HISTORY,
+        _acquire_with_telemetry,
+        _git_lock_stats_snapshot,
+    )
+
+    _GIT_LOCK_WAIT_HISTORY.clear()
+    lock = _threading.Lock()
+    acquired = _acquire_with_telemetry(lock, "_TEST_RECORD", timeout=1)
+    try:
+        snap = _git_lock_stats_snapshot()
+        assert snap["sample_count"] == 1
+    finally:
+        if acquired:
+            lock.release()
+
+
+def test_compute_wal_size_bytes_empty_dir(tmp_path: Path) -> None:
+    """Empty state dir returns 0."""
+    from hive._helpers import _compute_wal_size_bytes
+
+    assert _compute_wal_size_bytes(tmp_path) == 0
+
+
+def test_compute_wal_size_bytes_sums_only_wal_files(tmp_path: Path) -> None:
+    """Sums *.db-wal files only, ignoring other files."""
+    from hive._helpers import _compute_wal_size_bytes
+
+    (tmp_path / "a.db-wal").write_bytes(b"x" * 100)
+    (tmp_path / "b.db-wal").write_bytes(b"y" * 250)
+    (tmp_path / "c.db").write_bytes(b"z" * 9999)  # not WAL
+    (tmp_path / "d.db-shm").write_bytes(b"q" * 9999)  # not WAL
+    assert _compute_wal_size_bytes(tmp_path) == 350
+
+
+def test_count_competing_hive_processes_returns_non_negative_int() -> None:
+    """Helper is robust (never throws); cached snapshot is non-negative int."""
+    from hive._helpers import _count_competing_hive_processes
+
+    n = _count_competing_hive_processes()
+    assert isinstance(n, int)
+    assert n >= 0
