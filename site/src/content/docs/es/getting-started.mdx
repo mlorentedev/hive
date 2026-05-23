@@ -21,7 +21,7 @@ Un solo comando. Sin clonar, sin venv, sin archivos de configuración.
 Registra siempre Hive a nivel de **usuario** (no de proyecto) para que funcione en todos tus proyectos. Ese es el objetivo — un vault, todos los proyectos.
 - **Claude Code:** flag `-s user`
 - **Gemini CLI:** flag `-s user`
-- **Codex CLI / Copilot:** los archivos de config ya son a nivel de usuario (`~/.codex/config.toml`) o se pueden agregar a la configuración de usuario de VS Code
+- **Codex CLI / Copilot / OpenCode:** los archivos de config ya son a nivel de usuario (`~/.codex/config.toml`, `~/.config/opencode/opencode.jsonc`) o se pueden agregar a la configuración de usuario de VS Code
 :::
 
 <Tabs syncKey="client">
@@ -51,6 +51,20 @@ Registra siempre Hive a nivel de **usuario** (no de proyecto) para que funcione 
         "hive-vault": {
           "command": "uvx",
           "args": ["--upgrade", "hive-vault"]
+        }
+      }
+    }
+    ```
+  </TabItem>
+  <TabItem label="OpenCode">
+    Agrega a `~/.config/opencode/opencode.jsonc`:
+    ```jsonc
+    {
+      "mcp": {
+        "hive": {
+          "type": "local",
+          "command": ["uvx", "--upgrade", "hive-vault"],
+          "enabled": true
         }
       }
     }
@@ -110,6 +124,22 @@ Para apuntar Hive a tu vault:
     }
     ```
   </TabItem>
+  <TabItem label="OpenCode">
+    ```jsonc
+    {
+      "mcp": {
+        "hive": {
+          "type": "local",
+          "command": ["uvx", "--upgrade", "hive-vault"],
+          "environment": {
+            "VAULT_PATH": "/ruta/a/tu/vault"
+          },
+          "enabled": true
+        }
+      }
+    }
+    ```
+  </TabItem>
 </Tabs>
 
 ## Configurar Worker (Opcional)
@@ -159,6 +189,24 @@ Para habilitar la delegación de tareas a modelos más baratos:
             "HIVE_OLLAMA_ENDPOINT": "http://tu-ollama:11434",
             "OPENROUTER_API_KEY": "sk-or-..."
           }
+        }
+      }
+    }
+    ```
+  </TabItem>
+  <TabItem label="OpenCode">
+    ```jsonc
+    {
+      "mcp": {
+        "hive": {
+          "type": "local",
+          "command": ["uvx", "--upgrade", "hive-vault"],
+          "environment": {
+            "VAULT_PATH": "/ruta/a/tu/vault",
+            "HIVE_OLLAMA_ENDPOINT": "http://tu-ollama:11434",
+            "OPENROUTER_API_KEY": "sk-or-..."
+          },
+          "enabled": true
         }
       }
     }

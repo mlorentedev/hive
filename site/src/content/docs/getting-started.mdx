@@ -21,7 +21,7 @@ One command. No cloning, no venv, no config files.
 Always register Hive at **user scope** (not project scope) so it works across all your projects. That's the whole point — one vault, every project.
 - **Claude Code:** `-s user` flag
 - **Gemini CLI:** `-s user` flag
-- **Codex CLI / Copilot:** config files are already user-level (`~/.codex/config.toml`) or can be added to VS Code user settings
+- **Codex CLI / Copilot / OpenCode:** config files are already user-level (`~/.codex/config.toml`, `~/.config/opencode/opencode.jsonc`) or can be added to VS Code user settings
 :::
 
 <Tabs syncKey="client">
@@ -51,6 +51,20 @@ Always register Hive at **user scope** (not project scope) so it works across al
         "hive-vault": {
           "command": "uvx",
           "args": ["--upgrade", "hive-vault"]
+        }
+      }
+    }
+    ```
+  </TabItem>
+  <TabItem label="OpenCode">
+    Add to `~/.config/opencode/opencode.jsonc`:
+    ```jsonc
+    {
+      "mcp": {
+        "hive": {
+          "type": "local",
+          "command": ["uvx", "--upgrade", "hive-vault"],
+          "enabled": true
         }
       }
     }
@@ -110,6 +124,22 @@ To point Hive to your vault:
     }
     ```
   </TabItem>
+  <TabItem label="OpenCode">
+    ```jsonc
+    {
+      "mcp": {
+        "hive": {
+          "type": "local",
+          "command": ["uvx", "--upgrade", "hive-vault"],
+          "environment": {
+            "VAULT_PATH": "/path/to/your/vault"
+          },
+          "enabled": true
+        }
+      }
+    }
+    ```
+  </TabItem>
 </Tabs>
 
 ## Configure Worker (Optional)
@@ -159,6 +189,24 @@ To enable task delegation to cheaper models:
             "HIVE_OLLAMA_ENDPOINT": "http://your-ollama:11434",
             "OPENROUTER_API_KEY": "sk-or-..."
           }
+        }
+      }
+    }
+    ```
+  </TabItem>
+  <TabItem label="OpenCode">
+    ```jsonc
+    {
+      "mcp": {
+        "hive": {
+          "type": "local",
+          "command": ["uvx", "--upgrade", "hive-vault"],
+          "environment": {
+            "VAULT_PATH": "/path/to/your/vault",
+            "HIVE_OLLAMA_ENDPOINT": "http://your-ollama:11434",
+            "OPENROUTER_API_KEY": "sk-or-..."
+          },
+          "enabled": true
         }
       }
     }
