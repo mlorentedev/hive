@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.0](https://github.com/mlorentedev/hive/compare/v1.17.0...v1.18.0) (2026-05-23)
+
+
+### Features
+
+* **hive:** HIVE-115 PR-3 bounded_call hard deadline ([#111](https://github.com/mlorentedev/hive/issues/111), ADR-008) ([#119](https://github.com/mlorentedev/hive/issues/119)) ([43a6c4a](https://github.com/mlorentedev/hive/commit/43a6c4ac3e8294f3ff9ca129a1e6de70c42fb1ec))
+
 ## [1.17.0](https://github.com/mlorentedev/hive/compare/v1.16.0...v1.17.0) (2026-05-22)
 
 
