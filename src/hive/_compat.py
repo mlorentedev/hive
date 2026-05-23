@@ -31,12 +31,14 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import anyio
 
 if TYPE_CHECKING:
     from types import TracebackType
+
+GhostSource = Literal["cancellation", "deadline"]
 
 _log = logging.getLogger(__name__)
 
@@ -63,13 +65,34 @@ class _GhostResponseCounter:
         self._total = 0
         self._last_seen: str | None = None
         self._last_tool: str | None = None
+        self._by_source: dict[str, int] = {}
 
-    def record(self, tool: str | None = None) -> None:
+    def record(
+        self,
+        tool: str | None = None,
+        source: GhostSource = "cancellation",
+    ) -> None:
+        """Record a suppressed late response.
+
+        ``source`` discriminates the trigger so operators can break down
+        the metric in ``vault_health.ghost_responses.by_source``:
+
+        - ``"cancellation"`` — client sent ``notifications/cancelled``
+          and ``RequestResponder.cancel()`` already wrote an ``ErrorData``
+          to the wire; our late success would be a duplicate response
+          (the original race documented in ADR-007). Default for
+          ``_compat._patched_respond`` to preserve the prior contract.
+        - ``"deadline"`` — ``bounded_call`` enforced a hard deadline
+          (HIVE-115 PR-3 / ADR-008); the worker thread completed past
+          the deadline and we are silencing its late respond(). The
+          disk state may have mutated.
+        """
         with self._lock:
             self._total += 1
             self._last_seen = datetime.now(UTC).isoformat()
             if tool:
                 self._last_tool = tool
+            self._by_source[source] = self._by_source.get(source, 0) + 1
 
     def snapshot(self) -> dict[str, object]:
         with self._lock:
@@ -77,6 +100,7 @@ class _GhostResponseCounter:
                 "total": self._total,
                 "last_seen": self._last_seen,
                 "last_tool": self._last_tool,
+                "by_source": dict(self._by_source),
             }
 
     def reset(self) -> None:
@@ -84,6 +108,7 @@ class _GhostResponseCounter:
             self._total = 0
             self._last_seen = None
             self._last_tool = None
+            self._by_source = {}
 
 
 GHOST_RESPONSES = _GhostResponseCounter()

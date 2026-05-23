@@ -281,8 +281,19 @@ async def test_ghost_response_counter_passes_through_when_not_completed(
 
 
 def test_ghost_response_snapshot_defaults_empty() -> None:
-    """Fresh counter snapshot has total=0 and null last_* fields."""
+    """Fresh counter snapshot has total=0, null last_* fields, empty by_source.
+
+    ``by_source`` was added by HIVE-115 PR-3 to discriminate the
+    ``cancellation`` (existing) vs ``deadline`` (new, bounded_call-driven)
+    triggers. An empty dict on a fresh counter preserves the read contract
+    for clients that only look at ``total``.
+    """
     from hive import _compat as _hc
 
     snap = _hc.GHOST_RESPONSES.snapshot()
-    assert snap == {"total": 0, "last_seen": None, "last_tool": None}
+    assert snap == {
+        "total": 0,
+        "last_seen": None,
+        "last_tool": None,
+        "by_source": {},
+    }
