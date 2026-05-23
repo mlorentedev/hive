@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 from hive._helpers import (
@@ -11,10 +12,12 @@ from hive._helpers import (
     _check_path_boundary,
     _git_commit,
     _git_commit_all,
+    _is_external_committer_healthy,
     _make_frontmatter,
     _match_and_replace,
     _resolve_project_dir,
     _vault_guard,
+    detect_obsidian_git,
     format_io_error,
     project_not_found,
     track,
@@ -24,11 +27,85 @@ from hive._helpers import (
 from hive.frontmatter import validate_frontmatter
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from fastmcp import FastMCP
 
     from hive._context import ServerContext
 
 _WRITE_OPERATIONS = frozenset({"append", "replace", "create"})
+
+_AUTO_DEFER_ENV = "HIVE_AUTO_DEFER_TO_EXTERNAL_COMMITTER"
+
+
+def _env_truthy(value: str | None) -> bool:
+    """Permissive boolean parse for env-var opt-in.
+
+    Recognised truthy values: ``true``, ``yes``, ``1``, ``on``
+    (case-insensitive). Everything else is falsy (including unset).
+    Strict by design: a typo like ``HIVE_AUTO_DEFER_TO_EXTERNAL_COMMITTER=ture``
+    is treated as falsy, not crashed.
+    """
+    if value is None:
+        return False
+    return value.strip().lower() in {"true", "yes", "1", "on"}
+
+
+_DEFERRED_SUFFIX = (
+    " (deferred to obsidian-git; will be picked up on its next tick)"
+)
+_UNCOMMITTED_SUFFIX = " (uncommitted — call vault_commit to flush)"
+
+
+def _commit_status_suffix(requested_commit: bool, deferred: bool) -> str:
+    """Format the trailing response suffix for write tools.
+
+    Three states feed into one line:
+
+    - ``requested_commit=False`` → uncommitted (caller must
+      ``vault_commit`` later). Unchanged from pre-PR-4 behaviour.
+    - ``requested_commit=True, deferred=True`` → obsidian-git is healthy
+      and will pick this up on its next tick.
+    - ``requested_commit=True, deferred=False`` → hive committed inline;
+      empty suffix.
+    """
+    if not requested_commit:
+        return _UNCOMMITTED_SUFFIX
+    if deferred:
+        return _DEFERRED_SUFFIX
+    return ""
+
+
+def _should_defer_to_external_committer(vault_path: Path) -> bool:
+    """Composite predicate for HIVE-115 PR-4 cooperation with obsidian-git.
+
+    Per the 2026-05-22 audit M4:
+
+    .. code-block:: text
+
+        defer ⇔ env "HIVE_AUTO_DEFER_TO_EXTERNAL_COMMITTER" == "true"
+                AND detect_obsidian_git(vault) returns a non-None config
+                AND (recent_commit ∨ empty_porcelain)
+
+    Returns ``False`` when:
+
+    - env var is unset, ``false``, or any non-truthy value (default)
+    - obsidian-git plugin is not installed in the vault
+    - obsidian-git is installed but the last commit is stale AND
+      ``git status --porcelain`` is non-empty (committer is broken;
+      fall back to hive's own commit path)
+
+    Read-path predicate; no termination supervision needed.
+    """
+    if not _env_truthy(os.environ.get(_AUTO_DEFER_ENV)):
+        return False
+    config = detect_obsidian_git(vault_path)
+    if config is None:
+        return False
+    interval = config.get("commit_interval", 0)
+    if interval <= 0:
+        return False
+    return _is_external_committer_healthy(vault_path, interval)
 
 
 def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
@@ -131,7 +208,11 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
                     rel = filepath.relative_to(ctx.vault)
                     display = "00_meta" if project == "_meta" else project
-                    if commit:
+                    should_defer = (
+                        commit
+                        and _should_defer_to_external_committer(ctx.vault)
+                    )
+                    if commit and not should_defer:
                         _git_commit(
                             ctx.vault, [rel],
                             f"vault: create {display}/{path}",
@@ -143,7 +224,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     project,
                 )
 
-            suffix = "" if commit else " (uncommitted — call vault_commit to flush)"
+            suffix = _commit_status_suffix(commit, should_defer)
             return track(
                 ctx, "vault_write",
                 f"Created {project}/{path} (type: {doc_type}).{suffix}",
@@ -200,7 +281,11 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     )
 
                 rel = filepath.relative_to(ctx.vault)
-                if commit:
+                should_defer = (
+                    commit
+                    and _should_defer_to_external_committer(ctx.vault)
+                )
+                if commit and not should_defer:
                     _git_commit(
                         ctx.vault, [rel],
                         f"vault: update {project}/{section}",
@@ -212,7 +297,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 project,
             )
 
-        suffix = "" if commit else " (uncommitted — call vault_commit to flush)"
+        suffix = _commit_status_suffix(commit, should_defer)
         return track(
             ctx, "vault_write",
             f"Updated {project}/{section} ({operation}).{suffix}",
@@ -347,7 +432,11 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
                 rel = filepath.relative_to(ctx.vault)
                 n = len(patch_list)
-                if commit:
+                should_defer = (
+                    commit
+                    and _should_defer_to_external_committer(ctx.vault)
+                )
+                if commit and not should_defer:
                     _git_commit(
                         ctx.vault, [rel],
                         f"vault: patch {project}/{path}",
@@ -360,7 +449,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             )
 
         noun = "patch" if n == 1 else "patches"
-        suffix = "" if commit else " (uncommitted — call vault_commit to flush)"
+        suffix = _commit_status_suffix(commit, should_defer)
         return track(ctx, "vault_patch",
                      f"Applied {n} {noun} to {project}/{path}.{suffix}",
                      project, path)
