@@ -1,8 +1,9 @@
 ---
 id: "HIVE-115-latency-tail-redesign"
 type: spec
-status: draft
+status: archived
 created: "2026-05-21"
+archived: "2026-05-22"
 tags: [spec, proposal]
 template_version: "1.0"
 ---
