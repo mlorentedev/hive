@@ -20,7 +20,8 @@ Map every acceptance criterion from `proposal.md` to concrete proof (commit hash
 - [ ] AC-7 (bounded_call enforces deadline across async/thread/subprocess) → commit `<hash>` / tests `tests/test_bounded_call.py::test_async_sleep_terminated` + `test_blocking_thread_sleep_terminated` + `test_subprocess_terminated`
 - [ ] AC-8 (bounded_call terminates registered Popen) → commit `<hash>` / test `tests/test_bounded_call.py::test_subprocess_terminated`
 - [ ] AC-9 (.git/index.lock PID-ownership cleanup) → commit `<hash>` / test `tests/test_bounded_call.py::test_index_lock_pid_ownership`
-- [ ] AC-10 (no regression in existing test suite) → `make check` green; ghost-response test passes; HIVE-104 coalescer tests pass
+- [ ] AC-9b (partial commit between sub-Popens does not block recovery — added 2026-05-22 per B3) → commit `<hash>` / test `tests/test_bounded_call.py::test_partial_commit_prevention`
+- [ ] AC-10 (no regression; write paths migrated, read paths advisory) → `make check` green; ghost-response test passes; HIVE-104 coalescer tests pass; multi-process integration test (T3.7b) passes
 - [ ] AC-11 (outbox + reconciler for SQLite trackers) → commit `<hash>` / tests `tests/test_outbox.py::*`
 - [ ] AC-12 (detect-and-defer to obsidian-git) → commit `<hash>` / tests `tests/test_detect_and_defer.py::*`
 - [ ] AC-13 (bilingual troubleshooting docs) → commits `<hashes>` / files `site/.../guides/troubleshooting.md` (EN + ES)
