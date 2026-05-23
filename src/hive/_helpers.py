@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import difflib
 import functools
 import json
@@ -551,6 +552,18 @@ def track(
 _GIT_LOCK = threading.Lock()
 _WRITE_LOCK = threading.Lock()
 
+# Per-call subprocess registry — populated by `_run_git` for every spawned
+# Popen, drained by ``bounded_call`` / ``tool_span`` on deadline expiry to
+# terminate stuck git invocations (HIVE-115 PR-3 / ADR-008). Set by
+# tool wrappers right before the handler runs; thread-propagated via
+# contextvars (asyncio.to_thread carries the context, so the worker
+# thread sees the same list the async supervisor will iterate).
+# Default ``None`` = legacy unsupervised call (e.g. ``_git_log`` /
+# ``_git_recent`` read paths that retain ``subprocess.run`` per m1).
+_GIT_REGISTRY_CV: contextvars.ContextVar[
+    list[subprocess.Popen[bytes]] | None
+] = contextvars.ContextVar("_GIT_REGISTRY", default=None)
+
 
 _GIT_LOCK_WAIT_HISTORY: deque[int] = deque(maxlen=100)
 _GIT_LOCK_WAIT_GUARD = threading.Lock()
@@ -788,24 +801,57 @@ def _git_filelock(vault_path: Path) -> filelock.BaseFileLock:
 async def tool_span(
     tool_name: str, timeout_seconds: float,
 ) -> AsyncIterator[None]:
-    """Enforce a timeout and log wall-clock duration for an async tool.
+    """Enforce a hard deadline AND register a Popen kill-set for the body.
 
     Raises ``TimeoutError`` if the tool body exceeds *timeout_seconds*.
+    On expiry: terminates every Popen registered by ``_run_git`` during
+    the body (POSIX SIGTERM → grace → SIGKILL; Windows TerminateProcess
+    twice), then records the event in ``GHOST_RESPONSES`` with
+    ``source="deadline"`` so operators can distinguish deadline-driven
+    suppressions from cancellation-race suppressions in
+    ``vault_health.ghost_responses.by_source`` (HIVE-115 PR-3 / ADR-008,
+    pre-PR-3 audit B4).
+
+    Registry propagation: a fresh ``list`` is set on ``_GIT_REGISTRY_CV``
+    for the duration of the body. ``contextvars`` propagates the same
+    list reference into ``asyncio.to_thread`` workers (CPython 3.9+),
+    so ``_run_git`` callsites inside sync handlers populate the same
+    object the supervisor iterates on timeout.
     """
+    from hive._deadline import _DEFAULT_GRACE_S, _terminate_registry
+
+    registry: list[subprocess.Popen[bytes]] = []
+    token = _GIT_REGISTRY_CV.set(registry)
     start = time.monotonic()
     try:
-        async with asyncio.timeout(timeout_seconds):
-            yield
-    except TimeoutError:
-        elapsed = time.monotonic() - start
-        _log.warning(
-            "%s timed out after %.1fs (limit: %.0fs)",
-            tool_name, elapsed, timeout_seconds,
-        )
-        raise
-    else:
-        elapsed = time.monotonic() - start
-        _log.debug("%s completed in %.1fs", tool_name, elapsed)
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                yield
+        except TimeoutError:
+            elapsed = time.monotonic() - start
+            try:
+                killed = await _terminate_registry(registry, _DEFAULT_GRACE_S)
+            except Exception as exc:  # noqa: BLE001
+                _log.debug("tool_span termination cleanup failed: %s", exc)
+                killed = []
+            try:
+                from hive._compat import GHOST_RESPONSES
+
+                GHOST_RESPONSES.record(tool=tool_name, source="deadline")
+            except Exception as exc:  # noqa: BLE001
+                _log.debug("tool_span ghost_responses.record failed: %s", exc)
+            _log.warning(
+                "%s timed out after %.1fs (deadline %.0fs); killed %d "
+                "subprocess(es) "
+                "[mcp.tool_span.deadline_exceeded killed_pids=%s]",
+                tool_name, elapsed, timeout_seconds, len(killed), killed,
+            )
+            raise
+        else:
+            elapsed = time.monotonic() - start
+            _log.debug("%s completed in %.1fs", tool_name, elapsed)
+    finally:
+        _GIT_REGISTRY_CV.reset(token)
 
 
 async def run_sync_tool(
@@ -873,6 +919,76 @@ def wrap_sync_tool(
     return decorator
 
 
+def _run_git(
+    args: list[str],
+    vault_path: Path,
+    *,
+    registry: list[subprocess.Popen[bytes]] | None = None,
+) -> tuple[int, str, str]:
+    """Spawn one git invocation as a ``subprocess.Popen``; register on the
+    deadline registry; return ``(returncode, stdout, stderr)`` text.
+
+    The Green prerequisite of HIVE-115 PR-3 (per the 2026-05-22 audit B2).
+    All write-path git callers (``_git_commit``, ``_git_commit_all``)
+    funnel through this helper so the Popen migration touches one place
+    and the supervisor's termination authority composes uniformly.
+
+    Behaviour contract:
+
+    - **No inner ``timeout=``.** ``bounded_call`` / ``tool_span`` are the
+      single source of truth for deadlines (audit B1). An inner timeout
+      would race the supervisor's external termination — different error
+      semantics, harder to reason about.
+    - **Cross-OS creation flags** via ``hive._deadline.popen_creation_kwargs``:
+      Windows ``CREATE_NEW_PROCESS_GROUP``; POSIX ``start_new_session=True``.
+      Both let the supervisor reach descendants on termination (audit M2).
+    - **Registry**: caller-supplied list, or ``_GIT_REGISTRY_CV.get()``
+      when ``None``. ``None`` from both = "no supervisor active"
+      (legacy / test path); we still run, just without termination
+      authority. Mutation of the registry is thread-safe because list
+      append/remove are atomic in CPython.
+    - **External termination defense**: catches ``BrokenPipeError`` and
+      ``OSError`` because the supervisor may kill the Popen mid-flight;
+      we drain whatever stdio is left and return ``rc=-1`` on hard
+      failure.
+    """
+    from hive._deadline import popen_creation_kwargs
+
+    if registry is None:
+        registry = _GIT_REGISTRY_CV.get()
+
+    proc = subprocess.Popen(  # noqa: S603
+        ["git", *args],
+        cwd=vault_path,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        **popen_creation_kwargs(),
+    )
+    if registry is not None:
+        registry.append(proc)
+    stdout_b: bytes = b""
+    stderr_b: bytes = b""
+    try:
+        try:
+            stdout_b, stderr_b = proc.communicate()
+        except (BrokenPipeError, OSError) as exc:
+            # External termination by bounded_call / tool_span.
+            _log.debug("git %s: external termination (%s)", args[0], exc)
+            with contextlib.suppress(subprocess.SubprocessError, OSError):
+                # Best-effort drain of whatever the kernel buffered before
+                # the kill. Failures here are unrecoverable; we return -1.
+                stdout_b, stderr_b = proc.communicate()
+        rc = proc.returncode if proc.returncode is not None else -1
+    finally:
+        if registry is not None and proc in registry:
+            registry.remove(proc)
+    return (
+        rc,
+        (stdout_b or b"").decode("utf-8", "replace"),
+        (stderr_b or b"").decode("utf-8", "replace"),
+    )
+
+
 def _git_commit(
     vault_path: Path, rel_paths: list[Path], message: str,
 ) -> None:
@@ -897,6 +1013,12 @@ def _git_commit(
     two hive subprocesses could race on git's own ``.git/index.lock``
     and time out (see hive.log history: 5+ ``git commit timed out``
     warnings from concurrent sessions).
+
+    Both Popens (``git add`` then ``git commit``) register on the
+    deadline registry via ``_run_git``; if ``bounded_call`` /
+    ``tool_span`` fires its deadline mid-sequence, the surviving Popen
+    is terminated externally and this function returns to the caller
+    via the supervisor's ``TimeoutError``.
     """
     if not rel_paths:
         _log.debug("git commit no-op: empty path list")
@@ -912,29 +1034,24 @@ def _git_commit(
     try:
         try:
             with _filelock_with_telemetry(_git_filelock(vault_path), "_git_filelock"):
-                subprocess.run(
-                    ["git", "add", *path_strs],
-                    cwd=vault_path,
-                    capture_output=True,
-                    check=True,
-                    timeout=30,
-                )
-                subprocess.run(
-                    ["git", "commit", "-m", safe_msg],
-                    cwd=vault_path,
-                    capture_output=True,
-                    check=True,
-                    timeout=30,
-                )
+                rc, _, err = _run_git(["add", *path_strs], vault_path)
+                if rc != 0:
+                    _log.warning(
+                        "git add failed for %s rc=%s err=%s",
+                        path_strs, rc, err.strip(),
+                    )
+                    return
+                rc, _, err = _run_git(["commit", "-m", safe_msg], vault_path)
+                if rc != 0:
+                    _log.warning(
+                        "git commit failed for %s rc=%s err=%s",
+                        path_strs, rc, err.strip(),
+                    )
         except filelock.Timeout:
             _log.warning(
                 "git commit skipped for %s: inter-process lock timeout (%ds)",
                 path_strs, _lock_timeout(),
             )
-        except subprocess.CalledProcessError as exc:
-            _log.warning("git commit failed for %s: %s", path_strs, exc)
-        except subprocess.TimeoutExpired as exc:
-            _log.warning("git commit timed out for %s: %s", path_strs, exc)
         except Exception as exc:
             _log.warning(
                 "git commit unexpected error for %s: %s", path_strs, exc,
@@ -962,46 +1079,27 @@ def _git_commit_all(
     try:
         try:
             with _filelock_with_telemetry(_git_filelock(vault_path), "_git_filelock"):
-                porcelain = subprocess.run(
-                    ["git", "status", "--porcelain"],
-                    cwd=vault_path,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    timeout=30,
+                rc, porcelain_out, porcelain_err = _run_git(
+                    ["status", "--porcelain"], vault_path,
                 )
-                if not porcelain.stdout.strip():
+                if rc != 0:
+                    return "error", (
+                        f"git status rc={rc}: {porcelain_err.strip() or '<empty>'}"
+                    )
+                if not porcelain_out.strip():
                     return "clean", ""
-                subprocess.run(
-                    ["git", "add", "-A"],
-                    cwd=vault_path,
-                    capture_output=True,
-                    check=True,
-                    timeout=30,
-                )
-                subprocess.run(
-                    ["git", "commit", "-m", safe_msg],
-                    cwd=vault_path,
-                    capture_output=True,
-                    check=True,
-                    timeout=30,
-                )
-                rev = subprocess.run(
-                    ["git", "rev-parse", "HEAD"],
-                    cwd=vault_path,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    timeout=30,
-                )
-                return "committed", rev.stdout.strip()
+                rc, _, err = _run_git(["add", "-A"], vault_path)
+                if rc != 0:
+                    return "error", f"git add -A rc={rc}: {err.strip() or '<empty>'}"
+                rc, _, err = _run_git(["commit", "-m", safe_msg], vault_path)
+                if rc != 0:
+                    return "error", f"git commit rc={rc}: {err.strip() or '<empty>'}"
+                rc, rev_out, err = _run_git(["rev-parse", "HEAD"], vault_path)
+                if rc != 0:
+                    return "error", f"git rev-parse rc={rc}: {err.strip() or '<empty>'}"
+                return "committed", rev_out.strip()
         except filelock.Timeout:
             return "error", "inter-process lock timeout"
-        except subprocess.CalledProcessError as exc:
-            stderr = exc.stderr.decode("utf-8", "replace") if exc.stderr else ""
-            return "error", f"git failed: {stderr.strip() or exc!s}"
-        except subprocess.TimeoutExpired:
-            return "error", "git command timed out"
         except Exception as exc:
             return "error", f"unexpected: {type(exc).__name__}: {exc}"
     finally:

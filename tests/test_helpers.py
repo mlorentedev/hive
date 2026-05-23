@@ -376,20 +376,24 @@ class TestGitCommitCoalesce:
     def test_coalesces_multi_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """``_git_commit(vault, [p1, p2, p3], msg)`` → 1 add + 1 commit."""
+        """``_git_commit(vault, [p1, p2, p3], msg)`` → 1 add + 1 commit.
+
+        Post HIVE-115 PR-3: writes go through ``_run_git`` (Popen +
+        registry), not ``subprocess.run``. Test monkeypatches the helper
+        directly so the behaviour assertion ("one add, one commit") is
+        decoupled from the underlying process API.
+        """
         from pathlib import Path as _Path
 
         calls: list[list[str]] = []
 
-        def fake_run(cmd: list[str], **_kwargs: object) -> MagicMock:
-            calls.append(list(cmd))
-            mock = MagicMock()
-            mock.returncode = 0
-            mock.stdout = b""
-            mock.stderr = b""
-            return mock
+        def fake_run_git(
+            args: list[str], _vault: Path, *, registry: object = None,  # noqa: ARG001
+        ) -> tuple[int, str, str]:
+            calls.append(["git", *args])
+            return 0, "", ""
 
-        monkeypatch.setattr("hive._helpers.subprocess.run", fake_run)
+        monkeypatch.setattr("hive._helpers._run_git", fake_run_git)
 
         _git_commit(
             tmp_path,
@@ -408,15 +412,17 @@ class TestGitCommitCoalesce:
     def test_noop_on_empty_paths(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Empty path list must skip subprocess entirely (no git invocation)."""
+        """Empty path list must skip the helper entirely (no git invocation)."""
         calls: list[list[str]] = []
 
-        def fake_run(cmd: list[str], **_kwargs: object) -> MagicMock:
-            calls.append(list(cmd))
-            return MagicMock(returncode=0, stdout=b"", stderr=b"")
+        def fake_run_git(
+            args: list[str], _vault: Path, *, registry: object = None,  # noqa: ARG001
+        ) -> tuple[int, str, str]:
+            calls.append(["git", *args])
+            return 0, "", ""
 
-        monkeypatch.setattr("hive._helpers.subprocess.run", fake_run)
+        monkeypatch.setattr("hive._helpers._run_git", fake_run_git)
 
         _git_commit(tmp_path, [], "vault: noop")
 
-        assert calls == [], f"expected no subprocess calls, got: {calls}"
+        assert calls == [], f"expected no _run_git calls, got: {calls}"

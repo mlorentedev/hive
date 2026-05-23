@@ -35,7 +35,7 @@ import signal
 import subprocess
 import sys
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -52,7 +52,7 @@ IS_WINDOWS = sys.platform == "win32"
 # ── Cross-OS Popen creation helpers ─────────────────────────────────────
 
 
-def popen_creation_kwargs() -> dict[str, object]:
+def popen_creation_kwargs() -> dict[str, Any]:
     """Platform-specific kwargs to make a Popen terminatable as a group.
 
     On POSIX, ``start_new_session=True`` puts the child in a new process
@@ -62,6 +62,10 @@ def popen_creation_kwargs() -> dict[str, object]:
 
     On Windows, ``creationflags=CREATE_NEW_PROCESS_GROUP`` lets
     ``TerminateProcess`` reach the child process tree.
+
+    Return type is ``dict[str, Any]`` because mypy cannot unify the two
+    branches against ``subprocess.Popen``'s overloaded signatures; this
+    is the canonical "platform-specific kwargs bundle" trade-off.
     """
     if IS_WINDOWS:
         # CREATE_NEW_PROCESS_GROUP only exists on Windows; mypy on POSIX
