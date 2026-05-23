@@ -25,6 +25,24 @@ class _ExampleTracker(_SqliteTracker):
     _SCHEMA = "CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY);"
 
 
+def _wait_for_count(
+    tracker: _SqliteTracker, minimum: int, deadline_s: float = 2.0,
+) -> int:
+    """Poll ``tracker._checkpoint_count`` until it reaches ``minimum`` or
+    ``deadline_s`` elapses. Returns the count seen at exit.
+
+    Replaces absolute-timing ``time.sleep(...)`` waits in tests because
+    CI runners under load can stretch a 0.1s tick to 0.13-0.15s — if the
+    test sleeps exactly 0.25s, the second tick may land just past the
+    window. Polling with a generous deadline is robust to that slack
+    while still failing fast when the loop is genuinely broken.
+    """
+    deadline = time.monotonic() + deadline_s
+    while tracker._checkpoint_count < minimum and time.monotonic() < deadline:
+        time.sleep(0.02)
+    return tracker._checkpoint_count
+
+
 def _seed_wal(tracker: _SqliteTracker, n: int = 100) -> None:
     """Write enough rows to materialize WAL frames."""
     with tracker._lock:
@@ -45,10 +63,10 @@ def test_passive_checkpoint_runs_on_interval(tmp_path: Path) -> None:
     tracker = _ExampleTracker(db_path, checkpoint_interval_s=0.1)
     try:
         _seed_wal(tracker)
-        time.sleep(0.5)  # let 4-5 ticks happen at 0.1s interval
-        assert tracker._checkpoint_count >= 3, (
-            f"expected ≥3 checkpoint ticks within 0.5s at 0.1s interval, "
-            f"got {tracker._checkpoint_count}"
+        count = _wait_for_count(tracker, minimum=3, deadline_s=2.0)
+        assert count >= 3, (
+            f"expected ≥3 checkpoint ticks within 2s at 0.1s interval, "
+            f"got {count}"
         )
     finally:
         tracker.close()
@@ -154,8 +172,7 @@ def test_close_stops_checkpoint_thread(tmp_path: Path) -> None:
     tracker = _ExampleTracker(db_path, checkpoint_interval_s=0.05)
     try:
         _seed_wal(tracker)
-        time.sleep(0.2)  # let some ticks happen
-        count_before = tracker._checkpoint_count
+        count_before = _wait_for_count(tracker, minimum=1, deadline_s=2.0)
         assert count_before > 0, "test setup: thread should have run before close"
     finally:
         tracker.close()
@@ -184,9 +201,10 @@ def test_checkpoint_loop_survives_sqlite_errors(tmp_path: Path) -> None:
     tracker = _ExampleTracker(db_path, checkpoint_interval_s=0.1)
     try:
         _seed_wal(tracker)
-        time.sleep(0.25)  # at least 2 ticks
-        early_count = tracker._checkpoint_count
-        assert early_count >= 2
+        early_count = _wait_for_count(tracker, minimum=2, deadline_s=2.0)
+        assert early_count >= 2, (
+            f"expected ≥2 checkpoint ticks within 2s, got {early_count}"
+        )
 
         # Forcefully simulate a transient error by closing & reopening the
         # connection out from under the loop. The next tick should encounter
@@ -200,10 +218,10 @@ def test_checkpoint_loop_survives_sqlite_errors(tmp_path: Path) -> None:
             )
             tracker._conn.execute("PRAGMA journal_mode=WAL")
 
-        time.sleep(0.25)  # let a few more ticks run with the new conn
-        # Even after the reconnect, the loop should have continued.
-        # We can't assert exact count (the error-recovery branch
-        # may suppress the increment), but the thread must be alive.
+        # Wait until at least one MORE tick has happened (the post-error
+        # one), bounded by 2s. The error-recovery branch may suppress the
+        # increment, so we only require the thread stayed alive.
+        _wait_for_count(tracker, minimum=early_count + 1, deadline_s=2.0)
         assert tracker._checkpoint_thread is not None
         assert tracker._checkpoint_thread.is_alive(), (
             "checkpoint thread must survive transient sqlite3.Error"
