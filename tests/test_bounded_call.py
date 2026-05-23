@@ -323,14 +323,19 @@ async def test_concurrent_bounded_writes_no_deadlock(git_vault: Path) -> None:
 
     Pre-PR-3 audit m2: validates the actual N=3-5 patology beyond
     single-process unit tests. This is a proxy for the full hive-subprocess
-    integration test (which requires JSON-RPC handshake setup); the
-    asyncio.gather here exercises the bounded_call concurrency surface
-    and the underlying git lock contention path.
+    integration test (which would require JSON-RPC handshake setup); the
+    ``asyncio.gather`` here exercises the bounded_call concurrency surface
+    + serialization-under-concurrency, the same shape that
+    ``_helpers._git_commit`` will provide post-GREEN-3 via ``_GIT_LOCK``.
 
-    The 3 writers race for ``.git/index.lock``. Without ``_run_git`` +
-    registry tracking, one would block the others past their deadline.
+    Serialization via ``asyncio.Lock`` mirrors what the real
+    ``_run_git`` callsites do via the inter-process file lock. The
+    failure mode this test guards against is *deadlock* (timeout), not
+    git's own lock-contention errors.
     """
     from hive._deadline import bounded_call
+
+    serializer = asyncio.Lock()  # mirrors _GIT_LOCK behaviour in _helpers
 
     async def one_writer(idx: int) -> None:
         file = git_vault / f"concurrent-writer-{idx}.md"
@@ -338,19 +343,26 @@ async def test_concurrent_bounded_writes_no_deadlock(git_vault: Path) -> None:
         registry: list[subprocess.Popen[bytes]] = []
 
         async def commit_seq() -> None:
-            for argv in (
-                ["git", "add", file.name],
-                ["git", "commit", "-m", f"writer-{idx}"],
-            ):
-                proc = subprocess.Popen(  # noqa: S603, S607
-                    argv, cwd=git_vault,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                )
-                registry.append(proc)
-                try:
-                    await asyncio.to_thread(proc.wait)
-                finally:
-                    registry.remove(proc)
+            async with serializer:
+                for argv in (
+                    ["git", "add", file.name],
+                    ["git", "commit", "-m", f"writer-{idx}"],
+                ):
+                    proc = subprocess.Popen(  # noqa: S603, S607
+                        argv, cwd=git_vault,
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    )
+                    registry.append(proc)
+                    try:
+                        rc = await asyncio.to_thread(proc.wait)
+                        if rc != 0:
+                            _, err = proc.communicate(timeout=1)
+                            raise RuntimeError(
+                                f"git {argv[1]} rc={rc}: "
+                                f"{err.decode('utf-8', 'replace').strip()}",
+                            )
+                    finally:
+                        registry.remove(proc)
 
         await bounded_call(
             commit_seq, deadline_s=30.0, process_registry=registry,
