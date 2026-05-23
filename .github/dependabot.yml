@@ -1,0 +1,89 @@
+# Dependabot — weekly grouped updates, single PR per ecosystem.
+#
+# Rationale (HIVE-115 follow-up, 2026-05-22):
+# - We pin ``mcp >= 1.26, < 2.0`` in pyproject.toml because
+#   src/hive/_compat.py monkey-patches private internals of
+#   mcp.shared.session.RequestResponder (upstream tracker:
+#   modelcontextprotocol/python-sdk#2610). Dependabot's `ignore`
+#   block below keeps it from trying to lift that cap automatically;
+#   any mcp bump must be a deliberate code review against the shim.
+# - Grouping all routine bumps into ONE PR per ecosystem per week
+#   avoids the "20 stale Dependabot PRs" noise pattern. Pairs with
+#   release-please for ergonomic batch merges.
+# - github-actions ecosystem is included so CI workflows stay
+#   on supported runners + action versions.
+# - site/ has its own package.json (Astro + Starlight); covered as a
+#   separate npm ecosystem so its bumps don't mix into the Python PR.
+
+version: 2
+
+updates:
+  # ── Python deps (pyproject.toml + uv.lock) ────────────────────
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "America/Denver"
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    labels:
+      - "dependencies"
+    groups:
+      python-all:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # _compat.py patches mcp internals; major bumps must be reviewed
+      # by hand against tests/test_compat_shim.py. Track upstream at
+      # modelcontextprotocol/python-sdk#2610.
+      - dependency-name: "mcp"
+        update-types:
+          - "version-update:semver-major"
+
+  # ── GitHub Actions (workflows/) ───────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "America/Denver"
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+    labels:
+      - "dependencies"
+    groups:
+      actions-all:
+        patterns:
+          - "*"
+
+  # ── npm (site/ Astro + Starlight) ─────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/site"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "America/Denver"
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: "chore(site)"
+      include: "scope"
+    labels:
+      - "dependencies"
+    groups:
+      site-all:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
