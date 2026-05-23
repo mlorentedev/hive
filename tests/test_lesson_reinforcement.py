@@ -183,15 +183,20 @@ class TestTopByConfidenceTieBreaker:
         t = LessonReinforcementTracker()
         t.ensure("hive", "[2026-01-01] old")
         t.ensure("hive", "[2026-01-02] new")
-        # Both get one increment → equal confidence 0.73.
+        # Both get one increment → equal confidence 0.73. Post-PR-4 the
+        # increment routes through the outbox; flush() between the
+        # increment and the manual last_referenced override so the
+        # later flush-on-read doesn't overwrite our explicit values
+        # with date('now').
         t.increment("hive", "[2026-01-01] old")
-        # Sleep is fragile; instead force last_referenced explicitly.
+        t.flush()
         t._conn.execute(  # noqa: SLF001
             "UPDATE lesson_reinforcement SET last_referenced='2026-01-01' "
             "WHERE heading=?",
             ("[2026-01-01] old",),
         )
         t.increment("hive", "[2026-01-02] new")
+        t.flush()
         t._conn.execute(  # noqa: SLF001
             "UPDATE lesson_reinforcement SET last_referenced='2026-05-18' "
             "WHERE heading=?",

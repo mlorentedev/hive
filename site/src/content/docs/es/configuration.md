@@ -55,6 +55,8 @@ Cuando una llamada a una herramienta se cancela a mitad de ejecución (worker le
 | `HIVE_TOOL_TIMEOUT` | `60.0` | Timeout a nivel de herramienta (segundos) para tools async de worker (capture_lesson, delegate_task, worker_status) |
 | `HIVE_LOCK_TIMEOUT_S` | `30` | Timeout de adquisición del filelock de git (segundos). Sube a 60-90 en vaults grandes o bajo fuerte contención con obsidian-git. Validado 1..600. |
 | `HIVE_WAL_CHECKPOINT_INTERVAL_S` | `30.0` | Intervalo entre ticks de `PRAGMA wal_checkpoint(PASSIVE)` por proceso hive. Menor = drenaje del WAL más agresivo. Validado >0..3600. |
+| `HIVE_OUTBOX_TICK_S` | `5.0` | Intervalo (segundos) entre ticks del reconciliador que drena el outbox de refuerzo de lecciones hacia SQLite. Menor = visibilidad cross-process más rápida, mayor contención SQLite. |
+| `HIVE_AUTO_DEFER_TO_EXTERNAL_COMMITTER` | `false` | Cooperación opt-in con obsidian-git: cuando es `true` Y obsidian-git está instalado Y sano, los `vault_write` / `vault_patch` de hive se tratan silenciosamente como `commit=False` para que obsidian-git los recoja en su siguiente tick. Ver la [guía de integración con obsidian-git](/es/guides/obsidian-git-integration/) para el predicado completo y la semántica de fallback. |
 | `HIVE_RELEVANCE_ALPHA` | `0.3` | Tasa de aprendizaje EMA para puntuación adaptativa |
 | `HIVE_RELEVANCE_DECAY` | `0.9` | Factor de decaimiento por sesión para puntuaciones de relevancia |
 | `HIVE_RELEVANCE_EPSILON` | `0.15` | Ratio de exploración para session_briefing (epsilon-greedy) |
