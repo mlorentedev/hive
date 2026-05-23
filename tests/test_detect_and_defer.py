@@ -25,7 +25,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-import time
 from typing import TYPE_CHECKING
 
 import pytest
@@ -43,9 +42,15 @@ _POSIX_ONLY = pytest.mark.skipif(
 def _install_obsidian_git_config(
     vault: Path,
     auto_save_interval_minutes: int = 10,
+    *,
+    commit: bool = False,
 ) -> None:
     """Drop a minimal obsidian-git ``data.json`` so ``detect_obsidian_git``
     sees the plugin as installed.
+
+    Pass ``commit=True`` to also stage + commit the resulting
+    ``.obsidian/`` directory, leaving the working tree clean (needed
+    for the "idle vault" test case).
     """
     cfg_dir = vault / ".obsidian" / "plugins" / "obsidian-git"
     cfg_dir.mkdir(parents=True, exist_ok=True)
@@ -53,6 +58,15 @@ def _install_obsidian_git_config(
         json.dumps({"commitInterval": auto_save_interval_minutes}),
         encoding="utf-8",
     )
+    if commit:
+        subprocess.run(  # noqa: S603, S607
+            ["git", "add", ".obsidian"],
+            cwd=vault, check=True, capture_output=True,
+        )
+        subprocess.run(  # noqa: S603, S607
+            ["git", "commit", "-m", "test: stage obsidian-git config"],
+            cwd=vault, check=True, capture_output=True,
+        )
 
 
 # ── T4.4 — defer when env=true + obsidian healthy ───────────────────────
@@ -153,7 +167,9 @@ def test_defer_when_obsidian_present_and_vault_idle(
     """
     from hive._vault_write import _should_defer_to_external_committer
 
-    _install_obsidian_git_config(git_vault, auto_save_interval_minutes=1)
+    _install_obsidian_git_config(
+        git_vault, auto_save_interval_minutes=1, commit=True,
+    )
     monkeypatch.setenv("HIVE_AUTO_DEFER_TO_EXTERNAL_COMMITTER", "true")
 
     # Make the commit ancient AND leave the vault clean.

@@ -20,8 +20,6 @@ Pre-PR-4 audit scope (2026-05-22):
 
 from __future__ import annotations
 
-import os
-import subprocess
 import sys
 import time
 from typing import TYPE_CHECKING

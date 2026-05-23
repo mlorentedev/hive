@@ -1106,6 +1106,107 @@ def _git_commit_all(
         _GIT_LOCK.release()
 
 
+def _is_external_committer_healthy(
+    vault_path: Path,
+    auto_save_interval_minutes: int,
+) -> bool:
+    """Return True when an external committer (obsidian-git) is alive.
+
+    Composite predicate per HIVE-115 pre-PR-3 audit M4:
+
+    ``healthy ⇔ (last_commit_age < 2 * autoSaveInterval)
+                ∨ (`git status --porcelain` is empty)``
+
+    Rationale: a recent commit means the external committer is firing
+    on schedule (deferable). An idle vault (clean working tree) means
+    there's nothing for the external committer to commit, so deferral
+    is safe by definition. The dangerous case — dirty vault + no
+    recent commits — is the only one that falls back to hive's own
+    commit path.
+
+    Read-path helper (no termination needed); uses bare
+    ``subprocess.run`` rather than the supervised ``_run_git``.
+    """
+    window_seconds = max(1, auto_save_interval_minutes) * 60 * 2
+    try:
+        log = subprocess.run(  # noqa: S603, S607
+            ["git", "log", "-1", "--format=%ct"],
+            cwd=vault_path,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log.debug(
+            "mcp.detect_and_defer.git_log_failed vault=%s exc=%s",
+            vault_path, exc,
+        )
+        return False
+    try:
+        last_commit_epoch = int(log.stdout.strip()) if log.returncode == 0 else 0
+    except ValueError:
+        last_commit_epoch = 0
+    if last_commit_epoch and (time.time() - last_commit_epoch) < window_seconds:
+        return True
+    # Stale commits → external committer may have stalled. Idle vault?
+    try:
+        porcelain = subprocess.run(  # noqa: S603, S607
+            ["git", "status", "--porcelain"],
+            cwd=vault_path,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log.debug(
+            "mcp.detect_and_defer.git_status_failed vault=%s exc=%s",
+            vault_path, exc,
+        )
+        return False
+    return porcelain.returncode == 0 and porcelain.stdout.strip() == ""
+
+
+def _vault_write_deferral_suffix(
+    vault_path: Path,
+    *,
+    requested_commit: bool,
+) -> str:
+    """Return the trailing suffix for a deferred vault_write response, or
+    empty when no deferral applies.
+
+    Truth table:
+
+    +---------------+--------------------+---------------------------------+
+    | requested     | defer predicate    | suffix                          |
+    | commit=       | (env+obsidian+...) |                                 |
+    +===============+====================+=================================+
+    | False         | any                | ``""``                          |
+    +---------------+--------------------+---------------------------------+
+    | True          | False              | ``""``                          |
+    +---------------+--------------------+---------------------------------+
+    | True          | True               | ``" (deferred to obsidian-git;  |
+    |               |                    | will be picked up on its next   |
+    |               |                    | tick)"``                        |
+    +---------------+--------------------+---------------------------------+
+
+    The "uncommitted — call vault_commit to flush" suffix for
+    ``commit=False`` lives at the original call site and is unchanged
+    by this helper.
+    """
+    if not requested_commit:
+        return ""
+    # Avoid circular import — _vault_write imports _helpers.
+    from hive._vault_write import _should_defer_to_external_committer
+
+    if not _should_defer_to_external_committer(vault_path):
+        return ""
+    return (
+        " (deferred to obsidian-git; will be picked up on its next tick)"
+    )
+
+
 def detect_obsidian_git(vault_path: Path) -> dict[str, int] | None:
     """Return obsidian-git config when the plugin is active in this vault.
 
