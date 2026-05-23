@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.1](https://github.com/mlorentedev/hive/compare/v1.19.0...v1.19.1) (2026-05-23)
+
+
+### Documentation
+
+* **site:** add OpenCode + unify implementation examples as tabs (EN+ES) ([#128](https://github.com/mlorentedev/hive/issues/128)) ([b9e1940](https://github.com/mlorentedev/hive/commit/b9e1940d4a5ba7ebbf7c6b6f0f6e6d4654638687))
+
 ## [1.19.0](https://github.com/mlorentedev/hive/compare/v1.18.0...v1.19.0) (2026-05-23)
 
 
