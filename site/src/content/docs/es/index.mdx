@@ -83,6 +83,20 @@ Una cosa más: no tiene que ser un vault de Obsidian. Cualquier carpeta con arch
     }
     ```
   </TabItem>
+  <TabItem label="OpenCode">
+    Añade a `~/.config/opencode/opencode.jsonc`:
+    ```jsonc
+    {
+      "mcp": {
+        "hive": {
+          "type": "local",
+          "command": ["uvx", "--upgrade", "hive-vault"],
+          "enabled": true
+        }
+      }
+    }
+    ```
+  </TabItem>
 </Tabs>
 
 Sin clonar, sin venv, sin configuración. [Saber más →](/hive/es/getting-started/)

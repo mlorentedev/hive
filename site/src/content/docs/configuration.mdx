@@ -3,6 +3,8 @@ title: Configuration
 description: Environment variables for Hive MCP server.
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 All configuration is done through environment variables, passed when registering the MCP server.
 
 ## Requirements
@@ -75,38 +77,81 @@ If both are set, the `HIVE_` prefixed version takes precedence.
 
 ## Example: Full Configuration
 
-**Claude Code:**
-```bash
-claude mcp add -s user hive \
-  -e VAULT_PATH=$HOME/my-vault \
-  -e HIVE_OLLAMA_ENDPOINT=http://minipc.local:11434 \
-  -e OPENROUTER_API_KEY=sk-or-v1-abc123 \
-  -e HIVE_OPENROUTER_BUDGET=10.0 \
-  -- uvx --upgrade hive-vault
-```
+<Tabs syncKey="client">
+  <TabItem label="Claude Code">
+    ```bash
+    claude mcp add -s user hive \
+      -e VAULT_PATH=$HOME/my-vault \
+      -e HIVE_OLLAMA_ENDPOINT=http://minipc.local:11434 \
+      -e OPENROUTER_API_KEY=sk-or-v1-abc123 \
+      -e HIVE_OPENROUTER_BUDGET=10.0 \
+      -- uvx --upgrade hive-vault
+    ```
+  </TabItem>
+  <TabItem label="Codex CLI">
+    Add to `~/.codex/config.toml`:
+    ```toml
+    [mcp_servers.hive-vault]
+    command = "uvx"
+    args = ["--upgrade", "hive-vault"]
 
-**Gemini CLI:**
-```bash
-gemini mcp add -s user \
-  -e VAULT_PATH=$HOME/my-vault \
-  -e HIVE_OLLAMA_ENDPOINT=http://minipc.local:11434 \
-  -e OPENROUTER_API_KEY=sk-or-v1-abc123 \
-  -e HIVE_OPENROUTER_BUDGET=10.0 \
-  hive-vault uvx -- --upgrade hive-vault
-```
-
-**Codex CLI** — add to `~/.codex/config.toml`:
-```toml
-[mcp_servers.hive-vault]
-command = "uvx"
-args = ["--upgrade", "hive-vault"]
-
-[mcp_servers.hive-vault.env]
-VAULT_PATH = "~/my-vault"
-HIVE_OLLAMA_ENDPOINT = "http://minipc.local:11434"
-OPENROUTER_API_KEY = "sk-or-v1-abc123"
-HIVE_OPENROUTER_BUDGET = "10.0"
-```
+    [mcp_servers.hive-vault.env]
+    VAULT_PATH = "~/my-vault"
+    HIVE_OLLAMA_ENDPOINT = "http://minipc.local:11434"
+    OPENROUTER_API_KEY = "sk-or-v1-abc123"
+    HIVE_OPENROUTER_BUDGET = "10.0"
+    ```
+  </TabItem>
+  <TabItem label="Gemini CLI">
+    ```bash
+    gemini mcp add -s user \
+      -e VAULT_PATH=$HOME/my-vault \
+      -e HIVE_OLLAMA_ENDPOINT=http://minipc.local:11434 \
+      -e OPENROUTER_API_KEY=sk-or-v1-abc123 \
+      -e HIVE_OPENROUTER_BUDGET=10.0 \
+      hive-vault uvx -- --upgrade hive-vault
+    ```
+  </TabItem>
+  <TabItem label="Copilot (VS Code)">
+    Add to `.vscode/mcp.json` (or VS Code user settings):
+    ```json
+    {
+      "servers": {
+        "hive-vault": {
+          "command": "uvx",
+          "args": ["--upgrade", "hive-vault"],
+          "env": {
+            "VAULT_PATH": "/home/you/my-vault",
+            "HIVE_OLLAMA_ENDPOINT": "http://minipc.local:11434",
+            "OPENROUTER_API_KEY": "sk-or-v1-abc123",
+            "HIVE_OPENROUTER_BUDGET": "10.0"
+          }
+        }
+      }
+    }
+    ```
+  </TabItem>
+  <TabItem label="OpenCode">
+    Add to `~/.config/opencode/opencode.jsonc`:
+    ```jsonc
+    {
+      "mcp": {
+        "hive": {
+          "type": "local",
+          "command": ["uvx", "--upgrade", "hive-vault"],
+          "environment": {
+            "VAULT_PATH": "/home/you/my-vault",
+            "HIVE_OLLAMA_ENDPOINT": "http://minipc.local:11434",
+            "OPENROUTER_API_KEY": "sk-or-v1-abc123",
+            "HIVE_OPENROUTER_BUDGET": "10.0"
+          },
+          "enabled": true
+        }
+      }
+    }
+    ```
+  </TabItem>
+</Tabs>
 
 The `--upgrade` flag ensures you always get the latest version from PyPI on each session start.
 
@@ -114,15 +159,59 @@ The `--upgrade` flag ensures you always get the latest version from PyPI on each
 
 If you only need vault access and don't want worker delegation:
 
-```bash
-# Claude Code
-claude mcp add -s user hive -e VAULT_PATH=$HOME/my-vault -- uvx --upgrade hive-vault
+<Tabs syncKey="client">
+  <TabItem label="Claude Code">
+    ```bash
+    claude mcp add -s user hive -e VAULT_PATH=$HOME/my-vault -- uvx --upgrade hive-vault
+    ```
+  </TabItem>
+  <TabItem label="Codex CLI">
+    ```toml
+    [mcp_servers.hive-vault]
+    command = "uvx"
+    args = ["--upgrade", "hive-vault"]
 
-# Gemini CLI
-gemini mcp add -s user -e VAULT_PATH=$HOME/my-vault hive-vault uvx -- --upgrade hive-vault
-```
-
-For other MCP clients, pass the same environment variables through your client's MCP server configuration.
+    [mcp_servers.hive-vault.env]
+    VAULT_PATH = "~/my-vault"
+    ```
+  </TabItem>
+  <TabItem label="Gemini CLI">
+    ```bash
+    gemini mcp add -s user -e VAULT_PATH=$HOME/my-vault hive-vault uvx -- --upgrade hive-vault
+    ```
+  </TabItem>
+  <TabItem label="Copilot (VS Code)">
+    ```json
+    {
+      "servers": {
+        "hive-vault": {
+          "command": "uvx",
+          "args": ["--upgrade", "hive-vault"],
+          "env": {
+            "VAULT_PATH": "/home/you/my-vault"
+          }
+        }
+      }
+    }
+    ```
+  </TabItem>
+  <TabItem label="OpenCode">
+    ```jsonc
+    {
+      "mcp": {
+        "hive": {
+          "type": "local",
+          "command": ["uvx", "--upgrade", "hive-vault"],
+          "environment": {
+            "VAULT_PATH": "/home/you/my-vault"
+          },
+          "enabled": true
+        }
+      }
+    }
+    ```
+  </TabItem>
+</Tabs>
 
 Worker tools will still be available but will return "no providers available" when called.
 

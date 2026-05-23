@@ -83,6 +83,20 @@ One more thing: this doesn't have to be an Obsidian vault. Any folder with `.md`
     }
     ```
   </TabItem>
+  <TabItem label="OpenCode">
+    Add to `~/.config/opencode/opencode.jsonc`:
+    ```jsonc
+    {
+      "mcp": {
+        "hive": {
+          "type": "local",
+          "command": ["uvx", "--upgrade", "hive-vault"],
+          "enabled": true
+        }
+      }
+    }
+    ```
+  </TabItem>
 </Tabs>
 
 No cloning, no venv, no setup. [Learn more →](/hive/getting-started/)
