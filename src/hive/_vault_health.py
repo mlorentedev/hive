@@ -256,7 +256,7 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
         )
         lines.append("")
 
-    # ── Ghost-response counter (HIVE-104 Fase C) ──
+    # ── Ghost-response counter (HIVE-104 Fase C + HIVE-115 PR-3 source) ──
     from hive._compat import GHOST_RESPONSES
     snap = GHOST_RESPONSES.snapshot()
     if isinstance(snap.get("total"), int) and snap["total"] > 0:  # type: ignore[operator]
@@ -265,6 +265,12 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
         lines.append(f"- total: {snap['total']}")
         lines.append(f"- last_seen: {snap['last_seen']}")
         lines.append(f"- last_tool: {snap['last_tool'] or '<unknown>'}")
+        by_source = snap.get("by_source")
+        if isinstance(by_source, dict) and by_source:
+            breakdown = ", ".join(
+                f"{src}={count}" for src, count in sorted(by_source.items())
+            )
+            lines.append(f"- by_source: {breakdown}")
         lines.append(
             "- note: ErrorData ack does NOT imply rollback — verify state "
             "via `vault_query`, do not retry."
