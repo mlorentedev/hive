@@ -20,6 +20,17 @@ dependencies = [
     "fastmcp>=2.0.0",
     "filelock>=3.13",
     "httpx>=0.27.0",
+    # Pinned because src/hive/_compat.py monkey-patches private
+    # attributes on mcp.shared.session.RequestResponder
+    # (_completed, _on_complete, _entered, _cancel_scope, __exit__,
+    # respond). Any minor bump can rename these silently. Upstream
+    # tracker for the cancel-race the shim fixes:
+    # https://github.com/modelcontextprotocol/python-sdk/issues/2610
+    # Cap at <2.0 so a deliberate review happens before adopting
+    # any new major release. Bump the lower bound when verifying a
+    # newer release; bump the upper bound only after auditing the
+    # _compat shim against the new internals.
+    "mcp>=1.26,<2.0",
     "psutil>=5.9.0",
     "pydantic-settings>=2.0",
     "pyyaml>=6.0",
