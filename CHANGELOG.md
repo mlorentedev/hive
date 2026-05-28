@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.1](https://github.com/mlorentedev/hive/compare/v1.20.0...v1.20.1) (2026-05-28)
+
+
+### Bug Fixes
+
+* **hive:** evict cooperative filelock on deadline (HIVE-116 PR-2) ([#144](https://github.com/mlorentedev/hive/issues/144)) ([845c830](https://github.com/mlorentedev/hive/commit/845c830ebb15b99ccc5eead974d3d640b9332166))
+
 ## [1.20.0](https://github.com/mlorentedev/hive/compare/v1.19.1...v1.20.0) (2026-05-28)
 
 
