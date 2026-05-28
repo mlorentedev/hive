@@ -19,6 +19,8 @@ from hive._helpers import (
     _vault_guard,
     detect_obsidian_git,
     format_io_error,
+    get_partial_state,
+    mark_disk_write_done,
     project_not_found,
     track,
     vault_write_lock,
@@ -56,12 +58,31 @@ _DEFERRED_SUFFIX = (
 )
 _UNCOMMITTED_SUFFIX = " (uncommitted — call vault_commit to flush)"
 
+# HIVE-116 AC-5: public contract for the partial-state response. Locked
+# 2026-05-27 per ``specs/HIVE-116-stale-lock-after-deadline/proposal.md``
+# R3 resolution. Downstream agents key off the stable substring
+# ``"partial state — disk write succeeded"``; wording rotations may occur
+# in later minor versions but that prefix MUST remain.
+_PARTIAL_STATE_SUFFIX = (
+    " (partial state — disk write succeeded, "
+    "git commit killed by deadline; verify with vault_query "
+    "before retrying)"
+)
 
-def _commit_status_suffix(requested_commit: bool, deferred: bool) -> str:
+
+def _commit_status_suffix(
+    requested_commit: bool,
+    deferred: bool,
+    *,
+    deadline_killed: bool = False,
+) -> str:
     """Format the trailing response suffix for write tools.
 
-    Three states feed into one line:
+    Four states feed into one line; ``deadline_killed`` dominates:
 
+    - ``deadline_killed=True`` (any other args) → partial-state suffix
+      (HIVE-116 AC-5; disk write landed but git commit was killed by
+      the deadline supervisor).
     - ``requested_commit=False`` → uncommitted (caller must
       ``vault_commit`` later). Unchanged from pre-PR-4 behaviour.
     - ``requested_commit=True, deferred=True`` → obsidian-git is healthy
@@ -69,11 +90,19 @@ def _commit_status_suffix(requested_commit: bool, deferred: bool) -> str:
     - ``requested_commit=True, deferred=False`` → hive committed inline;
       empty suffix.
     """
+    if deadline_killed:
+        return _PARTIAL_STATE_SUFFIX
     if not requested_commit:
         return _UNCOMMITTED_SUFFIX
     if deferred:
         return _DEFERRED_SUFFIX
     return ""
+
+
+def _was_deadline_killed() -> bool:
+    """True when the partial-state CV records a deadline-driven git kill."""
+    state = get_partial_state()
+    return bool(state and state.get("deadline_killed"))
 
 
 def _should_defer_to_external_committer(vault_path: Path) -> bool:
@@ -205,6 +234,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                             format_io_error(exc, path, "create"),
                             project,
                         )
+                    mark_disk_write_done()
 
                     rel = filepath.relative_to(ctx.vault)
                     display = "00_meta" if project == "_meta" else project
@@ -224,7 +254,9 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     project,
                 )
 
-            suffix = _commit_status_suffix(commit, should_defer)
+            suffix = _commit_status_suffix(
+                commit, should_defer, deadline_killed=_was_deadline_killed(),
+            )
             return track(
                 ctx, "vault_write",
                 f"Created {project}/{path} (type: {doc_type}).{suffix}",
@@ -279,6 +311,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                         format_io_error(exc, f"{project}/{section}", operation),
                         project,
                     )
+                mark_disk_write_done()
 
                 rel = filepath.relative_to(ctx.vault)
                 should_defer = (
@@ -297,7 +330,9 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 project,
             )
 
-        suffix = _commit_status_suffix(commit, should_defer)
+        suffix = _commit_status_suffix(
+            commit, should_defer, deadline_killed=_was_deadline_killed(),
+        )
         return track(
             ctx, "vault_write",
             f"Updated {project}/{section} ({operation}).{suffix}",
@@ -429,6 +464,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                         format_io_error(exc, path, "write"),
                         project,
                     )
+                mark_disk_write_done()
 
                 rel = filepath.relative_to(ctx.vault)
                 n = len(patch_list)
@@ -449,7 +485,9 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             )
 
         noun = "patch" if n == 1 else "patches"
-        suffix = _commit_status_suffix(commit, should_defer)
+        suffix = _commit_status_suffix(
+            commit, should_defer, deadline_killed=_was_deadline_killed(),
+        )
         return track(ctx, "vault_patch",
                      f"Applied {n} {noun} to {project}/{path}.{suffix}",
                      project, path)
