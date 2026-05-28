@@ -69,6 +69,37 @@ class TestEnvOverride:
         monkeypatch.setenv("HIVE_WAL_CHECKPOINT_INTERVAL_S", "15.5")
         assert HiveSettings().wal_checkpoint_interval_s == 15.5
 
+    def test_hive_post_kill_drain_s_env(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """HIVE_POST_KILL_DRAIN_S env honored (HIVE-116 / ADR-012)."""
+        monkeypatch.setenv("HIVE_POST_KILL_DRAIN_S", "7.5")
+        assert HiveSettings().post_kill_drain_s == 7.5
+
+    def test_hive_post_kill_drain_s_default(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Default is 5.0s (HIVE_OUTBOX_TICK_S symmetry, user-locked 2026-05-27)."""
+        monkeypatch.delenv("HIVE_POST_KILL_DRAIN_S", raising=False)
+        assert HiveSettings().post_kill_drain_s == 5.0
+
+    @pytest.mark.parametrize("value", ["0.1", "0", "31", "60"])
+    def test_hive_post_kill_drain_s_validation_rejects(
+        self, monkeypatch: pytest.MonkeyPatch, value: str,
+    ) -> None:
+        """Out-of-range values raise ValidationError ([0.5, 30.0])."""
+        monkeypatch.setenv("HIVE_POST_KILL_DRAIN_S", value)
+        with pytest.raises(ValidationError):
+            HiveSettings()
+
+    @pytest.mark.parametrize("value", ["0.5", "5.0", "30.0"])
+    def test_hive_post_kill_drain_s_validation_accepts(
+        self, monkeypatch: pytest.MonkeyPatch, value: str,
+    ) -> None:
+        """Boundary + default accepted."""
+        monkeypatch.setenv("HIVE_POST_KILL_DRAIN_S", value)
+        assert HiveSettings().post_kill_drain_s == float(value)
+
     def test_hive_prefix_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("HIVE_OLLAMA_MODEL", "llama3:8b")
         assert HiveSettings().ollama_model == "llama3:8b"

@@ -44,6 +44,12 @@ class HiveSettings(BaseSettings):
     wal_checkpoint_interval_s: float = Field(default=30.0, gt=0.0, le=3600.0)
     # HIVE-115 / ADR-010: tunable lock acquire timeout (vault git operations).
     lock_timeout_s: int = Field(default=30, ge=1, le=600)
+    # HIVE-116 / ADR-012: post-kill drain window before the supervisor evicts
+    # the cached ``.git/hive.lock`` filelock from ``_GIT_FILELOCKS``. Window
+    # must be long enough for the SIGKILL grace to land AND for the worker
+    # thread to escape ``_filelock_with_telemetry``'s ``__exit__`` naturally
+    # on the happy path. Default 5.0s matches HIVE_OUTBOX_TICK_S for symmetry.
+    post_kill_drain_s: float = Field(default=5.0, ge=0.5, le=30.0)
 
 
 settings = HiveSettings()

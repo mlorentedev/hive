@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from hive._context import ServerContext
+    from hive._lock_eviction import LockEvictionTracker
     from hive.clients import ClientResponse
     from hive.frontmatter import Frontmatter
 
@@ -76,6 +77,16 @@ def synthesize_external_termination_stderr(original_stderr: bytes) -> str:
 # the to_thread worker (CPython propagates the context).
 _PARTIAL_STATE_CV: contextvars.ContextVar[dict[str, bool] | None] = (
     contextvars.ContextVar("_PARTIAL_STATE", default=None)
+)
+
+# HIVE-116 AC-1: contextvar propagating the vault path that ``tool_span``
+# should target for cooperative filelock eviction on deadline. Set by
+# ``wrap_sync_tool`` (which has ``ctx.vault``) before the tool body runs;
+# read by ``tool_span``'s except branch to call ``evict_filelock``. Kept
+# as a CV instead of a positional arg so the wide call surface of
+# ``tool_span`` does not need to change.
+_VAULT_FOR_EVICTION_CV: contextvars.ContextVar[Path | None] = (
+    contextvars.ContextVar("_VAULT_FOR_EVICTION", default=None)
 )
 
 # Tools that opt in to partial-state response formatting. Read-path tools
@@ -754,6 +765,18 @@ def _lock_timeout() -> int:
     return settings.lock_timeout_s
 
 
+def _post_kill_drain() -> float:
+    """Current post-kill drain window in seconds (HIVE-116 / ADR-012).
+
+    Lazy read of ``settings.post_kill_drain_s`` — tests monkeypatch the
+    settings object after import. Env: ``HIVE_POST_KILL_DRAIN_S``
+    (default 5.0, validated 0.5..30.0).
+    """
+    from hive.config import settings
+
+    return settings.post_kill_drain_s
+
+
 def _acquire_with_telemetry(
     lock: threading.Lock,
     lock_name: str,
@@ -875,6 +898,30 @@ def _git_filelock(vault_path: Path) -> filelock.BaseFileLock:
     return lock
 
 
+def evict_filelock(vault_path: Path) -> bool:
+    """Pop the cached ``FileLock`` for ``vault_path`` from the singleton cache.
+
+    HIVE-116 PR-2 / ADR-012 core primitive. Called by the deadline supervisor
+    after the post-kill drain when at least one Popen was terminated, to
+    unblock sibling workers that would otherwise wait on the still-held
+    ``.git/hive.lock`` of a runaway worker thread.
+
+    Returns True when an entry was evicted, False when nothing was cached
+    (already-evicted or never-acquired). Idempotent under
+    ``_GIT_FILELOCKS_GUARD``. Does **not** force-release the underlying
+    lock — that is impossible from outside the holder; instead, the next
+    ``_git_filelock`` call constructs a fresh ``FileLock`` against the
+    same path. On POSIX the kernel tracks fcntl owners by fd so the new
+    object can acquire as soon as the holder releases. On Windows the
+    orphan file persists until the parent process exits (filelock library
+    invariant), but no longer blocks new acquires.
+    """
+    key = str(vault_path / ".git" / "hive.lock")
+    with _GIT_FILELOCKS_GUARD:
+        lock = _GIT_FILELOCKS.pop(key, None)
+    return lock is not None
+
+
 @asynccontextmanager
 async def tool_span(
     tool_name: str, timeout_seconds: float,
@@ -889,6 +936,16 @@ async def tool_span(
     suppressions from cancellation-race suppressions in
     ``vault_health.ghost_responses.by_source`` (HIVE-115 PR-3 / ADR-008,
     pre-PR-3 audit B4).
+
+    HIVE-116 PR-2: when ``_VAULT_FOR_EVICTION_CV`` is set AND at least
+    one Popen was killed, sleep ``HIVE_POST_KILL_DRAIN_S`` (default 5.0s,
+    capped 0.5..30) and evict the cached ``.git/hive.lock`` filelock so
+    sibling workers can acquire freshly. Drain order matters: SIGTERM →
+    grace → SIGKILL → stdio drain (in _terminate_registry) → telemetry
+    → **post_kill_drain → evict_filelock** → raise. The post-kill drain
+    is what lets the worker thread escape ``_filelock_with_telemetry``'s
+    ``__exit__`` naturally on the happy path; eviction is the safety net
+    for the worst case where the thread is stuck in proc.communicate().
 
     Registry propagation: a fresh ``list`` is set on ``_GIT_REGISTRY_CV``
     for the duration of the body. ``contextvars`` propagates the same
@@ -924,12 +981,96 @@ async def tool_span(
                 "[mcp.tool_span.deadline_exceeded killed_pids=%s]",
                 tool_name, elapsed, timeout_seconds, len(killed), killed,
             )
+            # HIVE-116 AC-1: cooperative filelock eviction
+            vault_for_eviction = _VAULT_FOR_EVICTION_CV.get()
+            if vault_for_eviction is not None and killed:
+                await _drain_and_evict(
+                    vault_for_eviction, killed, tool_name,
+                )
             raise
         else:
             elapsed = time.monotonic() - start
             _log.debug("%s completed in %.1fs", tool_name, elapsed)
     finally:
         _GIT_REGISTRY_CV.reset(token)
+
+
+async def _drain_and_evict(
+    vault_path: Path,
+    killed_pids: list[int],
+    tool_name: str,
+) -> None:
+    """Wait the post-kill drain, evict ``.git/hive.lock`` from cache, log.
+
+    HIVE-116 AC-1 + AC-8. The drain window lets the worker thread holding
+    the in-process side of the cooperative lock escape ``__exit__`` on
+    the happy path; eviction unblocks new acquires when the thread is
+    stuck. Recording into the ``LockEvictionTracker`` (T-2.5) happens
+    lazily via the deferred import — keeping the supervisor agnostic of
+    ``ServerContext`` lifecycle so this module stays import-cycle-free.
+    """
+    drain_s = _post_kill_drain()
+    try:
+        await asyncio.sleep(drain_s)
+    except asyncio.CancelledError:
+        # Even when the caller cancels, attempt the eviction. Re-raise
+        # after the synchronous cleanup so the cancellation propagates.
+        evicted = evict_filelock(vault_path)
+        if evicted:
+            _log.info(
+                "mcp.lock_eviction lock=_git_filelock vault=%s "
+                "killed_pids=%s drain_s=%.1f tool=%s cancelled=true",
+                vault_path, killed_pids, drain_s, tool_name,
+            )
+        raise
+    evicted = evict_filelock(vault_path)
+    if evicted:
+        _log.info(
+            "mcp.lock_eviction lock=_git_filelock vault=%s "
+            "killed_pids=%s drain_s=%.1f tool=%s",
+            vault_path, killed_pids, drain_s, tool_name,
+        )
+        _record_lock_eviction(vault_path, killed_pids)
+
+
+def _record_lock_eviction(
+    vault_path: Path, killed_pids: list[int],
+) -> None:
+    """Persist the eviction event for vault_health telemetry (T-2.5).
+
+    Looks up the global ``LockEvictionTracker`` via the module-level
+    registry set by ``register_lock_eviction_tracker``. No-op when no
+    tracker is registered (e.g. during unit tests of ``tool_span`` that
+    do not build a full ``ServerContext``).
+    """
+    tracker = _LOCK_EVICTION_TRACKER
+    if tracker is None:
+        return
+    try:
+        tracker.record(vault_path, killed_pids)
+    except Exception as exc:  # noqa: BLE001
+        # Telemetry must never crash the supervisor.
+        _log.debug("lock_eviction tracker.record failed: %s", exc)
+
+
+# Module-level singleton registry for the LockEvictionTracker. Set by
+# ``register_lock_eviction_tracker`` during ``create_server`` (T-2.5);
+# read by ``_record_lock_eviction``. None outside production paths.
+_LOCK_EVICTION_TRACKER: LockEvictionTracker | None = None
+
+
+def register_lock_eviction_tracker(
+    tracker: LockEvictionTracker | None,
+) -> None:
+    """Install the process-global LockEvictionTracker.
+
+    Called once during ``create_server``. Stored as module-level
+    singleton because the supervisor (``tool_span``, ``bounded_call``)
+    does not receive ``ServerContext`` and cannot import it without
+    creating a cycle. Accepts ``None`` for test teardown.
+    """
+    global _LOCK_EVICTION_TRACKER
+    _LOCK_EVICTION_TRACKER = tracker
 
 
 _GENERIC_TIMEOUT_FMT = (
@@ -1005,6 +1146,11 @@ def wrap_sync_tool(
     the original signature, annotations, name, and docstring so
     FastMCP's schema introspection still sees the correct shape.
 
+    HIVE-116 PR-2: for tools in :data:`_PARTIAL_STATE_TOOLS`, the wrapper
+    sets :data:`_VAULT_FOR_EVICTION_CV` to ``ctx.vault`` before the body
+    runs so ``tool_span``'s deadline branch can call ``evict_filelock``
+    against the correct vault on supervisor kill.
+
     Usage::
 
         @mcp.tool(annotations=_READ_ONLY)
@@ -1020,9 +1166,19 @@ def wrap_sync_tool(
 
         @functools.wraps(fn)
         async def wrapper(*args: object, **kwargs: object) -> str:
-            return await run_sync_tool(
-                tool_name, ctx.tool_timeout, fn, *args, **kwargs,
-            )
+            vault_token: contextvars.Token[Path | None] | None = None
+            if (
+                tool_name in _PARTIAL_STATE_TOOLS
+                and ctx.vault.is_dir()
+            ):
+                vault_token = _VAULT_FOR_EVICTION_CV.set(ctx.vault)
+            try:
+                return await run_sync_tool(
+                    tool_name, ctx.tool_timeout, fn, *args, **kwargs,
+                )
+            finally:
+                if vault_token is not None:
+                    _VAULT_FOR_EVICTION_CV.reset(vault_token)
 
         wrapper.__signature__ = sig  # type: ignore[attr-defined]
         return wrapper
