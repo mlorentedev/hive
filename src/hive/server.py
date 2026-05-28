@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 from hive._context import ServerContext  # noqa: E402
 from hive._diagnostics import LifecycleMiddleware  # noqa: E402
 from hive._helpers import (  # noqa: E402
+    _clean_stale_wal_files,
     _resolve_file,
     _safe_read,
     _truncate,
@@ -82,6 +83,9 @@ def create_server(
             _Path(settings.db_path).parent / "lock_evictions.db",
         ),
     )
+
+    # Clean stale 0-byte WAL files on startup.
+    _clean_stale_wal_files(_Path(settings.db_path).parent)
 
     ctx = ServerContext(
         vault=resolved_path,
