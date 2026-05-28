@@ -340,6 +340,52 @@ If your vault uses obsidian-git for auto-backups, the two tools cooperate cleanl
 
 A future release will make the cooperation automatic (auto-defer when external committer healthy); for now it is opt-in via `commit=False`.
 
+## Partial-State Writes After Deadline
+
+When `vault_write` or `vault_patch` hits its tool-call deadline (default 60s) while the supervisor is killing a stuck `git add`/`git commit`, the file on disk may already have been written — but the git commit never landed. The response will include the suffix:
+
+```
+ (partial state — disk write succeeded, git commit killed by deadline; verify with vault_query before retrying)
+```
+
+Or, when the deadline fires before the handler even returns, the response is:
+
+```
+vault_write timed out after 60s — partial state: disk write succeeded, git commit killed by deadline; verify with vault_query before retrying.
+```
+
+### What to do
+
+1. **Do NOT blindly retry** — retrying with native FS tools risks double-writes. The file is already on disk.
+2. **Verify** the actual state with `vault_query`:
+   ```
+   vault_query(project="my-project", path="11-tasks.md")
+   ```
+   Compare against what you intended to write.
+3. **Inspect the git status** if you have shell access to the vault:
+   ```bash
+   git -C "$VAULT_PATH" status --porcelain
+   ```
+   The file should appear as modified or staged; nothing committed.
+4. **Recover the commit** either by:
+   - Calling `vault_commit` (Hive flushes whatever is dirty), or
+   - Letting obsidian-git pick it up on its next tick (if installed), or
+   - Manually `git -C "$VAULT_PATH" add . && git commit -m "vault: rescue partial state"`.
+
+### Why this happens
+
+The deadline supervisor terminates the `git add` / `git commit` subprocess, but the Python thread holding the cooperative `.git/hive.lock` may still be in mid-`communicate()` (especially on Windows). The on-disk write is atomic; the commit is not. The partial-state suffix is the contract Hive exposes to let downstream agents avoid double-writes.
+
+### Operator triage
+
+When investigating, look at `~/.local/share/hive/hive-<pid>.log` for lines like:
+
+```
+WARNING git add failed for [...] rc=-1 cause=external_termination err=[external_termination] killed by supervisor at 2026-05-27T18:00:00+00:00 ; original stderr: empty
+```
+
+The `cause=external_termination` tag is one-grep-able and tells you the supervisor killed it (vs `cause=git_error` for genuine git failures). The synthetic stderr with the ISO-8601 timestamp lets you correlate against the partial-state response received by the client.
+
 ## Getting Help
 
 If your issue isn't listed here:

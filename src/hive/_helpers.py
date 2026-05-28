@@ -16,7 +16,7 @@ import threading
 import time
 from collections import deque
 from contextlib import asynccontextmanager, contextmanager
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
 import filelock
@@ -35,6 +35,84 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 
 _REJECT_MSG = "The host should handle this task directly."
+
+# HIVE-116 AC-3: named return code for Popens terminated by the supervisor.
+# Replaces the bare ``-1`` used at multiple sites; gives operators + the
+# partial-state hook (HIVE-116 AC-6) a one-grep predicate.
+RC_EXTERNAL_TERMINATION: int = -1
+
+
+def synthesize_external_termination_stderr(original_stderr: bytes) -> str:
+    """Format the synthetic stderr returned by :func:`_run_git` on external kill.
+
+    HIVE-116 AC-3. Shape:
+
+    ``"[external_termination] killed by supervisor at <ISO-8601>; original
+    stderr: (empty|<N> bytes)"``
+
+    The ISO-8601 timestamp is UTC with offset suffix (`+00:00`). Callers
+    that need to grep across worker logs use the literal prefix
+    ``[external_termination]`` — the rest of the line is informational.
+    """
+    ts = datetime.now(UTC).isoformat(timespec="seconds")
+    n = len(original_stderr)
+    detail = "empty" if n == 0 else f"{n} bytes"
+    return (
+        f"[external_termination] killed by supervisor at {ts} ; "
+        f"original stderr: {detail}"
+    )
+
+
+# HIVE-116 AC-5/AC-6: contextvar threading partial-state signals from the
+# write tool to the deadline supervisor. Set by ``run_sync_tool`` for the
+# write tools (``vault_write`` / ``vault_patch``) so:
+#   - the write handler can mark "disk write completed" after the file is
+#     persisted but before ``_git_commit`` returns;
+#   - ``_git_commit`` can mark "deadline killed" when it sees an externally-
+#     terminated Popen;
+#   - on supervisor TimeoutError, ``run_sync_tool`` reads the dict to format
+#     the partial-state response instead of the generic "timed out" string.
+# The CV value is the *same dict reference* in the awaiting coroutine and
+# the to_thread worker (CPython propagates the context).
+_PARTIAL_STATE_CV: contextvars.ContextVar[dict[str, bool] | None] = (
+    contextvars.ContextVar("_PARTIAL_STATE", default=None)
+)
+
+# Tools that opt in to partial-state response formatting. Read-path tools
+# (``vault_query``, ``vault_search``, ``vault_health``) keep the generic
+# timeout response since they have no disk-write side-effect.
+_PARTIAL_STATE_TOOLS: frozenset[str] = frozenset(
+    {"vault_write", "vault_patch"},
+)
+
+
+def mark_disk_write_done() -> None:
+    """Signal that the partial-state CV write tool's FS write completed.
+
+    No-op when the CV is not set (i.e. tool is not in
+    :data:`_PARTIAL_STATE_TOOLS`, or the call is outside ``run_sync_tool``).
+    """
+    state = _PARTIAL_STATE_CV.get()
+    if state is not None:
+        state["disk_write_done"] = True
+
+
+def mark_deadline_killed() -> None:
+    """Signal that ``_run_git`` saw an externally-terminated Popen.
+
+    No-op when the CV is not set.
+    """
+    state = _PARTIAL_STATE_CV.get()
+    if state is not None:
+        state["deadline_killed"] = True
+
+
+def get_partial_state() -> dict[str, bool] | None:
+    """Snapshot the partial-state CV; None when not active."""
+    state = _PARTIAL_STATE_CV.get()
+    if state is None:
+        return None
+    return dict(state)
 
 
 def project_not_found(project: str) -> str:
@@ -854,6 +932,17 @@ async def tool_span(
         _GIT_REGISTRY_CV.reset(token)
 
 
+_GENERIC_TIMEOUT_FMT = (
+    "{tool} timed out after {timeout:.0f}s. "
+    "Server may be under load or a lock is contended; retry shortly."
+)
+_PARTIAL_STATE_TIMEOUT_FMT = (
+    "{tool} timed out after {timeout:.0f}s — partial state: "
+    "disk write succeeded, git commit killed by deadline; "
+    "verify with vault_query before retrying."
+)
+
+
 async def run_sync_tool(
     tool_name: str,
     timeout_seconds: float,
@@ -870,17 +959,39 @@ async def run_sync_tool(
     subprocess; the thread eventually returns and its late ``respond()``
     call is silenced by the ``_compat`` shim.
 
+    HIVE-116 AC-6: write tools (``vault_write`` / ``vault_patch``) opt into
+    a partial-state response via :data:`_PARTIAL_STATE_CV`. The CV holds a
+    dict the to_thread worker mutates as it progresses; on TimeoutError
+    the awaiter reads the dict and surfaces the partial-state message when
+    the disk write landed before the kill (so the calling agent does not
+    retry blindly and double-write).
+
     Returns a user-visible error string on timeout instead of propagating
     so the MCP client sees a normal tool response.
     """
+    state_token: contextvars.Token[dict[str, bool] | None] | None = None
+    if tool_name in _PARTIAL_STATE_TOOLS:
+        state_token = _PARTIAL_STATE_CV.set(
+            {"disk_write_done": False, "deadline_killed": False},
+        )
     try:
         async with tool_span(tool_name, timeout_seconds):
             return await asyncio.to_thread(fn, *args, **kwargs)
     except TimeoutError:
-        return (
-            f"{tool_name} timed out after {timeout_seconds:.0f}s. "
-            "Server may be under load or a lock is contended; retry shortly."
+        if (
+            state_token is not None
+            and (state := _PARTIAL_STATE_CV.get()) is not None
+            and state.get("disk_write_done")
+        ):
+            return _PARTIAL_STATE_TIMEOUT_FMT.format(
+                tool=tool_name, timeout=timeout_seconds,
+            )
+        return _GENERIC_TIMEOUT_FMT.format(
+            tool=tool_name, timeout=timeout_seconds,
         )
+    finally:
+        if state_token is not None:
+            _PARTIAL_STATE_CV.reset(state_token)
 
 
 def wrap_sync_tool(
@@ -968,17 +1079,33 @@ def _run_git(
         registry.append(proc)
     stdout_b: bytes = b""
     stderr_b: bytes = b""
+    externally_terminated = False
     try:
         try:
             stdout_b, stderr_b = proc.communicate()
         except (BrokenPipeError, OSError) as exc:
             # External termination by bounded_call / tool_span.
             _log.debug("git %s: external termination (%s)", args[0], exc)
+            externally_terminated = True
             with contextlib.suppress(subprocess.SubprocessError, OSError):
                 # Best-effort drain of whatever the kernel buffered before
-                # the kill. Failures here are unrecoverable; we return -1.
+                # the kill. Failures here are unrecoverable.
                 stdout_b, stderr_b = proc.communicate()
-        rc = proc.returncode if proc.returncode is not None else -1
+        rc = (
+            proc.returncode
+            if proc.returncode is not None
+            else RC_EXTERNAL_TERMINATION
+        )
+        # HIVE-116 AC-3: an external-termination rc must be remapped from
+        # whatever the OS reported (Linux SIGTERM = -15, Windows = 1) to
+        # our named sentinel so callers can predicate on the constant. The
+        # synthetic stderr replaces the (often empty) original.
+        if externally_terminated:
+            stderr_b = synthesize_external_termination_stderr(
+                stderr_b or b"",
+            ).encode("utf-8")
+            rc = RC_EXTERNAL_TERMINATION
+            mark_deadline_killed()
     finally:
         if registry is not None and proc in registry:
             registry.remove(proc)
@@ -1036,16 +1163,26 @@ def _git_commit(
             with _filelock_with_telemetry(_git_filelock(vault_path), "_git_filelock"):
                 rc, _, err = _run_git(["add", *path_strs], vault_path)
                 if rc != 0:
+                    cause = (
+                        "external_termination"
+                        if rc == RC_EXTERNAL_TERMINATION
+                        else "git_error"
+                    )
                     _log.warning(
-                        "git add failed for %s rc=%s err=%s",
-                        path_strs, rc, err.strip(),
+                        "git add failed for %s rc=%s cause=%s err=%s",
+                        path_strs, rc, cause, err.strip(),
                     )
                     return
                 rc, _, err = _run_git(["commit", "-m", safe_msg], vault_path)
                 if rc != 0:
+                    cause = (
+                        "external_termination"
+                        if rc == RC_EXTERNAL_TERMINATION
+                        else "git_error"
+                    )
                     _log.warning(
-                        "git commit failed for %s rc=%s err=%s",
-                        path_strs, rc, err.strip(),
+                        "git commit failed for %s rc=%s cause=%s err=%s",
+                        path_strs, rc, cause, err.strip(),
                     )
         except filelock.Timeout:
             _log.warning(

@@ -340,6 +340,52 @@ Si tu vault usa obsidian-git para auto-backups, las dos herramientas cooperan li
 
 Una release futura hará la cooperación automática (auto-defer cuando el committer externo esté sano); por ahora es opt-in vía `commit=False`.
 
+## Escrituras en estado parcial tras deadline
+
+Cuando `vault_write` o `vault_patch` alcanza su deadline (60s por defecto) mientras el supervisor está matando un `git add` / `git commit` colgado, el archivo en disco puede haberse escrito — pero el commit nunca llegó a aterrizar. La respuesta incluirá el sufijo:
+
+```
+ (partial state — disk write succeeded, git commit killed by deadline; verify with vault_query before retrying)
+```
+
+O, cuando el deadline dispara antes de que el handler retorne, la respuesta es:
+
+```
+vault_write timed out after 60s — partial state: disk write succeeded, git commit killed by deadline; verify with vault_query before retrying.
+```
+
+### Qué hacer
+
+1. **NO reintentes a ciegas** — reintentar con escrituras FS nativas arriesga double-writes. El archivo ya está en disco.
+2. **Verifica** el estado real con `vault_query`:
+   ```
+   vault_query(project="mi-proyecto", path="11-tasks.md")
+   ```
+   Compara con lo que pretendías escribir.
+3. **Inspecciona el estado de git** si tienes shell en el vault:
+   ```bash
+   git -C "$VAULT_PATH" status --porcelain
+   ```
+   El archivo debería aparecer como modified o staged; nada committed.
+4. **Recupera el commit** mediante:
+   - Llamar a `vault_commit` (Hive flushea lo que esté sucio), o
+   - Dejar que obsidian-git lo recoja en su próximo tick (si está instalado), o
+   - Manualmente `git -C "$VAULT_PATH" add . && git commit -m "vault: rescue partial state"`.
+
+### Por qué pasa
+
+El supervisor de deadline termina el subprocess `git add` / `git commit`, pero el hilo Python que sostiene el cooperative `.git/hive.lock` puede seguir en mitad de `communicate()` (especialmente en Windows). La escritura en disco es atómica; el commit no. El sufijo partial-state es el contrato que Hive expone para que los agentes downstream eviten double-writes.
+
+### Triage operacional
+
+Al investigar, mira en `~/.local/share/hive/hive-<pid>.log` líneas como:
+
+```
+WARNING git add failed for [...] rc=-1 cause=external_termination err=[external_termination] killed by supervisor at 2026-05-27T18:00:00+00:00 ; original stderr: empty
+```
+
+El tag `cause=external_termination` es one-grep-able e indica que el supervisor lo mató (vs `cause=git_error` para fallos genuinos de git). El stderr sintético con el timestamp ISO-8601 permite correlacionar contra la respuesta partial-state que recibió el cliente.
+
 ## Obtener ayuda
 
 Si tu problema no está listado aquí:
