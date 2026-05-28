@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.0](https://github.com/mlorentedev/hive/compare/v1.19.1...v1.20.0) (2026-05-28)
+
+
+### Features
+
+* **hive:** observable partial-state writes (HIVE-116 PR-1) ([#142](https://github.com/mlorentedev/hive/issues/142)) ([672473f](https://github.com/mlorentedev/hive/commit/672473fa2140f5f1a11b1011b8ffb96b3208fd43))
+
 ## [1.19.1](https://github.com/mlorentedev/hive/compare/v1.19.0...v1.19.1) (2026-05-23)
 
 
