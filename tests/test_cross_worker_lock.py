@@ -4,8 +4,8 @@ Promoted from Red-phase placeholder (PR-1) to green (PR-2) once
 ``evict_filelock`` + ``_drain_and_evict`` + ``LockEvictionTracker`` are
 wired into the supervisor.
 
-POSIX-first; Windows variant is the manual smoke recipe in
-``docs/troubleshooting.md`` (T-3.2 will promote to CI matrix lane).
+POSIX-first; Windows variant promoted to CI matrix lane in HIVE-116 PR-3
+(``cross_worker_lock`` job on ``windows-latest``, allowed-to-fail for 14d).
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ import contextvars
 import logging
 import os
 import subprocess
-import sys
 from typing import TYPE_CHECKING
 
 import pytest
@@ -36,10 +35,6 @@ if TYPE_CHECKING:
 
 pytestmark = [
     pytest.mark.cross_worker,
-    pytest.mark.skipif(
-        sys.platform == "win32",
-        reason="POSIX-only first pass; Windows variant lands in T-3.2",
-    ),
 ]
 
 

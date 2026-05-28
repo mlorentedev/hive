@@ -38,7 +38,9 @@ gemini mcp add -s user hive-vault uv -- run --directory /path/to/hive hive-vault
 2. Follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, etc.)
 3. Run `make check` — all gates must pass
 4. Open a PR against `master`
-5. CI runs automatically (Python 3.12 + 3.13)
+5. CI runs automatically:
+   - **check** (ubuntu-latest, Python 3.12 + 3.13): lint + mypy + unit tests + build
+   - **cross_worker_lock** (ubuntu-latest + windows-latest): cross-worker filelock eviction + cancellation race tests (allowed-to-fail for first 14d of CI maturity)
 6. Squash merge after CI passes
 
 ## Code Standards

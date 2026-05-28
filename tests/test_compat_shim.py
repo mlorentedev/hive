@@ -146,8 +146,8 @@ def _classify(messages: list[dict[str, object]]) -> tuple[str, str]:
 
 
 @pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Linux/macOS classifier for HIVE-104 Risk #1 (Windows timing differs)",
+    False,
+    reason="Re-enabled on all platforms as part of HIVE-116 PR-3 cross-OS CI lane",
 )
 @pytest.mark.asyncio
 async def test_classify_cancellation_race(tmp_path: Path) -> None:
