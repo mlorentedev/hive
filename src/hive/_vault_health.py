@@ -126,6 +126,16 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
     lock_stats = _helpers._git_lock_stats_snapshot()
     obsidian = _helpers.detect_obsidian_git(ctx.vault) is not None
 
+    # HIVE-116 PR-2 / AC-8: cooperative-filelock eviction telemetry.
+    # Defensive: a tracker DB hiccup must not break vault_health.
+    eviction_count_30d = 0
+    eviction_last_iso: str | None = None
+    try:
+        eviction_count_30d = ctx.lock_eviction.count_last_30d()
+        eviction_last_iso = ctx.lock_eviction.last_iso()
+    except Exception:  # noqa: BLE001
+        pass
+
     lines = [
         "## runtime",
         f"- uptime_s: {uptime_s:.1f}",
@@ -138,6 +148,9 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
         f"  - p99: {lock_stats['p99_ms']:.1f}",
         f"  - samples: {lock_stats['sample_count']}",
         f"- obsidian_git_present: {str(obsidian).lower()}",
+        "- lock_eviction:",
+        f"  - count_30d: {eviction_count_30d}",
+        f"  - last_iso: {eviction_last_iso or 'null'}",
         "- openrouter_budget:",
         f"  - spent_usd: {float(stats['spent']):.4f}",
         f"  - cap_usd: {ctx.openrouter_budget}",

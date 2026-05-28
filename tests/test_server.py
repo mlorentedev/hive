@@ -816,6 +816,25 @@ class TestVaultHealthRuntime:
         finally:
             _close_server(mcp)
 
+    async def test_runtime_block_includes_lock_eviction(
+        self, vault_mcp: FastMCP,
+    ) -> None:
+        """HIVE-116 PR-2 / AC-8: lock_eviction.count_30d + last_iso fields."""
+        import re
+
+        result = _text(
+            await vault_mcp.call_tool(
+                "vault_health", {"include_runtime": True},
+            ),
+        )
+        assert "lock_eviction:" in result
+        m = re.search(r"count_30d:\s*(\d+)", result)
+        assert m is not None, f"count_30d field missing in:\n{result}"
+        # Fresh tracker → 0 evictions
+        assert int(m.group(1)) == 0
+        # last_iso is 'null' when no eviction has happened
+        assert "last_iso: null" in result
+
     async def test_runtime_budget_does_not_leak_api_key(
         self, mock_vault: Path,
     ) -> None:

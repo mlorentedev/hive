@@ -23,8 +23,10 @@ from hive._helpers import (  # noqa: E402
     _resolve_file,
     _safe_read,
     _truncate,
+    register_lock_eviction_tracker,
 )
 from hive._lesson_reinforcement import LessonReinforcementTracker  # noqa: E402
+from hive._lock_eviction import LockEvictionTracker  # noqa: E402
 from hive._vault_health import health_report_text, register_vault_health  # noqa: E402
 from hive._vault_read import list_projects_text, register_vault_read  # noqa: E402
 from hive._vault_write import register_vault_write  # noqa: E402
@@ -45,6 +47,7 @@ def create_server(
     vault_scopes: dict[str, str] | None = None,
     relevance_tracker: RelevanceTracker | None = None,
     lesson_tracker: LessonReinforcementTracker | None = None,
+    lock_eviction_tracker: LockEvictionTracker | None = None,
 ) -> FastMCP:
     """Create and configure the Hive MCP server."""
     resolved_path = vault_path or settings.vault_path
@@ -72,6 +75,13 @@ def create_server(
     lessons = lesson_tracker or LessonReinforcementTracker(
         db_path=settings.lesson_db_path,
     )
+    from pathlib import Path as _Path
+
+    lock_eviction = lock_eviction_tracker or LockEvictionTracker(
+        db_path=str(
+            _Path(settings.db_path).parent / "lock_evictions.db",
+        ),
+    )
 
     ctx = ServerContext(
         vault=resolved_path,
@@ -82,6 +92,7 @@ def create_server(
         openrouter=openrouter,
         relevance=relevance,
         lessons=lessons,
+        lock_eviction=lock_eviction,
         stale_days=settings.stale_threshold_days,
         openrouter_budget=settings.openrouter_budget,
         openrouter_paid_model=settings.openrouter_paid_model,
@@ -89,6 +100,10 @@ def create_server(
         started_at_iso=datetime.now(UTC).isoformat(timespec="seconds"),
         started_at_monotonic=time.monotonic(),
     )
+    # HIVE-116 PR-2: register tracker as the process-global supervisor
+    # singleton so ``tool_span`` / ``bounded_call`` can persist eviction
+    # events without taking a ServerContext arg (would create a cycle).
+    register_lock_eviction_tracker(lock_eviction)
 
     mcp = FastMCP(
         "Hive",

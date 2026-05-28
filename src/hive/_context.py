@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from hive._lesson_reinforcement import LessonReinforcementTracker
+    from hive._lock_eviction import LockEvictionTracker
     from hive.budget import BudgetTracker
     from hive.clients import OllamaClient, OpenRouterClient
     from hive.relevance import RelevanceTracker
@@ -27,6 +28,7 @@ class ServerContext:
     openrouter: OpenRouterClient | None
     relevance: RelevanceTracker
     lessons: LessonReinforcementTracker
+    lock_eviction: LockEvictionTracker
     stale_days: int
     openrouter_budget: float
     openrouter_paid_model: str
@@ -40,3 +42,4 @@ class ServerContext:
         self.budget.close()
         self.relevance.close()
         self.lessons.close()
+        self.lock_eviction.close()

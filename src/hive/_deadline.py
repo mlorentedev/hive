@@ -251,6 +251,18 @@ async def bounded_call[T](
             "deadline_s=%.1f killed_pids=%s",
             tool_name or "<unknown>", elapsed, deadline_s, killed,
         )
+        # HIVE-116 AC-1: cooperative filelock eviction. Mirrors the
+        # ``tool_span`` branch; both supervisors share the eviction
+        # primitive so direct ``bounded_call`` callers (tests, future
+        # tooling) get the same unblocking behaviour as the MCP tool
+        # wrapper path.
+        if vault_for_index_cleanup is not None and killed:
+            from hive._helpers import _drain_and_evict
+
+            await _drain_and_evict(
+                vault_for_index_cleanup, killed,
+                tool_name or "<unknown>",
+            )
         raise TimeoutError(
             f"bounded_call exceeded deadline "
             f"(elapsed {elapsed:.1f}s > {deadline_s:.1f}s); "
