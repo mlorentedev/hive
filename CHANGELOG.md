@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.0](https://github.com/mlorentedev/hive/compare/v1.20.1...v1.21.0) (2026-05-28)
+
+
+### Features
+
+* **hive:** cross-OS CI matrix for filelock eviction + archive HIVE-116 spec (HIVE-116 PR-3) ([8cb35e0](https://github.com/mlorentedev/hive/commit/8cb35e0b7c6fd430d53feb5437f591fa9a185e9c))
+
 ## [1.20.1](https://github.com/mlorentedev/hive/compare/v1.20.0...v1.20.1) (2026-05-28)
 
 
