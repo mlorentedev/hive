@@ -35,6 +35,8 @@ The package layout follows a deliberate split: `server.py` is a thin registratio
 
 `src/hive/_compat.py` monkey-patches `mcp.shared.session.RequestResponder.__exit__` to swallow the spurious `CancelledError` that anyio re-raises after a cancelled tool call has already responded. Without it, a client sending `notifications/cancelled` kills the stdio receive loop and every subsequent call hangs (hive issue #75). The patch is forward-compatible — it fires only on the exact failure mode and degrades silently if upstream removes the symbol. Delete only after confirming the upstream MCP fix has shipped.
 
+**Upstream tracker:** [modelcontextprotocol/python-sdk#2610](https://github.com/modelcontextprotocol/python-sdk/issues/2610) — independent confirmation of the same root cause by `jshaofa-ui` (2026-05-16). `mcp` pinned `>=1.26,<2.0` in `pyproject.toml` so a major refactor of `RequestResponder` cannot silently break the shim. **Escalation deadline:** 2026-06-12 — if upstream is still silent, port the fix as our own PR upstream (tracked in [#127](https://github.com/mlorentedev/hive/issues/127)).
+
 ### Worker routing order
 
 `delegate_task` tries clients in this order, falling through on failure or unavailability:
@@ -53,11 +55,13 @@ make install    # uv venv + uv pip install -e ".[dev]"
 make lint       # ruff check src/ tests/
 make typecheck  # mypy --strict src/
 make test       # pytest with coverage (smoke tests auto-excluded via addopts)
+make test-one   # run a single test: make test-one ARGS="tests/test_server.py -k vault_query"
 make smoke      # pytest -m smoke (needs running Ollama + OPENROUTER_API_KEY)
 make check      # lint + typecheck + test — run this before every PR
 make build      # check + uv build
 make run        # uv run python -m hive.server (local MCP server over stdio)
-make clean      # remove build/cache artifacts
+make logs       # show path to the debug log file (also printed at server startup)
+make clean      # remove build/cache artifacts (cross-platform via Python)
 make site / site-dev / site-preview  # Astro docs site
 ```
 

@@ -701,6 +701,28 @@ def _compute_wal_size_bytes(state_dir: Path) -> int:
     return total
 
 
+def _clean_stale_wal_files(state_dir: Path, max_age_days: int = 30) -> None:
+    """Remove stale (≥*max_age_days*) zero-byte WAL files under *state_dir*.
+
+    A zero-byte ``.db-wal`` file means the WAL was fully checkpointed but
+    SQLite left the file behind — cosmetic clutter, not a functional issue.
+    These files accumulate over time and can confuse operators inspecting
+    ``wal_size_bytes`` in ``vault_health``. This cleanup runs at server
+    startup and is safe to call at any time (deleting a 0-byte WAL that a
+    live sibling process just checkpointed is harmless — SQLite re-creates
+    it on the next write).
+    """
+    now = time.time()
+    cutoff = now - max_age_days * 86400
+    try:
+        for wal in state_dir.glob("*.db-wal"):
+            if wal.stat().st_size == 0 and wal.stat().st_mtime < cutoff:
+                wal.unlink()
+                _log.info("mcp.wal_cleanup removed stale 0-byte WAL: %s", wal.name)
+    except OSError:
+        pass
+
+
 def _count_competing_hive_processes() -> int:
     """Count distinct ``hive-vault`` PIDs (excluding self), same user only.
 

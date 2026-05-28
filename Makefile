@@ -1,4 +1,4 @@
-.PHONY: help install lint typecheck test smoke check build clean run site site-dev site-preview
+.PHONY: help install lint typecheck test test-one smoke check build clean run logs site site-dev site-preview
 .DEFAULT_GOAL := help
 
 help: ## Show this help
@@ -16,6 +16,9 @@ typecheck: ## Run mypy --strict
 test: ## Run unit + integration tests
 	uv run pytest tests/ -v --cov=hive --cov-report=term-missing
 
+test-one: ## Run a single test file or expression (e.g. `make test-one ARGS="tests/test_server.py -k vault_query"`)
+	uv run pytest $(ARGS)
+
 smoke: ## Run e2e smoke tests (needs Ollama + API key)
 	uv run pytest -m smoke -v
 
@@ -27,6 +30,11 @@ build: check ## Check + build package
 run: ## Run Hive MCP server locally
 	uv run python -m hive.server
 
+logs: ## Show path to the debug log file
+	@echo "$${HIVE_LOG_PATH:-$$HOME/.local/share/hive/hive.log}"
+	@echo
+	@echo "Tail with: tail -f \"$${HIVE_LOG_PATH:-$$HOME/.local/share/hive/hive.log}\""
+
 site: ## Build landing page (requires Node.js)
 	cd site && npm ci && npm run build
 
@@ -36,5 +44,9 @@ site-dev: ## Start landing page dev server
 site-preview: ## Preview landing page production build
 	cd site && npm run preview
 
-clean: ## Remove build artifacts
-	rm -rf dist/ .venv/ *.egg-info/ .ruff_cache/ .mypy_cache/ .pytest_cache/ htmlcov/ .coverage site/dist/ site/node_modules/
+clean: ## Remove build artifacts (cross-platform)
+	uv run python -c "import shutil, pathlib; \
+	  dirs = ['dist', '.venv', '.ruff_cache', '.mypy_cache', \
+	          '.pytest_cache', 'htmlcov', 'site/dist', 'site/node_modules']; \
+	  [shutil.rmtree(d, ignore_errors=True) for d in dirs if pathlib.Path(d).exists()]; \
+	  [pathlib.Path(f).unlink(missing_ok=True) for f in ['.coverage', '*.egg-info']]"
