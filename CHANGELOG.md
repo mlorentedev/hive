@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.1](https://github.com/mlorentedev/hive/compare/v1.21.0...v1.21.1) (2026-05-29)
+
+
+### Documentation
+
+* migrate build/operate knowledge into docs/ (KPM-009) ([#149](https://github.com/mlorentedev/hive/issues/149)) ([8675017](https://github.com/mlorentedev/hive/commit/867501741529e7830b0adf9fdbfeb7b1f4b0db05))
+
 ## [1.21.0](https://github.com/mlorentedev/hive/compare/v1.20.1...v1.21.0) (2026-05-28)
 
 
