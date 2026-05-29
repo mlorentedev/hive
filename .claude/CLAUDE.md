@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 > **Hive** — vault-native AI orchestration: a unified MCP server giving AI coding assistants on-demand access to an Obsidian vault plus delegation to local/cheap workers.
 
+Project-bound knowledge lives in [`docs/`](../docs/) (docs-as-code): [`docs/adr/`](../docs/adr/) (architecture decisions + `sequence-diagrams.md`), [`docs/runbooks/`](../docs/runbooks/), [`docs/troubleshooting/`](../docs/troubleshooting/), [`docs/lessons.md`](../docs/lessons.md) (gotchas and post-mortems). The strategic/decide layer and session memory live in the maintainer's cross-project knowledge store (not committed here).
+
 ## Big-picture architecture
 
 Hive is an MCP server (stdio transport, FastMCP framework) with three responsibilities:

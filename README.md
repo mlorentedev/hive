@@ -66,7 +66,7 @@ Hive degrades gracefully — every recommended or optional dependency reveals mo
 
 ### Recommended configuration
 
-Per [ADR-006 (commit policy)](https://github.com/mlorentedev/hive/blob/master/docs/architecture/adr-006-commit-policy.md), the recommended pairing for write-heavy flows is:
+Per [ADR-006 (commit policy)](docs/adr/adr-006-commit-policy.md), the recommended pairing for write-heavy flows is:
 
 1. Install and enable the **obsidian-git** plugin in your vault.
 2. Set its **auto-commit interval** to 5 or 10 minutes.
@@ -75,7 +75,7 @@ Per [ADR-006 (commit policy)](https://github.com/mlorentedev/hive/blob/master/do
 
 `vault_health` reports a `## external_committer` block when it detects obsidian-git in the vault. The `commit=False` durability contract is explicit: files are persisted to disk regardless; only the *commit* is deferred. A crash before the next flush loses the commit, not the content.
 
-When a tool call is cancelled mid-flight (slow worker, client timeout), the server may have already mutated the disk before the cancel ack reaches the wire. `vault_health` surfaces a `## ghost_responses` counter and emits a `mcp.ghost_response.suppressed_after_cancel_ack` WARNING for each event — verify state via `vault_query` rather than retrying, since the ErrorData ack does **not** imply rollback ([ADR-007](https://github.com/mlorentedev/hive/blob/master/docs/architecture/adr-007-mcp-cancellation-response.md)).
+When a tool call is cancelled mid-flight (slow worker, client timeout), the server may have already mutated the disk before the cancel ack reaches the wire. `vault_health` surfaces a `## ghost_responses` counter and emits a `mcp.ghost_response.suppressed_after_cancel_ack` WARNING for each event — verify state via `vault_query` rather than retrying, since the ErrorData ack does **not** imply rollback ([ADR-007](docs/adr/adr-007-mcp-cancellation-response.md)).
 
 ## Tools
 
@@ -131,6 +131,13 @@ Full documentation at **[mlorentedev.github.io/hive](https://mlorentedev.github.
 - [Use Cases](https://mlorentedev.github.io/hive/guides/use-cases/) — real-world workflows
 - [Architecture](https://mlorentedev.github.io/hive/reference/architecture/) — module map and design decisions
 - [Troubleshooting](https://mlorentedev.github.io/hive/guides/troubleshooting/) — common issues and fixes
+
+Project-bound knowledge (docs-as-code) lives in [`docs/`](docs/):
+
+- [`docs/adr/`](docs/adr/) — Architecture Decision Records
+- [`docs/runbooks/`](docs/runbooks/) — operational procedures
+- [`docs/troubleshooting/`](docs/troubleshooting/) — known issues and root-cause write-ups
+- [`docs/lessons.md`](docs/lessons.md) — accumulated gotchas and post-mortems
 
 ## Contributing
 
