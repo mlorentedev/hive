@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from hive._helpers import (
     _READ_ONLY,
+    META_SCOPE,
     SECTION_SHORTCUTS,
     _format_metadata,
     _git_log,
@@ -122,7 +123,7 @@ def list_projects_text(ctx: ServerContext) -> str:
     lines = ["# Vault Projects", ""]
     found_any = False
     for scope_name, dir_name in ctx.scopes.items():
-        if scope_name == "meta":
+        if scope_name == META_SCOPE:
             continue
         scope_dir = ctx.vault / dir_name
         if not scope_dir.is_dir():
