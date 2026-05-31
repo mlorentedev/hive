@@ -7,20 +7,20 @@ created: "2026-05-29"
 
 > TDD order. One task = one focused commit. Tick as you go. Reorder freely while spec is in `draft` state; freeze once you start `implementing`.
 >
-> **STATUS: draft — DO NOT freeze.** Two `[MUST RESOLVE]` open questions in proposal.md (cross-OS transport, SPOF/lifecycle) AND ADR-011 are blocking. Resolve via `/spec fill` + ADR-011 before turning this into a frozen task list. The steps below are a provisional skeleton, not a committed plan.
+> **STATUS: draft — DO NOT freeze.** Progress (2026-05-31): ADR-011 is authored (proposed) and resolves the design-only open questions (transport, SPOF/lifecycle, observability, version skew §6.1, write idempotency §6.2, forensic recorder §6.3); the Linux transport spike passed (`spike/transport_spike.py`, 5/5). **Sole remaining freeze-blocker:** the **Windows** half of the transport spike (loopback-HTTP + token round-trip, `0600`-equivalent token-file ACL, firewall prompt) + ADR-011 acceptance. Freeze only after that. The steps below remain a provisional skeleton.
 
 ## Setup
 
 - [ ] Branch created from main: `feat/HIVE-118-phase-c-daemon-model`
 - [ ] `proposal.md` completed via `/spec fill` (Socratic pass — currently agent-scaffolded from vault context)
 - [ ] **ADR-011 authored + merged** (daemon decision, transport choice, fallback contract, supersession of ADR-005) — gating
-- [ ] Open questions in `proposal.md` "Risks" resolved (cross-OS transport decided; SPOF/lifecycle strategy decided)
+- [x] Open questions in `proposal.md` "Risks" resolved (cross-OS transport decided; SPOF/lifecycle strategy decided) — done in ADR-011 (2026-05-31); only the Windows transport spike remains
 
 ## Implementation (provisional skeleton — refine after fill + ADR-011)
 
 > Keep small (one commit each), TDD order. Sequencing assumes a spike de-risks the transport first.
 
-- [ ] **Spike:** prototype the chosen local transport (Unix socket / named pipe / loopback Streamable-HTTP) round-trip on Linux + Windows; decide before committing the design
+- [~] **Spike:** loopback Streamable-HTTP + bearer-token round-trip. **Linux: DONE** (`spike/transport_spike.py`, 5/5 — round-trip, missing/wrong-token 401, `0600` token file). **Windows: PENDING** (port binding, firewall prompt, `0600`-equivalent token-file ACL) — the gate before freeze + ADR-011 acceptance.
 - [ ] Write failing test: daemon starts, owns the SQLite DBs, answers a `tools/list`
 - [ ] Implement `hive serve` daemon entrypoint (long-lived; single owner of `ServerContext`)
 - [ ] Write failing test: thin client connects over transport and round-trips one `vault_query`

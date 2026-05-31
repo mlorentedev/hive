@@ -13,6 +13,8 @@ tags: [architecture, daemon, transport, observability, resilience, mcp]
 
 Proposed (2026-05-30). Drives the `specs/HIVE-118-phase-c-daemon-model/` work. **Supersedes the "Stay on Option A" recommendation of [adr-005-transport-and-scale.md](adr-005-transport-and-scale.md)** by adopting its Option B (the `hive serve` daemon). One residual `[MUST RESOLVE]` blocks acceptance: a transport spike must validate the chosen loopback-HTTP + token path on Windows (the file-handle terrain that produced HIVE-116). `tasks.md` stays unfrozen until that spike passes and this ADR is accepted.
 
+**Update (2026-05-31).** The **Linux half** of the transport spike PASSED — loopback Streamable-HTTP + bearer-token round-trip (cross-process), missing-token and wrong-token rejection (HTTP 401), and an owner-only `0600` token file, all green and reproducible at [`spike/transport_spike.py`](../../specs/HIVE-118-phase-c-daemon-model/spike/transport_spike.py) (`5/5 checks, exit 0`). The residual therefore narrows to the **Windows** half only (port binding, firewall prompt, `0600`-equivalent token-file ACL). The three design open-questions that did not need Windows are now **resolved** (§6). This ADR is **one Windows spike from acceptance**; `tasks.md` stays unfrozen until then.
+
 ## Context
 
 [adr-005-transport-and-scale.md](adr-005-transport-and-scale.md) analysed the stdio multi-process model (one `uvx hive-vault` per Claude Code session, all sharing one vault git repo + three SQLite DBs) and recommended **Option A** (stay on stdio, ship the six contention fixes) with **Option B** (a single persistent daemon) pre-registered as a v2 milestone gated on two triggers: sustained write-tail-latency complaints, or a real need for shared cross-session state.
@@ -47,11 +49,11 @@ The daemon listens on `127.0.0.1:PORT` using FastMCP's **native** Streamable-HTT
 
 A bare loopback port is reachable by **any** local process/user, so it is not owner-restricted the way a `0600` Unix socket is. We close that gap with a **per-daemon bearer token**: the daemon writes a random token to `~/.local/share/hive/daemon.token` with mode `0600` (owner-only) and publishes its port to a sibling state file; the thin client reads the token and sends it as an `Authorization` header. Requests without the matching token are rejected. This resolves the transport `[MUST RESOLVE]` and the local-transport-security item together.
 
-> **Residual `[MUST RESOLVE]`:** a spike must confirm the loopback-HTTP + token round-trip on Windows (port binding, token-file perms equivalent, firewall prompts) before this ADR is accepted and `tasks.md` is frozen.
+> **Residual `[MUST RESOLVE]`:** the loopback-HTTP + token round-trip is **validated on Linux** (spike, 2026-05-31 — see Status). A spike must still confirm it on **Windows** (port binding, `0600`-equivalent token-file ACL, firewall prompts) before this ADR is accepted and `tasks.md` is frozen.
 
 ### 3. Fallback contract
 
-If the client cannot reach a daemon — none running, token mismatch, or a protocol-version mismatch — it **transparently falls back to the current in-process stdio server**, and the response/health flags degraded (non-daemon) mode. Clients reconnect automatically when the daemon returns. A dead daemon degrades to today's behaviour; it never breaks hive. The existing `~/.claude.json` MCP contract is preserved unchanged by a thin stdio shim.
+If the client cannot reach a daemon — none running, token mismatch, or a protocol-version mismatch — it **transparently falls back to the current in-process stdio server**, and the response/health flags degraded (non-daemon) mode. Clients reconnect automatically when the daemon returns. A dead daemon degrades to today's behaviour; it never breaks hive. The existing `~/.claude.json` MCP contract is preserved unchanged by a thin stdio shim. The protocol-version mismatch is detected by an explicit handshake — see §6.1.
 
 ### 4. Resilience, observability & post-mortem (load-bearing, not appendix)
 
@@ -61,7 +63,7 @@ A single daemon serving N sessions is a single point of failure, so it is built 
 - **Crash-safe durable state** — SQLite WAL + git working tree survive `SIGKILL` uncorrupted; informational counters/EMA may be lost but never block startup. Reuses the Outbox crash-loss contract + HIVE-116 partial-state contract.
 - **Startup self-heal** — clears its own stale locks / zombie state from a prior unclean exit.
 - **Liveness + readiness probes**, distinct.
-- **Crash artifact** — abnormal exit flushes a black-box ring buffer of the last-N requests + lock events to a known path, with **no secrets/API keys**.
+- **Crash artifact** — abnormal exit flushes a black-box ring buffer of the last-N requests + lock events to a known path, with **no secrets/API keys**. Field policy decided in §6.3 (metadata + redacted-arg shapes; `N=256`; keep newest 5 artifacts).
 - **Three-plane telemetry** (decided, to avoid the "DB vs log" trap): (1) live metrics in-memory → `/metrics` + `hive status`, no synchronous per-call disk write; (2) forensic JSON-lines + crash artifact; (3) historical telemetry reusing `usage.db`, written async/reconciler-side, durable across restarts.
 - **Correlated structured logging** — one daemon log (replaces per-PID files), JSON, with per-request `correlation_id` + `session_id`.
 
@@ -70,6 +72,16 @@ Primary observability surface: **`/status` HTTP endpoint** (free with the chosen
 ### 5. Scope boundary
 
 Local, single-user daemon only (Ollama stays remote). NOT in scope: remote/multi-user "team edition", changing the MCP tool surface (that is HIVE-119 / #151), or reconciling other sessions' vault branches.
+
+### 6. Resolved design decisions (2026-05-31)
+
+These three open questions did not need the Windows spike and are decided here, converting the spec's `[AGENT-SUGGESTION — accept or remove]` items to accepted contract.
+
+**6.1 Client↔daemon version skew → protocol-version handshake.** The daemon advertises an integer `hive_protocol_version` (in its `/status` and the connect handshake); the thin client carries a `CLIENT_COMPAT_RANGE` and, on a value outside that range, logs degraded mode and falls back to the in-process stdio path (§3) rather than serving a mismatched pair. The integer is bumped **only** on a breaking client↔daemon contract change (request envelope, DB schema, fallback semantics) — not on ordinary feature releases — and the range lets an N‑1 client keep working through a rolling upgrade window. Chosen over (a) relying on MCP's own `initialize` negotiation, which cannot see hive-semantic skew, and (b) lock-step refusal, which turns every skew into an outage. This is the standard wire-protocol-versioning pattern (gRPC/LSP/database protocols) and degrades through an already-required path, so it adds a contract but no new failure mode.
+
+**6.2 Write idempotency across reconnect/fallback → idempotency key.** Each `vault_write` / `vault_patch` carries a client-generated idempotency key. The daemon and the stdio fallback both consult one applied-key store (short TTL, ~10 min) and a key already present is a no-op that returns the prior result. This gives at-most-once semantics across the daemon→stdio handoff and is the only option that is safe for **append** mode (a pre-commit content check cannot distinguish "already applied" from "two legitimately identical appends"). Cost: the key must be threaded through the tool envelope and persisted in a small store the fallback path can also read.
+
+**6.3 Forensic recorder fields → metadata + redacted-arg shapes.** The black-box ring buffer (last `N=256` requests) and the crash artifact record: tool name, `correlation_id`, `session_id`, start time, duration, outcome, and lock events — plus **argument shapes with values redacted to `type:length`** (e.g. `text: <str:1204>`), never raw values, file contents, headers, or the bearer token. Redaction is therefore **security-critical** code: it must default to redacting any unrecognised field and be unit-tested against a known-secret fixture so a token can never reach an artifact. Keep the newest 5 crash artifacts (rotate older). Richer than metadata-only repro, accepted because the marginal diagnostic value is high and the redaction surface is small and testable.
 
 ## Consequences
 
@@ -84,8 +96,8 @@ Local, single-user daemon only (Ollama stays remote). NOT in scope: remote/multi
 
 - New single point of failure — bounded by the resilience pillar (supervised restart + transparent stdio fallback), but real.
 - New deploy surface — users must have the daemon started (service unit / launchd / Task Scheduler).
-- New skew class — thin-client shim vs daemon version mismatch during rolling upgrades (needs a protocol-version handshake; tracked as an open question in the spec).
-- Write idempotency across reconnect/fallback must be defined so a retried write after a mid-call daemon death is not duplicated.
+- New skew class — thin-client shim vs daemon version mismatch during rolling upgrades — bounded by the protocol-version handshake + stdio fallback (§6.1).
+- Write idempotency across reconnect/fallback — handled by a per-write idempotency key so a retried write after a mid-call daemon death is a no-op (§6.2).
 
 ### Neutral
 
