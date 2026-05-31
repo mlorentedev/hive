@@ -20,7 +20,8 @@ created: "2026-05-29"
 
 > Keep small (one commit each), TDD order. Sequencing assumes a spike de-risks the transport first.
 
-- [~] **Spike:** loopback Streamable-HTTP + bearer-token round-trip. **Linux: DONE** (`spike/transport_spike.py`, 5/5 — round-trip, missing/wrong-token 401, `0600` token file). **Windows: PENDING** (port binding, firewall prompt, `0600`-equivalent token-file ACL) — the gate before freeze + ADR-011 acceptance.
+- [~] **Spike (transport):** loopback Streamable-HTTP + bearer-token round-trip. **Linux: DONE** (`spike/transport_spike.py`, 5/5 — round-trip, missing/wrong-token 401, `0600` token file). **Windows: PENDING** (port binding, firewall prompt, `0600`-equivalent token-file ACL) — the gate before freeze + ADR-011 acceptance.
+- [~] **Spike (load/concurrency):** N parallel sessions → one daemon owning a shared SQLite. **Linux: DONE** (`spike/load_spike.py`, 4/4 — 8×25 & 16×40 with zero failures, no lost writes, no head-of-line blocking, p99≈66–99 ms). Pre-validates the single-owner concurrency model (ADR-011 §1) + the multi-client + "slow op doesn't HOL-block" acceptance criteria before the real daemon is built. Worth a confirming Windows run.
 - [ ] Write failing test: daemon starts, owns the SQLite DBs, answers a `tools/list`
 - [ ] Implement `hive serve` daemon entrypoint (long-lived; single owner of `ServerContext`)
 - [ ] Write failing test: thin client connects over transport and round-trips one `vault_query`
