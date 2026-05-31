@@ -332,6 +332,9 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
             find: Keyword to look up in existing lesson headings (lookup mode).
             rank_by: Lookup ranking — 'reinforcements' (default), 'confidence',
                 or 'hybrid'. Ignored unless ``find`` is set.
+
+        Note: there is no `commit` parameter here — lesson writes always
+        auto-commit. `commit` lives on ``vault_write`` / ``vault_patch``.
         """
         guard = _vault_guard(ctx)
         if guard:

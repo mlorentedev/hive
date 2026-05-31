@@ -159,6 +159,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         project: str = "",
         path: str = "",
         pattern: str = "",
+        subpath: str = "",
     ) -> str:
         """List vault projects, or files within a project.
 
@@ -168,8 +169,12 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         Args:
             project: Project slug. Empty = list all projects.
             path: Subdirectory within the project. Empty = project root.
+                (Use `path`, not `subpath` — `subpath` is accepted as an alias.)
             pattern: Glob pattern to filter files (e.g. 'adr-*', '*.md').
+            subpath: Alias of `path` (#151). Prefer `path`. Note: there is no
+                `scope` parameter here — `scope` lives on `vault_search`.
         """
+        path = path or subpath  # #151: accept `subpath` as alias of `path`
         guard = _vault_guard(ctx)
         if guard:
             return track(ctx, "vault_list", guard)
@@ -254,6 +259,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         path: str = "",
         max_lines: int = 0,
         include_metadata: bool = False,
+        identifier: str = "",
     ) -> str:
         """Read content from a vault project — use instead of direct filesystem access.
 
@@ -261,9 +267,13 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             project: Project slug (directory under 10_projects/), or '_meta' for 00_meta/.
             section: Shortcut name (context, tasks, roadmap, lessons). Ignored if path is set.
             path: Relative path to a specific .md file within the project. Overrides section.
+                (Use `path` for a file, not `identifier` — `identifier` is accepted as an alias.)
             max_lines: Maximum lines to return. 0 = unlimited.
             include_metadata: Prepend a structured metadata line from YAML frontmatter.
+            identifier: Alias of `path` (#151). Prefer `path`; for a section
+                shortcut use `section` instead.
         """
+        path = path or identifier  # #151: accept `identifier` as alias of `path`
         guard = _vault_guard(ctx)
         if guard:
             return track(ctx, "vault_query", guard, project)
@@ -313,6 +323,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         project: str = "",
         scope: str = "",
         rank_by: str = "bm25",
+        regex: bool = False,
     ) -> str:
         """Search the vault: full-text, ranked, or recent changes.
 
@@ -327,7 +338,8 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             type_filter: Only files whose frontmatter type matches.
             status_filter: Only files whose frontmatter status matches.
             tag_filter: Only files that have this frontmatter tag.
-            use_regex: Treat query as regex. Default False.
+            use_regex: Treat query as regex. Default False. (Use `use_regex`,
+                not `regex` — `regex` is accepted as an alias.)
             ranked: Score results by relevance. Default False.
             max_results: Max files when ranked. Default 10.
             since_days: Show recent changes (0 = disabled). Default 0.
@@ -336,7 +348,11 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             rank_by: Lesson ranking ('bm25' default keeps current
                 behaviour; 'reinforcements', 'confidence', 'hybrid' filter
                 to 90-lessons.md only and rank by usage signal).
+            regex: Alias of `use_regex` (#151). Prefer `use_regex`. To narrow
+                by location use `scope` / `project`, not `path_filter` /
+                `path_prefix`.
         """
+        use_regex = use_regex or regex  # #151: accept `regex` as alias of `use_regex`
         guard = _vault_guard(ctx)
         if guard:
             return track(ctx, "vault_search", guard)
@@ -585,7 +601,9 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
 
         Args:
             project: Project slug (directory under 10_projects/). Empty =
-                list available projects so the caller can pick one.
+                list available projects so the caller can pick one. This is the
+                only parameter — there is no `days` argument (the briefing
+                window is fixed).
         """
         guard = _vault_guard(ctx)
         if guard:
