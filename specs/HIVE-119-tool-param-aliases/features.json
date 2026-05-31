@@ -1,0 +1,51 @@
+[
+  {
+    "id": "HIVE-119-tool-param-aliases-f1",
+    "behavior": "vault_list(subpath=X) is accepted and behaves identically to vault_list(path=X)",
+    "verification": "uv run pytest tests/test_tool_param_aliases.py -k subpath_aliases_path -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-119-tool-param-aliases-f2",
+    "behavior": "vault_patch(old_string=A, new_string=B) is accepted and applies the same replacement as find/replace",
+    "verification": "uv run pytest tests/test_tool_param_aliases.py -k old_new_string -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-119-tool-param-aliases-f3",
+    "behavior": "vault_search(regex=True) is accepted and behaves identically to use_regex=True",
+    "verification": "uv run pytest tests/test_tool_param_aliases.py -k regex_aliases_use_regex -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-119-tool-param-aliases-f4",
+    "behavior": "vault_query(identifier=X) is accepted and behaves identically to vault_query(path=X)",
+    "verification": "uv run pytest tests/test_tool_param_aliases.py -k identifier_aliases_path -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-119-tool-param-aliases-f5",
+    "behavior": "When both canonical and alias are supplied, the canonical value wins (alias ignored)",
+    "verification": "uv run pytest tests/test_tool_param_aliases.py -k path_beats_subpath -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-119-tool-param-aliases-f6",
+    "behavior": "No registered tool's JSON Schema contains anyOf (the load-bearing | None ban holds)",
+    "verification": "uv run pytest tests/test_tool_param_aliases.py -k anyof -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-119-tool-param-aliases-f7",
+    "behavior": "Docstrings of the 7 affected tools name canonical params and call out the common wrong name",
+    "verification": "uv run pytest tests/test_tool_param_aliases.py -k wrong_names -q",
+    "state": "pending",
+    "evidence": ""
+  }
+]
