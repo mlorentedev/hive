@@ -296,7 +296,7 @@ def _parse_project_ref(project: str) -> tuple[str | None, str]:
 
 
 def _resolve_project_dir(
-    vault: Path, project: str, scopes: dict[str, str] | None = None,
+    vault: Path, project: str, scopes: dict[str, str],
 ) -> tuple[Path, str] | None:
     """Resolve a project slug to (directory, scope_name).
 
@@ -309,10 +309,13 @@ def _resolve_project_dir(
     depth.  Slugs containing ``/`` are resolved as literal relative paths
     within the scope directory (no BFS).
 
+    ``scopes`` is required: every production caller passes ``ctx.scopes``
+    and the single default is resolved once at the ``create_server()``
+    boundary, so there is no internal fallback to drift untested (#159).
+    Tests that want the shipped default pass ``_default_scopes()``.
+
     Returns None if the project is not found or escapes the vault boundary.
     """
-    scopes = scopes or _default_scopes()
-
     # _meta special case → meta scope root
     if project == "_meta":
         meta_dir_name = scopes.get(META_SCOPE, "00_meta")
@@ -402,7 +405,7 @@ def _resolve_file(
     project: str,
     section: str,
     path: str,
-    scopes: dict[str, str] | None = None,
+    scopes: dict[str, str],
 ) -> Path | str:
     """Resolve a vault file from project + section/path. Returns Path or error string."""
     result = _resolve_project_dir(vault, project, scopes)

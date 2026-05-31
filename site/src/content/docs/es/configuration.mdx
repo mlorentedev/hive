@@ -62,7 +62,7 @@ Cuando una llamada a una herramienta se cancela a mitad de ejecución (worker le
 | `HIVE_RELEVANCE_ALPHA` | `0.3` | Tasa de aprendizaje EMA para puntuación adaptativa |
 | `HIVE_RELEVANCE_DECAY` | `0.9` | Factor de decaimiento por sesión para puntuaciones de relevancia |
 | `HIVE_RELEVANCE_EPSILON` | `0.15` | Ratio de exploración para session_briefing (epsilon-greedy) |
-| `HIVE_VAULT_SCOPES` | `{"projects": "10_projects", "meta": "00_meta", "work": "50_work", "agents": "80_agents"}` | Mapeo JSON de nombres de scope a subdirectorios del vault. Los scopes soportan resolución jerárquica (BFS). El scope `agents` contiene buzones de agentes de IA; el auto-scan prueba los scopes en orden de inserción, por lo que `agents` va al final para no eclipsar nombres de proyectos existentes. |
+| `HIVE_VAULT_SCOPES` | `{"projects": "10_projects", "meta": "00_meta", "work": "50_work", "agents": "80_agents"}` | Mapeo JSON de nombres de scope a subdirectorios del vault. Los scopes soportan resolución jerárquica (BFS). El scope `agents` contiene buzones de agentes de IA; el auto-scan prueba los scopes en orden de inserción, por lo que `agents` va al final para no eclipsar nombres de proyectos existentes. Cada directorio debe ser una ruta relativa única dentro del vault — los valores duplicados, absolutos o que escapan (`..`) se rechazan al iniciar. |
 | `HIVE_LOG_PATH` | `~/.local/share/hive/hive.log` | Ruta del log persistente de depuración (rotación 1MB) |
 | `HIVE_LOG_LEVEL` | `INFO` | Nivel del log persistente. Captura los loggers `hive`, `fastmcp` y `mcp`. `DEBUG` para diagnóstico a nivel de transporte; `WARNING` para silenciar eventos de ciclo de vida. |
 
