@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+import sys
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -16,6 +17,8 @@ from fastmcp import FastMCP  # noqa: E402
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from fastmcp.server.auth import AuthProvider
 
 from hive._context import ServerContext  # noqa: E402
 from hive._diagnostics import LifecycleMiddleware  # noqa: E402
@@ -50,8 +53,14 @@ def create_server(
     relevance_tracker: RelevanceTracker | None = None,
     lesson_tracker: LessonReinforcementTracker | None = None,
     lock_eviction_tracker: LockEvictionTracker | None = None,
+    auth: AuthProvider | None = None,
 ) -> FastMCP:
-    """Create and configure the Hive MCP server."""
+    """Create and configure the Hive MCP server.
+
+    ``auth`` gates the transport: ``None`` (stdio default) leaves the server
+    open as today; the ``hive serve`` daemon passes a bearer-token verifier so
+    the loopback HTTP port is owner-gated (ADR-011 §2).
+    """
     resolved_path = vault_path or settings.vault_path
     # The single boundary where the default scope mapping is applied (#159):
     # _resolve_project_dir requires an explicit scopes arg, so no other code
@@ -115,6 +124,7 @@ def create_server(
 
     mcp = FastMCP(
         "Hive",
+        auth=auth,
         middleware=[LifecycleMiddleware()],
         instructions=(
             "Hive provides on-demand access to an Obsidian vault.\n\n"
@@ -472,20 +482,35 @@ def _setup_file_logging() -> None:
         logger.setLevel(level)
 
 
+def _run_serve(argv: list[str]) -> None:
+    """``hive serve`` — run the Phase C single-owner daemon (ADR-011)."""
+    import argparse
+
+    from hive._daemon import DEFAULT_HOST, run_serve
+
+    parser = argparse.ArgumentParser(prog="hive serve")
+    parser.add_argument("--host", default=DEFAULT_HOST)
+    parser.add_argument("--port", type=int, default=0, help="0 = pick a free port")
+    opts = parser.parse_args(argv)
+    run_serve(host=opts.host, port=opts.port)
+
+
 def main() -> None:
     """Entry point for the hive CLI command.
 
-    ``create_server()`` is called here rather than at module import
-    so importing ``hive.server`` (e.g. from tests, from typing tools,
-    or from a future ``hive serve --http`` entry point) is side-effect
-    free. The previous import-time instantiation cost every ``uvx
-    hive-vault`` spawn ~300-600 ms before main() even ran.
+    Bare ``hive`` runs the stdio MCP server (the v1 per-session contract).
+    ``hive serve`` runs the Phase C single-owner daemon over loopback HTTP +
+    bearer token (ADR-011). ``create_server()`` is called here rather than at
+    module import so importing ``hive.server`` is side-effect free.
     """
     _setup_file_logging()
     _log = logging.getLogger("hive")
-    server = create_server()
+    argv = sys.argv[1:]
     try:
-        server.run()
+        if argv and argv[0] == "serve":
+            _run_serve(argv[1:])
+        else:
+            create_server().run()
     except BaseException as exc:
         _log.critical("hive server exiting: %r", exc, exc_info=True)
         raise
