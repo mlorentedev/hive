@@ -1,7 +1,7 @@
 ---
 id: "HIVE-118-phase-c-daemon-model"
 type: spec
-status: draft # draft | implementing | verifying | archived
+status: implementing # draft | implementing | verifying | archived
 created: "2026-05-29"
 tags: [spec, proposal]
 template_version: "1.0"
@@ -74,9 +74,9 @@ Concrete behavior change after this PR:
 
 ## Risks / open questions
 
-> **Status (2026-05-31):** ADR-011 records the daemon decision and resolves the design-only questions below. The Linux transport spike passed (`spike/transport_spike.py`, 5/5). The **only** remaining `[MUST RESOLVE]` before code is the **Windows** half of the transport spike. Items are kept for traceability with their resolution.
+> **Status (2026-05-31) — RESOLVED.** ADR-011 is **accepted**; all `[MUST RESOLVE]` items are cleared. The transport spike passes on **Linux AND Windows** (5/5 both), and four companion spikes (load, idempotency, resilience, robustness) are green on both OSes. `tasks.md` is frozen; implementation may begin. Items kept for traceability with their resolution.
 
-- **[MUST RESOLVE before code — Windows only] Cross-OS transport.** Decided: loopback Streamable-HTTP + per-daemon bearer token (ADR-011 §2), FastMCP-native so there is no named-pipe handle terrain. **Validated on Linux** — cross-process round-trip, missing/wrong-token rejection (HTTP 401), and a `0600` token file (`spike/transport_spike.py`). **Residual:** confirm the same round-trip on **Windows** (port binding, firewall prompt, `0600`-equivalent token-file ACL). This is the last gate before freezing `tasks.md`.
+- **[RESOLVED — cross-OS] Cross-OS transport.** Decided: loopback Streamable-HTTP + per-daemon bearer token (ADR-011 §2), FastMCP-native so there is no named-pipe handle terrain. **Validated on Linux AND Windows** — cross-process round-trip, missing/wrong-token rejection (HTTP 401), and an owner-only token file (POSIX `0600` / Windows `icacls` ACL) all pass via `spike/transport_spike.py` (5/5 each). The gate is closed.
 - **[Resolved] Single point of failure + lifecycle.** Resolved by the resilience pillar (ADR-011 §4): supervised auto-restart, transparent stdio fallback (item 4), crash-safe durable state, restart-on-upgrade, startup self-heal.
 - **[Resolved] Forensic completeness vs overhead.** Resolved (ADR-011 §6.3): ring buffer `N=256`; record metadata + **redacted** argument shapes (`type:length`), never raw values/secrets; redaction is security-critical and tested against a known-secret fixture; keep the newest 5 crash artifacts.
 - **[Resolved] Observability surface choice.** Resolved (ADR-011 §4): primary `/status` HTTP endpoint, mirrored by a `hive status` CLI and the existing `worker_status` MCP tool, all over one internal metrics core.

@@ -7,7 +7,7 @@ created: "2026-05-29"
 
 > TDD order. One task = one focused commit. Tick as you go. Reorder freely while spec is in `draft` state; freeze once you start `implementing`.
 >
-> **STATUS: draft — DO NOT freeze.** Progress (2026-05-31): ADR-011 is authored (proposed) and resolves the design-only open questions (transport, SPOF/lifecycle, observability, version skew §6.1, write idempotency §6.2, forensic recorder §6.3); the Linux transport spike passed (`spike/transport_spike.py`, 5/5). **Sole remaining freeze-blocker:** the **Windows** half of the transport spike (loopback-HTTP + token round-trip, `0600`-equivalent token-file ACL, firewall prompt) + ADR-011 acceptance. Freeze only after that. The steps below remain a provisional skeleton.
+> **STATUS: FROZEN (2026-05-31).** ADR-011 is **accepted**; the design is locked. The transport spike passes on **Linux AND Windows** (5/5 both) and four companion spikes (load, idempotency, resilience, robustness) are green on both OSes. Implementation may begin in the TDD order below — change a step only with a one-line note here.
 
 ## Setup
 
@@ -20,8 +20,9 @@ created: "2026-05-29"
 
 > Keep small (one commit each), TDD order. Sequencing assumes a spike de-risks the transport first.
 
-- [~] **Spike (transport):** loopback Streamable-HTTP + bearer-token round-trip. **Linux: DONE** (`spike/transport_spike.py`, 5/5 — round-trip, missing/wrong-token 401, `0600` token file). **Windows: PENDING** (port binding, firewall prompt, `0600`-equivalent token-file ACL) — the gate before freeze + ADR-011 acceptance.
-- [~] **Spike (load/concurrency):** N parallel sessions → one daemon owning a shared SQLite. **Linux: DONE** (`spike/load_spike.py`, 4/4 — 8×25 & 16×40 with zero failures, no lost writes, no head-of-line blocking, p99≈66–99 ms). Pre-validates the single-owner concurrency model (ADR-011 §1) + the multi-client + "slow op doesn't HOL-block" acceptance criteria before the real daemon is built. Worth a confirming Windows run.
+- [x] **Spike (transport):** loopback Streamable-HTTP + bearer-token round-trip. **Linux + Windows: DONE** (`spike/transport_spike.py`, 5/5 both — round-trip, missing/wrong-token 401, owner-only token file via `0600`/`icacls`). Closed ADR-011's transport residual.
+- [x] **Spike (load/concurrency):** N parallel sessions → one daemon owning a shared SQLite. **Linux + Windows: DONE** (`spike/load_spike.py`, 4/4 both — zero failures, no lost writes, no head-of-line blocking). Pre-validated the single-owner concurrency model (ADR-011 §1).
+- [x] **Spike (idempotency / resilience / robustness):** **Linux + Windows: DONE** — `idempotency_spike.py` 3/3 (§6.2 at-most-once incl. concurrent dupes → one row), `resilience_spike.py` 4/4 (§4 — state durable + `integrity_check=ok` after `SIGKILL`/`TerminateProcess`, reconnect, disconnect survival), `robustness_spike.py` 3/3 (1 MB payload, auth unbypassable, port-in-use exits cleanly). De-risked §6.2 + §4 + transport edges before building.
 - [ ] Write failing test: daemon starts, owns the SQLite DBs, answers a `tools/list`
 - [ ] Implement `hive serve` daemon entrypoint (long-lived; single owner of `ServerContext`)
 - [ ] Write failing test: thin client connects over transport and round-trips one `vault_query`
@@ -41,7 +42,7 @@ created: "2026-05-29"
 - [ ] **Telemetry planes:** in-memory metrics core (plane 1) feeding `/metrics` + `hive status`; assert hot path does no synchronous DB write
 - [ ] **Telemetry planes:** promote existing `usage.db` to durable historical store (plane 3), written async/reconciler-side; test history survives a daemon restart
 - [ ] Service install/lifecycle: systemd `--user` unit (`Restart=on-failure`) + launchd/Windows recovery stubs
-- [ ] Cross-OS CI lane (extend the `cross_worker_lock` matrix pattern) covering transport + recovery integration tests
+- [ ] **Cross-OS CI lane** (extend the `cross_worker_lock` Linux+Windows matrix). Port the five spike scenarios into `tests/` as pytest integration tests **against the real `hive serve` daemon** — transport+token round-trip, single-owner concurrency, idempotency (§6.2), crash-only durability (§4), and transport/auth edges. The spikes (`spike/*.py`) are the executable spec for these tests; once the daemon exists they become real coverage of hive's own code (not just FastMCP) and gate every PR on both OSes. Until then they stay runnable as-is for manual cross-OS checks.
 
 ## Closing
 

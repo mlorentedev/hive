@@ -1,8 +1,9 @@
 ---
 id: adr-011-phase-c-daemon-model
 type: adr
-status: proposed
+status: accepted
 created: "2026-05-30"
+accepted: "2026-05-31"
 owner: manu
 tags: [architecture, daemon, transport, observability, resilience, mcp]
 ---
@@ -13,7 +14,7 @@ tags: [architecture, daemon, transport, observability, resilience, mcp]
 
 Proposed (2026-05-30). Drives the `specs/HIVE-118-phase-c-daemon-model/` work. **Supersedes the "Stay on Option A" recommendation of [adr-005-transport-and-scale.md](adr-005-transport-and-scale.md)** by adopting its Option B (the `hive serve` daemon). One residual `[MUST RESOLVE]` blocks acceptance: a transport spike must validate the chosen loopback-HTTP + token path on Windows (the file-handle terrain that produced HIVE-116). `tasks.md` stays unfrozen until that spike passes and this ADR is accepted.
 
-**Update (2026-05-31).** The **Linux half** of the transport spike PASSED — loopback Streamable-HTTP + bearer-token round-trip (cross-process), missing-token and wrong-token rejection (HTTP 401), and an owner-only `0600` token file, all green and reproducible at [`spike/transport_spike.py`](../../specs/HIVE-118-phase-c-daemon-model/spike/transport_spike.py) (`5/5 checks, exit 0`). The residual therefore narrows to the **Windows** half only (port binding, firewall prompt, `0600`-equivalent token-file ACL). The three design open-questions that did not need Windows are now **resolved** (§6). This ADR is **one Windows spike from acceptance**; `tasks.md` stays unfrozen until then.
+**Accepted (2026-05-31).** The residual `[MUST RESOLVE]` is cleared: the transport spike passes on **Linux AND Windows** (`transport_spike.py`, 5/5 both — loopback Streamable-HTTP round-trip, missing/wrong-token 401, and an owner-only token file: POSIX `0600` on Linux, an `icacls` inheritance-stripped owner-only ACL on Windows). Four companion spikes validate the rest of the design cross-OS, all green on both OSes: `load` (single-owner concurrency, no head-of-line blocking), `idempotency` (§6.2 at-most-once, incl. concurrent duplicates → one row), `resilience` (§4 — state durable + `integrity_check=ok` after `SIGKILL`/`TerminateProcess`, client reconnect, disconnect survival), and `robustness` (1 MB payload intact, auth unbypassable, port-in-use exits cleanly). The design is locked; `tasks.md` is frozen and implementation may begin. Spikes live at [`specs/HIVE-118-phase-c-daemon-model/spike/`](../../specs/HIVE-118-phase-c-daemon-model/spike/).
 
 ## Context
 

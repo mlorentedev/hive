@@ -1,0 +1,104 @@
+{
+  "spec": "HIVE-118-phase-c-daemon-model",
+  "generated": "2026-05-31",
+  "adr": "adr-011-phase-c-daemon-model (accepted 2026-05-31)",
+  "gating_rule": "The agent MUST NOT set state=passing. Only the harness may, after running `verification` and capturing exit code 0. States: planned (not built) | spiked (design validated cross-OS by a passing spike; real impl + test pending) | accepted (decision/meta-criterion met) | passing (harness-only, terminal).",
+  "features": [
+    {
+      "id": "single-owner-multi-client",
+      "ac": "Single-owner daemon serves multiple clients",
+      "behavior": "With `hive serve` running, >=2 concurrent client sessions complete vault reads/writes through it and exactly one hive daemon process owns the SQLite DBs + git working tree.",
+      "verification": "pytest tests/test_daemon_integration.py -k multi_client",
+      "state": "planned",
+      "evidence": "Concurrency model pre-validated cross-OS by spike/load_spike.py (4/4 Linux+Windows: 200/200 zero-failure, no lost writes, no HOL)."
+    },
+    {
+      "id": "cross-session-observability",
+      "ac": "Cross-session observability surface",
+      "behavior": "A single call (`hive status` / `/status` / extended `worker_status`) returns metrics aggregated across >=2 sessions and persists across a session disconnect.",
+      "verification": "pytest tests/test_daemon_observability.py -k cross_session",
+      "state": "planned",
+      "evidence": null
+    },
+    {
+      "id": "transparent-fallback",
+      "ac": "Transparent fallback",
+      "behavior": "With no daemon running, a client call still succeeds via in-process stdio and the response/health flags degraded (non-daemon) mode.",
+      "verification": "pytest tests/test_daemon_fallback.py -k no_daemon",
+      "state": "planned",
+      "evidence": null
+    },
+    {
+      "id": "transport-cross-os",
+      "ac": "Cross-OS transport validated",
+      "behavior": "Loopback Streamable-HTTP + per-daemon bearer token round-trips a tools/call and rejects missing/wrong tokens (401) on Linux AND Windows.",
+      "verification": "uv run python specs/HIVE-118-phase-c-daemon-model/spike/transport_spike.py",
+      "state": "spiked",
+      "evidence": "transport_spike 5/5 on Linux AND Windows (2026-05-31). To become a pytest integration test in the cross-OS CI lane."
+    },
+    {
+      "id": "local-transport-owner-only",
+      "ac": "Local transport is owner-gated by token",
+      "behavior": "The token file is owner-only (POSIX 0600 / Windows icacls ACL) and a request without the matching token is refused.",
+      "verification": "uv run python specs/HIVE-118-phase-c-daemon-model/spike/transport_spike.py",
+      "state": "spiked",
+      "evidence": "transport_spike owner-only + 401 checks pass on Linux AND Windows (2026-05-31)."
+    },
+    {
+      "id": "write-idempotency",
+      "ac": "Write idempotency across reconnect/fallback (ADR-011 §6.2)",
+      "behavior": "A vault_write/patch carries an idempotency key; a retried key is a no-op (at-most-once), safe for append mode, including under concurrency.",
+      "verification": "uv run python specs/HIVE-118-phase-c-daemon-model/spike/idempotency_spike.py",
+      "state": "spiked",
+      "evidence": "idempotency_spike 3/3 on Linux AND Windows (2026-05-31), incl. 12 concurrent duplicates -> one row. Real impl wires the key through the tool envelope + a shared applied-key store."
+    },
+    {
+      "id": "supervised-recovery",
+      "ac": "Supervised recovery",
+      "behavior": "Killing the daemon (SIGKILL) triggers supervisor auto-restart; durable state (SQLite + git) is intact, and in-flight clients reconnect or fall back.",
+      "verification": "pytest tests/test_daemon_recovery.py -k sigkill_restart",
+      "state": "planned",
+      "evidence": "Crash-only durability pre-validated by spike/resilience_spike.py 4/4 (Linux+Windows): state durable + integrity_check=ok after SIGKILL/TerminateProcess, reconnect, disconnect survival. The supervisor (systemd/launchd unit) itself is post-build."
+    },
+    {
+      "id": "post-mortem-artifact",
+      "ac": "Post-mortem artifact on crash",
+      "behavior": "An abnormal exit writes a crash artifact (last-N ring buffer, lock/DB state, in-flight requests, version, traceback) with NO secrets/API keys (ADR-011 §6.3 redaction).",
+      "verification": "pytest tests/test_daemon_postmortem.py -k crash_artifact_no_secrets",
+      "state": "planned",
+      "evidence": null
+    },
+    {
+      "id": "correlated-structured-logging",
+      "ac": "Correlated, structured logging",
+      "behavior": "Every request is logged once with a correlation_id + session_id traceable across the daemon log and metrics; one daemon log replaces per-PID files.",
+      "verification": "pytest tests/test_daemon_logging.py -k correlation_id",
+      "state": "planned",
+      "evidence": null
+    },
+    {
+      "id": "three-plane-telemetry",
+      "ac": "Three-plane telemetry separation",
+      "behavior": "Live metrics served from memory (no synchronous per-call DB write on the hot path); forensic JSON-lines + crash artifact; historical telemetry in usage.db surviving a restart.",
+      "verification": "pytest tests/test_daemon_telemetry.py -k three_plane",
+      "state": "planned",
+      "evidence": null
+    },
+    {
+      "id": "transport-robustness",
+      "ac": "Transport/auth robustness (supporting)",
+      "behavior": "A large (1 MB) payload round-trips intact; missing/empty/wrong-scheme auth are all rejected; a port-in-use daemon exits cleanly.",
+      "verification": "uv run python specs/HIVE-118-phase-c-daemon-model/spike/robustness_spike.py",
+      "state": "spiked",
+      "evidence": "robustness_spike 3/3 on Linux AND Windows (2026-05-31)."
+    },
+    {
+      "id": "adr-011-accepted",
+      "ac": "ADR-011 written and merged",
+      "behavior": "ADR-011 captures the daemon decision, transport choice, fallback contract, resilience/observability design, and what it supersedes in ADR-005.",
+      "verification": "grep -q '^status: accepted' docs/adr/adr-011-phase-c-daemon-model.md",
+      "state": "accepted",
+      "evidence": "ADR-011 status: accepted (2026-05-31). Merges with the HIVE-118 PR."
+    }
+  ]
+}
