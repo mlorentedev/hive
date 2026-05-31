@@ -12,6 +12,8 @@ tags: [architecture, scalability, mcp, transport, concurrency]
 ## Status
 Proposed (2026-05-18) — written after diagnosing inter-process hangs (see [lessons.md](../lessons.md), "Multi-process MCP server contention surfaces").
 
+> **2026-05-30 — Option B escalated.** This ADR's Option B (single `hive serve` daemon) is being adopted in [adr-011-phase-c-daemon-model.md](adr-011-phase-c-daemon-model.md) (status: proposed) — **on operating-model grounds, not the latency triggers below** (the latency trigger did not fire; HIVE-115/116 neutralised the contention class). When ADR-011 is accepted, this ADR's "Stay on Option A" recommendation is superseded.
+
 ## Context
 
 [adr-001-orchestration-model.md](adr-001-orchestration-model.md) established Hive as an MCP server with on-demand vault access. [adr-004-thread-safety-model.md](adr-004-thread-safety-model.md) addressed **intra**-process concurrency (multiple MCP tool calls within one server process). This ADR addresses **inter**-process concurrency — the gap that surfaced once Claude Code users started running 2–5 parallel sessions against the same vault.
