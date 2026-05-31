@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.0](https://github.com/mlorentedev/hive/compare/v1.21.1...v1.22.0) (2026-05-31)
+
+
+### Features
+
+* **tools:** accept wrong param-name aliases + tighten docstrings ([#151](https://github.com/mlorentedev/hive/issues/151)) ([#152](https://github.com/mlorentedev/hive/issues/152)) ([6d29633](https://github.com/mlorentedev/hive/commit/6d29633ffe40c783055bf6e67295a99fd7cc08a5))
+
 ## [1.21.1](https://github.com/mlorentedev/hive/compare/v1.21.0...v1.21.1) (2026-05-29)
 
 
