@@ -65,45 +65,54 @@ HOL_PINGS = 6
 
 
 def _serve(token: str, port: int, db_path: str) -> None:
-    """Single-owner daemon: owns one SQLite DB, serves record/ping/slow."""
+    """Single-owner daemon: owns one SQLite DB, serves record/ping/slow.
+
+    The tools are ``async`` and model hive's real daemon contract: the daemon
+    owns ONE connection guarded by an intra-process lock (ADR-004), and any
+    *blocking* work (git, here a ``sleep``) is offloaded to a worker thread via
+    ``asyncio.to_thread`` so it never blocks the event loop. A naive *sync* tool
+    that blocks the loop would serialize every session — a real pitfall the
+    Windows run surfaces; this models the correct pattern hive already uses.
+    """
+    import threading
+
     from fastmcp import FastMCP
     from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 
-    init = sqlite3.connect(db_path)
-    init.execute("PRAGMA journal_mode=WAL")
-    init.execute("CREATE TABLE IF NOT EXISTS calls (id INTEGER PRIMARY KEY, session TEXT)")
-    init.commit()
-    init.close()
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("CREATE TABLE IF NOT EXISTS calls (id INTEGER PRIMARY KEY, session TEXT)")
+    conn.commit()
+    db_lock = threading.Lock()
 
     verifier = StaticTokenVerifier({token: {"client_id": "hive-load", "scopes": []}})
     mcp: FastMCP = FastMCP("hive-load-daemon", auth=verifier)
 
     @mcp.tool
-    def ping() -> str:
-        """Trivial fast call."""
+    async def ping() -> str:
+        """Trivial fast call (no shared state)."""
         return "pong"
 
     @mcp.tool
-    def record(session: str) -> int:
+    async def record(session: str) -> int:
         """Shared-state write: INSERT a row, return the running count.
 
-        A fresh connection per call (WAL + busy_timeout) mirrors ADR-009 —
-        concurrent writers serialize on SQLite's lock, not an inter-process
-        filelock, because there is exactly one owning process.
+        One owning connection + lock = the ADR-004 intra-process model. There
+        is exactly one writer process, so writes serialize on a local lock, not
+        an inter-process filelock — the contention class HIVE-115/116 removed.
         """
-        conn = sqlite3.connect(db_path, timeout=5.0, isolation_level=None)
-        try:
-            conn.execute("PRAGMA busy_timeout=5000")
+        with db_lock:
             conn.execute("INSERT INTO calls (session) VALUES (?)", (session,))
+            conn.commit()
             (count,) = conn.execute("SELECT COUNT(*) FROM calls").fetchone()
-            return int(count)
-        finally:
-            conn.close()
+        return int(count)
 
     @mcp.tool
-    def slow() -> str:
-        """A blocking call (stand-in for a slow git op) — HOL-blocking probe."""
-        time.sleep(SLOW_S)
+    async def slow() -> str:
+        """A slow op modelling hive's git path: blocking work offloaded to a
+        worker thread (``asyncio.to_thread``) so the event loop stays free and
+        other sessions are not head-of-line-blocked."""
+        await asyncio.to_thread(time.sleep, SLOW_S)
         return "done"
 
     mcp.run(transport="http", host=HOST, port=port, path=PATH, show_banner=False)
@@ -130,13 +139,6 @@ async def _session(url: str, token: str, session_id: str, n_calls: int) -> list[
     return latencies
 
 
-async def _one_call(url: str, token: str, tool: str) -> float:
-    t0 = time.monotonic()
-    async with _client(url, token) as client:
-        await client.call_tool(tool, {})
-    return (time.monotonic() - t0) * 1000
-
-
 async def _run_load(url: str, token: str) -> list[list[float] | BaseException]:
     tasks = [
         _session(url, token, f"s{i}", CALLS_PER_SESSION) for i in range(N_SESSIONS)
@@ -145,12 +147,24 @@ async def _run_load(url: str, token: str) -> list[list[float] | BaseException]:
 
 
 async def _hol_probe(url: str, token: str) -> list[float]:
-    """Fire one slow() and, mid-flight, HOL_PINGS ping()s from other sessions."""
-    slow_task = asyncio.create_task(_one_call(url, token, "slow"))
-    await asyncio.sleep(0.05)  # let slow() land on the daemon first
-    pings = await asyncio.gather(*[_one_call(url, token, "ping") for _ in range(HOL_PINGS)])
-    await slow_task
-    return pings
+    """Measure ping latency on a WARM connection while a slow() call is in flight.
+
+    Uses pre-warmed connections so this isolates true head-of-line blocking
+    from cold connect/handshake cost (which is high on Windows and would
+    otherwise masquerade as HOL). If the daemon multiplexes, the pings return
+    in ~warm-RTT even though slow() is mid-flight on another connection.
+    """
+    async with _client(url, token) as ping_client, _client(url, token) as slow_client:
+        await ping_client.call_tool("ping", {})  # warm the ping connection
+        slow_task = asyncio.create_task(slow_client.call_tool("slow", {}))
+        await asyncio.sleep(0.05)  # let slow() land on the daemon first
+        lats: list[float] = []
+        for _ in range(HOL_PINGS):
+            t0 = time.monotonic()
+            await ping_client.call_tool("ping", {})
+            lats.append((time.monotonic() - t0) * 1000)
+        await slow_task
+        return lats
 
 
 # ── driver ───────────────────────────────────────────────────────────────
@@ -263,13 +277,6 @@ def _db_count(db_path: str) -> int:
 
 
 def _report(checks, proc, db_path: str, child_log: Path) -> int:  # noqa: ANN001
-    with contextlib.suppress(Exception):
-        if proc.poll() is None:
-            proc.kill()
-    for stale in (db_path, f"{db_path}-wal", f"{db_path}-shm"):
-        Path(stale).unlink(missing_ok=True)
-    child_log.unlink(missing_ok=True)
-
     print(f"\nHIVE-118 load spike — {N_SESSIONS} parallel sessions, one daemon\n")
     width = max(len(name) for name, _, _ in checks)
     all_ok = True
@@ -278,6 +285,16 @@ def _report(checks, proc, db_path: str, child_log: Path) -> int:  # noqa: ANN001
         print(f"  [{'PASS' if ok else 'FAIL'}] {name.ljust(width)}  {detail}")
     print(f"\n{'ALL PASS' if all_ok else 'FAILED'} — "
           f"{sum(ok for _, ok, _ in checks)}/{len(checks)} checks\n")
+
+    # Best-effort cleanup AFTER the report — temp files must never be fatal
+    # (Windows holds the log handle until the daemon fully exits).
+    with contextlib.suppress(Exception):
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=5)
+    for stale in (db_path, f"{db_path}-wal", f"{db_path}-shm", str(child_log)):
+        with contextlib.suppress(OSError):
+            Path(stale).unlink(missing_ok=True)
     return 0 if all_ok else 1
 
 

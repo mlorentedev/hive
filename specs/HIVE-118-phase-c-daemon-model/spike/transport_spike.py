@@ -227,12 +227,6 @@ def _report(
     token_file: Path,
     child_log: Path,
 ) -> int:
-    with contextlib.suppress(Exception):
-        if proc.poll() is None:
-            proc.kill()
-    token_file.unlink(missing_ok=True)
-    child_log.unlink(missing_ok=True)
-
     label = "Windows" if _IS_WINDOWS else "Linux/POSIX"
     print(f"\nHIVE-118 transport spike ({label}) — loopback Streamable-HTTP + token\n")
     width = max(len(name) for name, _, _ in checks)
@@ -243,6 +237,17 @@ def _report(
         print(f"  [{mark}] {name.ljust(width)}  {detail}")
     print(f"\n{'ALL PASS' if all_ok else 'FAILED'} — "
           f"{sum(ok for _, ok, _ in checks)}/{len(checks)} checks\n")
+
+    # Best-effort cleanup AFTER the report — temp files must never be fatal.
+    # Windows holds an open handle until the daemon fully exits, so kill+wait
+    # before unlinking and suppress any residual lock.
+    with contextlib.suppress(Exception):
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=5)
+    for path in (token_file, child_log):
+        with contextlib.suppress(OSError):
+            path.unlink(missing_ok=True)
     return 0 if all_ok else 1
 
 

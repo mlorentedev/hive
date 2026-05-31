@@ -55,14 +55,21 @@ class HIVE-115/116 fought, here collapsed to a single owner. Asserts:
 
 ## Status
 
-- **transport_spike — Linux:** ✅ PASS `5/5, exit 0` (2026-05-31). See ADR-011 Status.
-- **load_spike — Linux:** ✅ PASS `4/4` (2026-05-31). 8×25 → 200/200, p99≈66 ms,
-  ~177 calls/s; 16×40 → 640/640, p99≈99 ms, ~295 calls/s, no HOL blocking.
+- **transport_spike — Linux:** ✅ PASS `5/5, exit 0`. See ADR-011 Status.
+- **load_spike — Linux:** ✅ PASS `4/4`. 8×25 → 200/200, p99≈50 ms, HOL ping
+  p95≈5 ms (slow() offloaded to a thread, warm-connection probe).
 - **Windows:** ⏳ PENDING — run **both** spikes on a Windows host. For
   `transport_spike`, confirm loopback port binding, no blocking firewall prompt
   for a `127.0.0.1` listener, and the `icacls` owner-only ACL on the token file.
-  That closes ADR-011's last residual. (`load_spike` is OS-agnostic but worth a
-  confirming Windows run.)
+  That closes ADR-011's last residual.
+
+> **Windows robustness (2026-05-31):** both spikes print their result *before*
+> best-effort temp cleanup and suppress a locked-file unlink — Windows keeps the
+> daemon's log handle open until it fully exits, which previously crashed the
+> report. The load spike's tools are `async` and offload blocking work via
+> `asyncio.to_thread` (hive's real git pattern), so a slow op does not
+> head-of-line-block other sessions; a naive *sync* loop-blocking tool would,
+> which is exactly the pitfall to avoid in the daemon.
 
 > Scope: the spikes validate the transport + single-owner concurrency layer, not
 > the real vault/git path — that is the post-build multi-client integration test
