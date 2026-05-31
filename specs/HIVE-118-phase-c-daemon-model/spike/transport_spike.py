@@ -134,7 +134,11 @@ def _verify_owner_only(path: Path) -> tuple[bool, str]:
         ["icacls", str(path)], check=False, capture_output=True, text=True,
     )
     out = proc.stdout
-    leaked = [p for p in _BROAD_PRINCIPALS if p in out.lower()]
+    # The first line embeds the file PATH (e.g. ``C:\Users\Manu\...``) whose
+    # "Users" would false-match the broad ``users`` principal — strip the path
+    # (case-insensitive) before scanning the actual ACE principals.
+    haystack = out.lower().replace(str(path).lower(), " ")
+    leaked = [p for p in _BROAD_PRINCIPALS if p in haystack]
     # Print the raw ACL so the human running the Windows spike can confirm it.
     print("  icacls:\n" + "\n".join(f"    {ln}" for ln in out.splitlines() if ln.strip()))
     return not leaked, f"broad_principals={leaked or 'none'}"
