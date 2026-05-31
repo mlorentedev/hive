@@ -18,6 +18,8 @@ template_version: "1.0"
 
 ## Why
 
+[AGENT-DRAFT — review before archive]
+
 Hive today runs **one stdio process per Claude Code session** (ADR-001/ADR-005). At the maintainer's everyday baseline of 3–5 concurrent sessions this produces three structural costs that mitigation cannot fully remove: (1) **fragmented observability** — usage stats live in per-process buffers (`_LOG_BUFFER_MAX=50`, lost on exit), logs are ~250 orphaned per-PID files, and `vault_health(include_runtime)` only ever sees a single process, so there is no way to answer "what is hive doing across all my sessions right now?"; (2) **no shared state** — each process keeps its own relevance EMA, re-scans the vault, and cannot reuse a warm index; (3) **N cold-starts + version skew** — every session spawns its own interpreter and (until this session's fix) could even land on a different published version mid-release. Phase C replaces the N-process model with a **single long-lived daemon per machine** that owns SQLite + git and serves N thin clients, making centralised monitoring, shared state, and a single operational lifecycle first-class rather than bolted-on. This is the v2.0 milestone pre-registered in ADR-005 and tracked by checkpoint #124.
 
 ## What
@@ -78,6 +80,9 @@ Concrete behavior change after this PR:
 - **Observability surface choice.** `/metrics` (Prometheus/HTTP) vs `hive status` CLI vs extended `worker_status` MCP tool — likely all three over one internal metrics core, but decide the primary in ADR-011.
 - **Concurrency model inside the daemon.** One process now multiplexes all sessions' calls — confirm the async event loop + existing thread-safety (ADR-004) hold when serving N clients, and that one slow git op cannot head-of-line-block other sessions.
 - **Decision gate.** ADR-011 is not yet written. Open question: does the #124 telemetry justify Phase C *now* on latency grounds (finding: **no**), and is the operating-model case (observability + shared state) sufficient on its own to escalate to a v2.0 build (maintainer: leaning **yes**)? Resolve via ADR-011 before freezing tasks.md.
+- **[MUST RESOLVE before code] Local transport security.** [AGENT-SUGGESTION — accept or remove] The Unix socket / named pipe is a new attack surface: on a multi-user machine another local user must NOT be able to connect to the daemon (read the vault, spend the OpenRouter budget). Require restrictive ownership — socket mode `0600` (owner-only) on POSIX, an owner-only ACL on the Windows named pipe — and validate it before implementation (same Windows file-handle terrain as HIVE-116).
+- **Client-shim ↔ daemon version skew.** [AGENT-SUGGESTION — accept or remove] Phase C removes cross-session version skew but introduces a new class: during a rolling upgrade a new thin client shim may talk to an older running daemon (or vice versa). Needs a protocol-version handshake / compatibility contract so a mismatched pair degrades cleanly (fall back to stdio) rather than corrupting state. Resolve in ADR-011.
+- **Write idempotency across reconnect/fallback.** [AGENT-SUGGESTION — accept or remove] If the daemon dies mid-`vault_write`/`vault_patch` and the client retries over the stdio fallback, the write/commit must not be duplicated. "Crash-safe durable state" covers integrity but not at-most-once request semantics; define how a retried write is de-duplicated (idempotency key or pre-commit check). Resolve in ADR-011.
 
 ## Acceptance criteria
 
@@ -92,6 +97,7 @@ Observable outcomes. Each must be testable.
 - [ ] **Correlated, structured logging.** Every request is logged once with a `correlation_id` + `session_id` traceable across the daemon log and metrics; a single daemon log replaces per-PID files (test: issue a call, assert one correlated structured log line + same id in `hive status`).
 - [ ] **Three-plane telemetry separation.** Live metrics are served from memory (no per-call disk write on the hot path — verifiable: hot path issues no synchronous DB INSERT); the forensic trail is JSON-lines + crash artifact; historical telemetry persists in `usage.db` across a daemon restart (test: record calls, restart daemon, assert history survives while the live counters reset).
 - [ ] **ADR-011 written and merged** capturing the daemon decision, transport choice, fallback contract, resilience/observability design, and what it supersedes in ADR-005.
+- [ ] **Local transport is owner-only.** [AGENT-SUGGESTION — accept or remove] The daemon's socket/pipe rejects connections from other local users — POSIX socket created with mode `0600`, Windows named pipe with an owner-only ACL (test: assert the socket file mode and that a non-owner connection is refused).
 
 ## References
 
