@@ -30,7 +30,10 @@ dependencies = [
     # any new major release. Bump the lower bound when verifying a
     # newer release; bump the upper bound only after auditing the
     # _compat shim against the new internals.
-    "mcp>=1.26,<2.0",
+    # 1.27.2 audited 2026-05-31: tests/test_compat_shim.py (incl. the
+    # real-subprocess cancel-race) passes — the patched RequestResponder
+    # internals are unchanged.
+    "mcp>=1.27,<2.0",
     "psutil>=5.9.0",
     "pydantic-settings>=2.0",
     "pyyaml>=6.0",
