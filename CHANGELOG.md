@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.0](https://github.com/mlorentedev/hive/compare/v1.23.1...v1.24.0) (2026-05-31)
+
+
+### Features
+
+* add `hive serve` daemon entrypoint (HIVE-118) ([#164](https://github.com/mlorentedev/hive/issues/164)) ([3494bfb](https://github.com/mlorentedev/hive/commit/3494bfb3f4a1539ece9322be7351716f45676fb7))
+
 ## [1.23.1](https://github.com/mlorentedev/hive/compare/v1.23.0...v1.23.1) (2026-05-31)
 
 
