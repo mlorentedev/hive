@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.0](https://github.com/mlorentedev/hive/compare/v1.22.0...v1.23.0) (2026-05-31)
+
+
+### Features
+
+* add agents scope for AI-agent inboxes ([#154](https://github.com/mlorentedev/hive/issues/154)) ([6bc4412](https://github.com/mlorentedev/hive/commit/6bc441222bb0b032cf8793583d33d3178df1b5d9))
+
 ## [1.22.0](https://github.com/mlorentedev/hive/compare/v1.21.1...v1.22.0) (2026-05-31)
 
 
