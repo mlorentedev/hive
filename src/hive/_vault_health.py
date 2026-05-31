@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from hive._helpers import (
     _READ_ONLY,
+    META_SCOPE,
     SECTION_SHORTCUTS,
     _resolve_project_dir,
     _safe_read,
@@ -197,7 +198,7 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
     found_any = False
 
     for scope_name, dir_name in ctx.scopes.items():
-        if scope_name == "meta":
+        if scope_name == META_SCOPE:
             continue
         scope_dir = ctx.vault / dir_name
         if not scope_dir.is_dir():
@@ -237,7 +238,7 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
     # ── Duplicate name warnings ──
     dup_lines: list[str] = []
     for scope_name, dir_name in ctx.scopes.items():
-        if scope_name == "meta":
+        if scope_name == META_SCOPE:
             continue
         scope_dir = ctx.vault / dir_name
         if not scope_dir.is_dir():
@@ -365,7 +366,7 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                 project_dirs.append(resolved)
             else:
                 for scope_name, dir_name in ctx.scopes.items():
-                    if scope_name == "meta":
+                    if scope_name == META_SCOPE:
                         continue
                     scope_dir = ctx.vault / dir_name
                     if not scope_dir.is_dir():
@@ -388,7 +389,7 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                 # also get an `_meta/`-prefixed form (the slug Obsidian/Hive
                 # users type in wikilinks).
                 scope_dir_names = set(ctx.scopes.values())
-                meta_dir_name = ctx.scopes.get("meta")
+                meta_dir_name = ctx.scopes.get(META_SCOPE)
                 try:
                     md_files = list(ctx.vault.rglob("*.md"))
                 except OSError:

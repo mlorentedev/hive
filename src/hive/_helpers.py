@@ -140,6 +140,12 @@ SECTION_SHORTCUTS: dict[str, str] = {
     "lessons": "90-lessons.md",
 }
 
+# The scope KEY (not directory) that holds cross-project content. Several
+# tools special-case it: project auto-scan and health enumeration skip it,
+# and it is reached via the ``_meta`` slug shortcut. Centralised here so the
+# literal is not duplicated across the resolver / read / health modules.
+META_SCOPE = "meta"
+
 
 def _default_scopes() -> dict[str, str]:
     """Fallback scopes when a caller does not pass an explicit mapping.
@@ -153,7 +159,6 @@ def _default_scopes() -> dict[str, str]:
     from hive.config import settings
 
     return settings.vault_scopes
-
 
 _FENCED_CODE_RE = re.compile(
     r"(?ms)^(?P<fence>`{3,}|~{3,})[^\n]*\n.*?^(?P=fence)[^\n]*$",
@@ -310,13 +315,13 @@ def _resolve_project_dir(
 
     # _meta special case → meta scope root
     if project == "_meta":
-        meta_dir_name = scopes.get("meta", "00_meta")
+        meta_dir_name = scopes.get(META_SCOPE, "00_meta")
         d = vault / meta_dir_name
         if not d.is_dir():
             return None
         if _check_path_boundary(d, vault) is not None:
             return None
-        return (d, "meta")
+        return (d, META_SCOPE)
 
     explicit_scope, slug = _parse_project_ref(project)
 
@@ -329,7 +334,7 @@ def _resolve_project_dir(
 
     # Auto-scan: iterate scopes, first match wins, skip missing dirs
     for scope_name, dir_name in scopes.items():
-        if scope_name == "meta":
+        if scope_name == META_SCOPE:
             continue  # meta is not a project container
         scope_dir = vault / dir_name
         result = _search_scope(scope_dir, slug, scope_name, vault)
