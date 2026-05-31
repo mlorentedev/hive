@@ -13,7 +13,7 @@ Hive degrades gracefully — every recommended or optional dependency reveals mo
 
 - **Required**
   - Python **3.12+** (works on 3.13).
-  - A directory of markdown files. The `00_meta` / `10_projects` / `50_work` layout is optional — without it, vault tools still operate but scope routing is flat.
+  - A directory of markdown files. The `00_meta` / `10_projects` / `50_work` / `80_agents` layout is optional — without it, vault tools still operate but scope routing is flat.
 
 - **Recommended**
   - `git` initialised inside the vault. Without it, `vault_write` / `vault_patch` still write to disk; they just skip the per-write commit (and `vault_commit` reports the working tree as untracked).
@@ -62,7 +62,7 @@ When a tool call is cancelled mid-flight (slow worker, client timeout), the serv
 | `HIVE_RELEVANCE_ALPHA` | `0.3` | EMA learning rate for adaptive context scoring |
 | `HIVE_RELEVANCE_DECAY` | `0.9` | Session decay factor for relevance scores |
 | `HIVE_RELEVANCE_EPSILON` | `0.15` | Exploration ratio for session_briefing (epsilon-greedy) |
-| `HIVE_VAULT_SCOPES` | `{"projects": "10_projects", "meta": "00_meta", "work": "50_work"}` | JSON mapping of scope names to vault subdirectories. Scopes support hierarchical resolution (BFS). |
+| `HIVE_VAULT_SCOPES` | `{"projects": "10_projects", "meta": "00_meta", "work": "50_work", "agents": "80_agents"}` | JSON mapping of scope names to vault subdirectories. Scopes support hierarchical resolution (BFS). The `agents` scope holds AI-agent inboxes; auto-scan tries scopes in insertion order, so `agents` is listed last to avoid shadowing existing project names. Each directory must be a unique relative path inside the vault — duplicate, absolute, or escaping (`..`) values are rejected at startup. |
 | `HIVE_LOG_PATH` | `~/.local/share/hive/hive.log` | File path for persistent debug log (1MB rotating) |
 | `HIVE_LOG_LEVEL` | `INFO` | Log level for the persistent log file. Captures `hive`, `fastmcp` and `mcp` loggers. Set to `DEBUG` for transport-level diagnostics, `WARNING` to suppress lifecycle events. |
 

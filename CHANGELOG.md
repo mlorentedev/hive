@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.23.1](https://github.com/mlorentedev/hive/compare/v1.23.0...v1.23.1) (2026-05-31)
+
+
+### Bug Fixes
+
+* harden scope configuration against misconfiguration ([#161](https://github.com/mlorentedev/hive/issues/161)) ([b1daed8](https://github.com/mlorentedev/hive/commit/b1daed8464f96482a2552921f6140cd58f02588c))
+
+## [1.23.0](https://github.com/mlorentedev/hive/compare/v1.22.0...v1.23.0) (2026-05-31)
+
+
+### Features
+
+* add agents scope for AI-agent inboxes ([#154](https://github.com/mlorentedev/hive/issues/154)) ([6bc4412](https://github.com/mlorentedev/hive/commit/6bc441222bb0b032cf8793583d33d3178df1b5d9))
+
+## [1.22.0](https://github.com/mlorentedev/hive/compare/v1.21.1...v1.22.0) (2026-05-31)
+
+
+### Features
+
+* **tools:** accept wrong param-name aliases + tighten docstrings ([#151](https://github.com/mlorentedev/hive/issues/151)) ([#152](https://github.com/mlorentedev/hive/issues/152)) ([6d29633](https://github.com/mlorentedev/hive/commit/6d29633ffe40c783055bf6e67295a99fd7cc08a5))
+
 ## [1.21.1](https://github.com/mlorentedev/hive/compare/v1.21.0...v1.21.1) (2026-05-29)
 
 

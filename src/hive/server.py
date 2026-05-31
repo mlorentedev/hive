@@ -21,6 +21,7 @@ from hive._context import ServerContext  # noqa: E402
 from hive._diagnostics import LifecycleMiddleware  # noqa: E402
 from hive._helpers import (  # noqa: E402
     _clean_stale_wal_files,
+    _default_scopes,
     _resolve_file,
     _safe_read,
     _truncate,
@@ -52,7 +53,10 @@ def create_server(
 ) -> FastMCP:
     """Create and configure the Hive MCP server."""
     resolved_path = vault_path or settings.vault_path
-    scopes = vault_scopes or settings.vault_scopes
+    # The single boundary where the default scope mapping is applied (#159):
+    # _resolve_project_dir requires an explicit scopes arg, so no other code
+    # path carries an internal default that could drift untested.
+    scopes = vault_scopes or _default_scopes()
     tracker = usage_tracker or UsageTracker()
     budget = budget_tracker or BudgetTracker(db_path=settings.db_path)
     ollama = ollama_client or OllamaClient(

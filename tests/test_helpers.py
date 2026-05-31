@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from hive._helpers import (
+    _default_scopes,
     _git_commit,
     _match_and_replace,
     _resolve_project_dir,
@@ -171,14 +172,16 @@ class TestResolveProjectDir:
 
     def test_flat_scope_resolves(self, mock_vault: Path) -> None:
         """Standard flat scope: 10_projects/testproject resolves."""
-        result = _resolve_project_dir(mock_vault, "testproject")
+        result = _resolve_project_dir(mock_vault, "testproject", _default_scopes())
         assert result is not None
         assert result[0] == mock_vault / "10_projects" / "testproject"
         assert result[1] == "projects"
 
     def test_explicit_scope_flat(self, mock_vault: Path) -> None:
         """Explicit scope:slug resolves for flat scopes."""
-        result = _resolve_project_dir(mock_vault, "projects:testproject")
+        result = _resolve_project_dir(
+            mock_vault, "projects:testproject", _default_scopes(),
+        )
         assert result is not None
         assert result[0] == mock_vault / "10_projects" / "testproject"
 
@@ -240,9 +243,71 @@ class TestResolveProjectDir:
         result = _resolve_project_dir(tmp_path, "work:../../etc", scopes)
         assert result is None
 
+    # ── agents scope (HIVE-120) ──
+
+    def test_agents_scope_explicit_resolves(self, tmp_path: Path) -> None:
+        """agents:Hermes-NaN resolves like any other flat scope."""
+        (tmp_path / "80_agents" / "Hermes-NaN").mkdir(parents=True)
+        scopes = {"agents": "80_agents"}
+        result = _resolve_project_dir(tmp_path, "agents:Hermes-NaN", scopes)
+        assert result is not None
+        assert result[0] == tmp_path / "80_agents" / "Hermes-NaN"
+        assert result[1] == "agents"
+
+    def test_agents_scope_auto_scan_resolves(self, tmp_path: Path) -> None:
+        """A plain agent name auto-scans into the agents scope."""
+        (tmp_path / "10_projects").mkdir()
+        (tmp_path / "80_agents" / "Hermes-NaN").mkdir(parents=True)
+        scopes = {"projects": "10_projects", "agents": "80_agents"}
+        result = _resolve_project_dir(tmp_path, "Hermes-NaN", scopes)
+        assert result is not None
+        assert result[0] == tmp_path / "80_agents" / "Hermes-NaN"
+        assert result[1] == "agents"
+
+    def test_agents_in_default_scopes(self, tmp_path: Path) -> None:
+        """``_default_scopes()`` reads settings.vault_scopes (the SSOT) — which
+        includes the agents scope — lazily, not from a stale literal. Callers
+        pass it explicitly now that the resolver requires a scopes mapping."""
+        assert "agents" in _default_scopes()
+        (tmp_path / "80_agents" / "Hermes-NaN").mkdir(parents=True)
+        result = _resolve_project_dir(
+            tmp_path, "agents:Hermes-NaN", _default_scopes(),
+        )
+        assert result is not None
+        assert result[0] == tmp_path / "80_agents" / "Hermes-NaN"
+        assert result[1] == "agents"
+
+    def test_scopes_argument_is_required(self, tmp_path: Path) -> None:
+        """The scopes mapping is a required argument — there is no internal
+        default fallback to drift untested (#159 item 1). The single default
+        lives at the create_server() boundary."""
+        with pytest.raises(TypeError):
+            _resolve_project_dir(tmp_path, "anything")  # type: ignore[call-arg]
+
+    def test_agents_appended_last_does_not_shadow(self, tmp_path: Path) -> None:
+        """A name present in BOTH projects and agents resolves to projects:
+        agents is appended last, so first-match auto-scan keeps prior
+        behaviour (req #6, no regression)."""
+        (tmp_path / "10_projects" / "shared").mkdir(parents=True)
+        (tmp_path / "80_agents" / "shared").mkdir(parents=True)
+        result = _resolve_project_dir(tmp_path, "shared", _default_scopes())
+        assert result is not None
+        assert result[1] == "projects"
+
+    def test_agents_name_is_arbitrary(self, tmp_path: Path) -> None:
+        """Agent names carry no format constraint — any valid dir name (mixed
+        case, digits, hyphens, underscores, dots) resolves like any project."""
+        scopes = {"agents": "80_agents"}
+        for name in ("weather-bot", "local_runner", "Athena.v2", "GPT5x"):
+            (tmp_path / "80_agents" / name).mkdir(parents=True)
+            result = _resolve_project_dir(tmp_path, f"agents:{name}", scopes)
+            assert result is not None, name
+            assert result[0] == tmp_path / "80_agents" / name
+            assert result[1] == "agents"
+
     def test_meta_unchanged(self, mock_vault: Path) -> None:
         """_meta still resolves to 00_meta scope root."""
-        result = _resolve_project_dir(mock_vault, "_meta")
+        result = _resolve_project_dir(mock_vault, "_meta", _default_scopes())
         assert result is not None
         assert result[0] == mock_vault / "00_meta"
         assert result[1] == "meta"

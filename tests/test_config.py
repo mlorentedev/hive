@@ -131,7 +131,33 @@ class TestEnvOverride:
 class TestVaultScopes:
     def test_default_scopes(self) -> None:
         s = HiveSettings()
-        assert s.vault_scopes == {"projects": "10_projects", "meta": "00_meta", "work": "50_work"}
+        assert s.vault_scopes == {
+            "projects": "10_projects",
+            "meta": "00_meta",
+            "work": "50_work",
+            "agents": "80_agents",
+        }
+
+    def test_agents_scope_appended_last(self) -> None:
+        """agents must be the LAST key so auto-scan (first-match) cannot let
+        an agent dir shadow an existing projects/work project name."""
+        assert list(HiveSettings().vault_scopes) == [
+            "projects",
+            "meta",
+            "work",
+            "agents",
+        ]
+
+    def test_scopes_env_can_add_agents(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """HIVE_VAULT_SCOPES JSON env can introduce an agents scope (req #5)."""
+        monkeypatch.setenv(
+            "HIVE_VAULT_SCOPES",
+            '{"projects": "10_projects", "agents": "80_agents"}',
+        )
+        assert HiveSettings().vault_scopes == {
+            "projects": "10_projects",
+            "agents": "80_agents",
+        }
 
     def test_scopes_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(
@@ -144,6 +170,71 @@ class TestVaultScopes:
             "meta": "00_meta",
             "work": "50_work",
         }
+
+
+class TestVaultScopesValidation:
+    """Startup validation of HIVE_VAULT_SCOPES (#159 item 2).
+
+    A clear ValidationError at construction beats undefined behaviour later:
+    two scopes sharing a directory makes the second silently unreachable
+    (auto-scan is first-match), and a directory that escapes the vault root
+    is a foot-gun the path-boundary check would only catch lazily, per call.
+    """
+
+    def test_accepts_valid_custom_mapping(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(
+            "HIVE_VAULT_SCOPES",
+            '{"projects": "10_projects", "nested": "50_work/clients"}',
+        )
+        assert HiveSettings().vault_scopes == {
+            "projects": "10_projects",
+            "nested": "50_work/clients",
+        }
+
+    def test_accepts_empty_mapping(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An empty mapping (flat vault, no scope routing) is allowed."""
+        monkeypatch.setenv("HIVE_VAULT_SCOPES", "{}")
+        assert HiveSettings().vault_scopes == {}
+
+    def test_rejects_duplicate_directories(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Two scope keys pointing at one directory shadows the second."""
+        monkeypatch.setenv(
+            "HIVE_VAULT_SCOPES",
+            '{"projects": "10_projects", "alias": "10_projects"}',
+        )
+        with pytest.raises(ValidationError, match="same directory"):
+            HiveSettings()
+
+    @pytest.mark.parametrize(
+        "bad_dir",
+        ["../escape", "10_projects/../../etc", "sub/../../out"],
+    )
+    def test_rejects_parent_traversal(
+        self, monkeypatch: pytest.MonkeyPatch, bad_dir: str,
+    ) -> None:
+        monkeypatch.setenv("HIVE_VAULT_SCOPES", f'{{"x": "{bad_dir}"}}')
+        with pytest.raises(ValidationError, match="relative path inside"):
+            HiveSettings()
+
+    @pytest.mark.parametrize("bad_dir", ["/etc", "\\\\windows", "C:/data"])
+    def test_rejects_absolute_directories(
+        self, monkeypatch: pytest.MonkeyPatch, bad_dir: str,
+    ) -> None:
+        monkeypatch.setenv("HIVE_VAULT_SCOPES", f'{{"x": "{bad_dir}"}}')
+        with pytest.raises(ValidationError, match="relative path inside"):
+            HiveSettings()
+
+    @pytest.mark.parametrize("bad_dir", ["", "   "])
+    def test_rejects_blank_directories(
+        self, monkeypatch: pytest.MonkeyPatch, bad_dir: str,
+    ) -> None:
+        monkeypatch.setenv("HIVE_VAULT_SCOPES", f'{{"x": "{bad_dir}"}}')
+        with pytest.raises(ValidationError, match="relative path inside"):
+            HiveSettings()
 
 
 class TestLogPath:

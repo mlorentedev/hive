@@ -1,9 +1,14 @@
 """Hive configuration — pydantic-settings with env var overrides."""
 
+import re
 from pathlib import Path
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# A leading drive letter (``C:``) marks a Windows absolute path; checked
+# explicitly because ``str.startswith`` only catches the separator forms.
+_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 
 
 class HiveSettings(BaseSettings):
@@ -20,7 +25,16 @@ class HiveSettings(BaseSettings):
         validation_alias=AliasChoices("HIVE_OPENROUTER_API_KEY", "OPENROUTER_API_KEY"),
     )
     vault_scopes: dict[str, str] = Field(
-        default={"projects": "10_projects", "meta": "00_meta", "work": "50_work"},
+        # ``agents`` is intentionally LAST: auto-scan (plain project name)
+        # resolves first-match over insertion order, so appending keeps an
+        # 80_agents/ dir from shadowing an existing projects/work project.
+        # Override the whole mapping via HIVE_VAULT_SCOPES (JSON).
+        default={
+            "projects": "10_projects",
+            "meta": "00_meta",
+            "work": "50_work",
+            "agents": "80_agents",
+        },
     )
     openrouter_budget: float = 1.0
     openrouter_model: str = "qwen/qwen3-coder:free"
@@ -50,6 +64,36 @@ class HiveSettings(BaseSettings):
     # thread to escape ``_filelock_with_telemetry``'s ``__exit__`` naturally
     # on the happy path. Default 5.0s matches HIVE_OUTBOX_TICK_S for symmetry.
     post_kill_drain_s: float = Field(default=5.0, ge=0.5, le=30.0)
+
+    @field_validator("vault_scopes")
+    @classmethod
+    def _validate_vault_scopes(cls, value: dict[str, str]) -> dict[str, str]:
+        """Reject scope mappings that would misbehave at runtime (#159).
+
+        A clear startup error beats undefined behaviour later:
+
+        - Two scopes sharing a directory — auto-scan is first-match, so the
+          second key would be silently unreachable.
+        - A directory that is absolute or climbs out of the vault root — a
+          scope dir must be a relative path *inside* the vault. The per-call
+          path-boundary check would catch this lazily; this fails loudly once.
+        """
+        dirs = list(value.values())
+        duplicates = sorted({d for d in dirs if dirs.count(d) > 1})
+        if duplicates:
+            raise ValueError(
+                "vault_scopes maps multiple scopes to the same directory: "
+                f"{duplicates}",
+            )
+        for key, raw in value.items():
+            is_absolute = raw.startswith(("/", "\\")) or bool(_DRIVE_RE.match(raw))
+            segments = re.split(r"[\\/]", raw)
+            if not raw.strip() or is_absolute or ".." in segments:
+                raise ValueError(
+                    f"vault_scopes[{key!r}] must be a relative path inside the "
+                    f"vault, got {raw!r}",
+                )
+        return value
 
 
 settings = HiveSettings()

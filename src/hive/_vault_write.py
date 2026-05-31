@@ -348,6 +348,8 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         replace: str = "",
         patches: list[dict[str, str]] = [],  # noqa: B006
         commit: bool = True,
+        old_string: str = "",
+        new_string: str = "",
     ) -> str:
         """Surgical find-and-replace in a vault file with auto git commit.
 
@@ -366,13 +368,19 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             project: Project slug or '_meta' for cross-project content.
             path: Relative path to the file within the project.
             find: Exact text to find (single mode). Empty = not set.
+                (Use `find`/`replace`, NOT `old_string`/`new_string` — those
+                are accepted as aliases.)
             replace: Replacement text (single mode). Empty = not set.
             patches: List of {"find", "replace"} dicts (multi mode).
             commit: If True (default), auto-commit. If False, write to disk
                 without committing — useful for batching many patches into
                 one ``vault_commit`` flush. See ``vault_write`` docstring for
                 the durability contract.
+            old_string: Alias of `find` (#151). Prefer `find`.
+            new_string: Alias of `replace` (#151). Prefer `replace`.
         """
+        find = find or old_string  # #151: accept Edit-tool param names as aliases
+        replace = replace or new_string
         guard = _vault_guard(ctx)
         if guard:
             return track(ctx, "vault_patch", guard, project)
@@ -507,6 +515,8 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
         Args:
             message: Commit message. Empty defaults to "vault: batch update".
+                This is the only parameter — there is no `project` argument;
+                the commit spans the whole vault working tree.
         """
         guard = _vault_guard(ctx)
         if guard:

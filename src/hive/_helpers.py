@@ -140,7 +140,25 @@ SECTION_SHORTCUTS: dict[str, str] = {
     "lessons": "90-lessons.md",
 }
 
-_DEFAULT_SCOPES: dict[str, str] = {"projects": "10_projects", "meta": "00_meta", "work": "50_work"}
+# The scope KEY (not directory) that holds cross-project content. Several
+# tools special-case it: project auto-scan and health enumeration skip it,
+# and it is reached via the ``_meta`` slug shortcut. Centralised here so the
+# literal is not duplicated across the resolver / read / health modules.
+META_SCOPE = "meta"
+
+
+def _default_scopes() -> dict[str, str]:
+    """Fallback scopes when a caller does not pass an explicit mapping.
+
+    Reads ``settings.vault_scopes`` (the single source of truth, defined in
+    ``hive.config``) lazily so tests can monkeypatch the settings object
+    after import — same idiom as :func:`_lock_timeout` / :func:`_post_kill_drain`.
+    Avoids a duplicated literal that could silently drift from the real
+    default (SSOT — Standing Order #2).
+    """
+    from hive.config import settings
+
+    return settings.vault_scopes
 
 _FENCED_CODE_RE = re.compile(
     r"(?ms)^(?P<fence>`{3,}|~{3,})[^\n]*\n.*?^(?P=fence)[^\n]*$",
@@ -278,7 +296,7 @@ def _parse_project_ref(project: str) -> tuple[str | None, str]:
 
 
 def _resolve_project_dir(
-    vault: Path, project: str, scopes: dict[str, str] | None = None,
+    vault: Path, project: str, scopes: dict[str, str],
 ) -> tuple[Path, str] | None:
     """Resolve a project slug to (directory, scope_name).
 
@@ -291,19 +309,22 @@ def _resolve_project_dir(
     depth.  Slugs containing ``/`` are resolved as literal relative paths
     within the scope directory (no BFS).
 
+    ``scopes`` is required: every production caller passes ``ctx.scopes``
+    and the single default is resolved once at the ``create_server()``
+    boundary, so there is no internal fallback to drift untested (#159).
+    Tests that want the shipped default pass ``_default_scopes()``.
+
     Returns None if the project is not found or escapes the vault boundary.
     """
-    scopes = scopes or _DEFAULT_SCOPES
-
     # _meta special case → meta scope root
     if project == "_meta":
-        meta_dir_name = scopes.get("meta", "00_meta")
+        meta_dir_name = scopes.get(META_SCOPE, "00_meta")
         d = vault / meta_dir_name
         if not d.is_dir():
             return None
         if _check_path_boundary(d, vault) is not None:
             return None
-        return (d, "meta")
+        return (d, META_SCOPE)
 
     explicit_scope, slug = _parse_project_ref(project)
 
@@ -316,7 +337,7 @@ def _resolve_project_dir(
 
     # Auto-scan: iterate scopes, first match wins, skip missing dirs
     for scope_name, dir_name in scopes.items():
-        if scope_name == "meta":
+        if scope_name == META_SCOPE:
             continue  # meta is not a project container
         scope_dir = vault / dir_name
         result = _search_scope(scope_dir, slug, scope_name, vault)
@@ -384,7 +405,7 @@ def _resolve_file(
     project: str,
     section: str,
     path: str,
-    scopes: dict[str, str] | None = None,
+    scopes: dict[str, str],
 ) -> Path | str:
     """Resolve a vault file from project + section/path. Returns Path or error string."""
     result = _resolve_project_dir(vault, project, scopes)
