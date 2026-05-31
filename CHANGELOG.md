@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.1](https://github.com/mlorentedev/hive/compare/v1.23.0...v1.23.1) (2026-05-31)
+
+
+### Bug Fixes
+
+* harden scope configuration against misconfiguration ([#161](https://github.com/mlorentedev/hive/issues/161)) ([b1daed8](https://github.com/mlorentedev/hive/commit/b1daed8464f96482a2552921f6140cd58f02588c))
+
 ## [1.23.0](https://github.com/mlorentedev/hive/compare/v1.22.0...v1.23.0) (2026-05-31)
 
 
