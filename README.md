@@ -52,7 +52,7 @@ Hive degrades gracefully — every recommended or optional dependency reveals mo
 
 - **Required**
   - Python **3.12+** (works on 3.13).
-  - A directory of markdown files. The vault structure used by `00_meta` / `10_projects` / `50_work` is optional — without it, vault tools still operate but the scope routing is flat.
+  - A directory of markdown files. The vault structure used by `00_meta` / `10_projects` / `50_work` / `80_agents` is optional — without it, vault tools still operate but the scope routing is flat.
 
 - **Recommended**
   - `git` initialised inside the vault. Without it, `vault_write` / `vault_patch` still write to disk; they just skip the per-write commit (and `vault_commit` reports the working tree as untracked).

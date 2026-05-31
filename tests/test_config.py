@@ -131,7 +131,33 @@ class TestEnvOverride:
 class TestVaultScopes:
     def test_default_scopes(self) -> None:
         s = HiveSettings()
-        assert s.vault_scopes == {"projects": "10_projects", "meta": "00_meta", "work": "50_work"}
+        assert s.vault_scopes == {
+            "projects": "10_projects",
+            "meta": "00_meta",
+            "work": "50_work",
+            "agents": "80_agents",
+        }
+
+    def test_agents_scope_appended_last(self) -> None:
+        """agents must be the LAST key so auto-scan (first-match) cannot let
+        an agent dir shadow an existing projects/work project name."""
+        assert list(HiveSettings().vault_scopes) == [
+            "projects",
+            "meta",
+            "work",
+            "agents",
+        ]
+
+    def test_scopes_env_can_add_agents(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """HIVE_VAULT_SCOPES JSON env can introduce an agents scope (req #5)."""
+        monkeypatch.setenv(
+            "HIVE_VAULT_SCOPES",
+            '{"projects": "10_projects", "agents": "80_agents"}',
+        )
+        assert HiveSettings().vault_scopes == {
+            "projects": "10_projects",
+            "agents": "80_agents",
+        }
 
     def test_scopes_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(

@@ -240,6 +240,58 @@ class TestResolveProjectDir:
         result = _resolve_project_dir(tmp_path, "work:../../etc", scopes)
         assert result is None
 
+    # ── agents scope (HIVE-120) ──
+
+    def test_agents_scope_explicit_resolves(self, tmp_path: Path) -> None:
+        """agents:Hermes-NaN resolves like any other flat scope."""
+        (tmp_path / "80_agents" / "Hermes-NaN").mkdir(parents=True)
+        scopes = {"agents": "80_agents"}
+        result = _resolve_project_dir(tmp_path, "agents:Hermes-NaN", scopes)
+        assert result is not None
+        assert result[0] == tmp_path / "80_agents" / "Hermes-NaN"
+        assert result[1] == "agents"
+
+    def test_agents_scope_auto_scan_resolves(self, tmp_path: Path) -> None:
+        """A plain agent name auto-scans into the agents scope."""
+        (tmp_path / "10_projects").mkdir()
+        (tmp_path / "80_agents" / "Hermes-NaN").mkdir(parents=True)
+        scopes = {"projects": "10_projects", "agents": "80_agents"}
+        result = _resolve_project_dir(tmp_path, "Hermes-NaN", scopes)
+        assert result is not None
+        assert result[0] == tmp_path / "80_agents" / "Hermes-NaN"
+        assert result[1] == "agents"
+
+    def test_agents_in_lazy_default_scopes(self, tmp_path: Path) -> None:
+        """With no explicit scopes, the resolver reads settings.vault_scopes
+        (the SSOT) — which now includes the agents scope. Proves the lazy
+        ``_default_scopes()`` reads the live default, not a stale literal."""
+        (tmp_path / "80_agents" / "Hermes-NaN").mkdir(parents=True)
+        result = _resolve_project_dir(tmp_path, "agents:Hermes-NaN")
+        assert result is not None
+        assert result[0] == tmp_path / "80_agents" / "Hermes-NaN"
+        assert result[1] == "agents"
+
+    def test_agents_appended_last_does_not_shadow(self, tmp_path: Path) -> None:
+        """A name present in BOTH projects and agents resolves to projects:
+        agents is appended last, so first-match auto-scan keeps prior
+        behaviour (req #6, no regression)."""
+        (tmp_path / "10_projects" / "shared").mkdir(parents=True)
+        (tmp_path / "80_agents" / "shared").mkdir(parents=True)
+        result = _resolve_project_dir(tmp_path, "shared")  # lazy default scopes
+        assert result is not None
+        assert result[1] == "projects"
+
+    def test_agents_name_is_arbitrary(self, tmp_path: Path) -> None:
+        """Agent names carry no format constraint — any valid dir name (mixed
+        case, digits, hyphens, underscores, dots) resolves like any project."""
+        scopes = {"agents": "80_agents"}
+        for name in ("weather-bot", "local_runner", "Athena.v2", "GPT5x"):
+            (tmp_path / "80_agents" / name).mkdir(parents=True)
+            result = _resolve_project_dir(tmp_path, f"agents:{name}", scopes)
+            assert result is not None, name
+            assert result[0] == tmp_path / "80_agents" / name
+            assert result[1] == "agents"
+
     def test_meta_unchanged(self, mock_vault: Path) -> None:
         """_meta still resolves to 00_meta scope root."""
         result = _resolve_project_dir(mock_vault, "_meta")

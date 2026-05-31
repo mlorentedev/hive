@@ -25,8 +25,15 @@ Hive funciona con **cualquier directorio de archivos Markdown**. No necesitas re
 │   └── otro-proyecto/
 │       ├── 00-context.md
 │       └── 11-tasks.md
-└── ...
+├── 50_work/                       # scope "work" — clientes, productos, tickets
+│   └── mi-empresa/
+│       └── 00-context.md
+└── 80_agents/                     # scope "agents" — buzones de agentes de IA
+    └── mi-agente/                 # el nombre que quieras; cada dir es un proyecto de primera clase
+        └── 00-context.md
 ```
+
+Los scopes por defecto son `projects` → `10_projects/`, `meta` → `00_meta/`, `work` → `50_work/` y `agents` → `80_agents/`. El scope `agents` es un buzón para agentes de IA; cada subdirectorio — con el nombre que quieras — es un proyecto de primera clase, así que toda herramienta de vault funciona con `agents:<nombre>` igual que con `10_projects`: `vault_query`, `vault_write`, `vault_patch`, `vault_search`, `vault_list` y `vault_health` lo resuelven.
 
 ## Usar tu Vault Existente
 
