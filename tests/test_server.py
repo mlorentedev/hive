@@ -4082,3 +4082,79 @@ class TestWriteLockTimeout:
             ))
         assert "busy" in result.lower() or "timeout" in result.lower()
         _close_server(mcp)
+
+
+# ── agents scope (HIVE-120) ─────────────────────────────────────────
+#
+# These exercise the *default* scopes (no vault_scopes= arg) so they prove
+# the shipped default now includes "agents": "80_agents" and that every
+# tool treats an 80_agents/ subdir as a first-class project, identical to
+# 10_projects/ and 50_work/.
+
+
+def _seed_agent(vault: Path) -> Path:
+    """Create an 80_agents/Hermes-NaN project inside *vault*."""
+    agent = vault / "80_agents" / "Hermes-NaN"
+    agent.mkdir(parents=True)
+    (agent / "00-context.md").write_text(
+        "---\nid: hermes-nan\ntype: project\nstatus: active\n---\n\n"
+        "# Hermes-NaN\n\nRemote ops agent on NaN infrastructure.\n",
+    )
+    return agent
+
+
+class TestAgentsScope:
+    async def test_vault_list_shows_agents(self, mock_vault: Path) -> None:
+        _seed_agent(mock_vault)
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool("vault_list", {}))
+        assert "agents/Hermes-NaN" in result
+        _close_server(mcp)
+
+    async def test_query_explicit_agents_scope(self, mock_vault: Path) -> None:
+        _seed_agent(mock_vault)
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool(
+            "vault_query", {"project": "agents:Hermes-NaN", "section": "context"},
+        ))
+        assert "Remote ops agent" in result
+        _close_server(mcp)
+
+    async def test_query_auto_scan_agents(self, mock_vault: Path) -> None:
+        _seed_agent(mock_vault)
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool(
+            "vault_query", {"project": "Hermes-NaN", "section": "context"},
+        ))
+        assert "Remote ops agent" in result
+        _close_server(mcp)
+
+    async def test_health_enumerates_agents(self, mock_vault: Path) -> None:
+        _seed_agent(mock_vault)
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(await mcp.call_tool("vault_health", {}))
+        assert "agents/Hermes-NaN" in result
+        _close_server(mcp)
+
+    async def test_write_to_agents_scope(self, git_multi_scope_vault: Path) -> None:
+        import subprocess
+
+        agent = _seed_agent(git_multi_scope_vault)
+        subprocess.run(
+            ["git", "add", "."], cwd=git_multi_scope_vault,
+            capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "add agent"], cwd=git_multi_scope_vault,
+            capture_output=True, check=True,
+        )
+        mcp = create_server(vault_path=git_multi_scope_vault)
+        result = _text(await mcp.call_tool("vault_write", {
+            "project": "agents:Hermes-NaN",
+            "section": "tasks",
+            "operation": "append",
+            "content": "\n## Inbox\nFirst task for the agent.\n",
+        }))
+        assert "Updated" in result
+        assert "First task for the agent" in (agent / "11-tasks.md").read_text()
+        _close_server(mcp)

@@ -20,7 +20,16 @@ class HiveSettings(BaseSettings):
         validation_alias=AliasChoices("HIVE_OPENROUTER_API_KEY", "OPENROUTER_API_KEY"),
     )
     vault_scopes: dict[str, str] = Field(
-        default={"projects": "10_projects", "meta": "00_meta", "work": "50_work"},
+        # ``agents`` is intentionally LAST: auto-scan (plain project name)
+        # resolves first-match over insertion order, so appending keeps an
+        # 80_agents/ dir from shadowing an existing projects/work project.
+        # Override the whole mapping via HIVE_VAULT_SCOPES (JSON).
+        default={
+            "projects": "10_projects",
+            "meta": "00_meta",
+            "work": "50_work",
+            "agents": "80_agents",
+        },
     )
     openrouter_budget: float = 1.0
     openrouter_model: str = "qwen/qwen3-coder:free"

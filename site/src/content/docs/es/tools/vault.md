@@ -25,12 +25,13 @@ Sin `project`, lista todos los proyectos del vault con recuento de archivos y at
 
 ### Resolución de scopes
 
-Los proyectos se organizan en **scopes** — directorios de nivel superior del vault. Por defecto, Hive incluye tres scopes:
+Los proyectos se organizan en **scopes** — directorios de nivel superior del vault. Por defecto, Hive incluye cuatro scopes:
 
 | Scope | Directorio | Propósito |
 |---|---|---|
 | `projects` | `10_projects/` | Proyectos personales |
 | `work` | `50_work/` | Trabajo: productos, clientes, tickets, desarrollo |
+| `agents` | `80_agents/` | Buzones de agentes de IA — cada subdirectorio es un proyecto de primera clase |
 | `meta` | `00_meta/` | Patrones y plantillas cross-proyecto |
 
 Usa la sintaxis `scope:slug` para apuntar a un scope específico: `vault_list(project="work:hydra3d-plus")`.

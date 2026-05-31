@@ -140,7 +140,20 @@ SECTION_SHORTCUTS: dict[str, str] = {
     "lessons": "90-lessons.md",
 }
 
-_DEFAULT_SCOPES: dict[str, str] = {"projects": "10_projects", "meta": "00_meta", "work": "50_work"}
+
+def _default_scopes() -> dict[str, str]:
+    """Fallback scopes when a caller does not pass an explicit mapping.
+
+    Reads ``settings.vault_scopes`` (the single source of truth, defined in
+    ``hive.config``) lazily so tests can monkeypatch the settings object
+    after import — same idiom as :func:`_lock_timeout` / :func:`_post_kill_drain`.
+    Avoids a duplicated literal that could silently drift from the real
+    default (SSOT — Standing Order #2).
+    """
+    from hive.config import settings
+
+    return settings.vault_scopes
+
 
 _FENCED_CODE_RE = re.compile(
     r"(?ms)^(?P<fence>`{3,}|~{3,})[^\n]*\n.*?^(?P=fence)[^\n]*$",
@@ -293,7 +306,7 @@ def _resolve_project_dir(
 
     Returns None if the project is not found or escapes the vault boundary.
     """
-    scopes = scopes or _DEFAULT_SCOPES
+    scopes = scopes or _default_scopes()
 
     # _meta special case → meta scope root
     if project == "_meta":

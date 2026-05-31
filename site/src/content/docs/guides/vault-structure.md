@@ -25,8 +25,15 @@ Hive works with **any directory of Markdown files**. You don't need to restructu
 │   └── another-project/
 │       ├── 00-context.md
 │       └── 11-tasks.md
-└── ...
+├── 50_work/                       # "work" scope — clients, products, tickets
+│   └── my-company/
+│       └── 00-context.md
+└── 80_agents/                     # "agents" scope — AI-agent inboxes
+    └── my-agent/                  # any name you choose; each dir is a first-class project
+        └── 00-context.md
 ```
+
+The default scopes are `projects` → `10_projects/`, `meta` → `00_meta/`, `work` → `50_work/`, and `agents` → `80_agents/`. The `agents` scope is an inbox for AI agents; each subdirectory — named however you like — is a first-class project, so every vault tool works with `agents:<name>` exactly as it does for `10_projects`: `vault_query`, `vault_write`, `vault_patch`, `vault_search`, `vault_list`, and `vault_health` all resolve it.
 
 ## Using Your Existing Vault
 
