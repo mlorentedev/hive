@@ -371,6 +371,12 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                     scope_dir = ctx.vault / dir_name
                     if not scope_dir.is_dir():
                         continue
+                    # Only directories are projects. Files directly under a
+                    # scope root (e.g. an ``80_agents/_index.md`` landing page)
+                    # are intentionally skipped — the ``_index.md`` convention
+                    # is optional, so health does not enumerate or validate it
+                    # (decision: #159 item 3; enforcing it would false-flag
+                    # vaults that don't use the convention).
                     for d in sorted(scope_dir.iterdir()):
                         if d.is_dir():
                             project_dirs.append((d, scope_name))
