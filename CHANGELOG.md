@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.0](https://github.com/mlorentedev/hive/compare/v1.26.1...v1.27.0) (2026-06-01)
+
+
+### Features
+
+* unauthenticated /health liveness probe on the daemon (HIVE-118) ([#179](https://github.com/mlorentedev/hive/issues/179)) ([1c0ed89](https://github.com/mlorentedev/hive/commit/1c0ed8976fc47d205b4b72b8e7f031e5db2468f0))
+
 ## [1.26.1](https://github.com/mlorentedev/hive/compare/v1.26.0...v1.26.1) (2026-06-01)
 
 
