@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.1](https://github.com/mlorentedev/hive/compare/v1.25.0...v1.25.1) (2026-06-01)
+
+
+### Bug Fixes
+
+* harden hive client shim against a wedged daemon (HIVE-118) ([#169](https://github.com/mlorentedev/hive/issues/169)) ([0e033d1](https://github.com/mlorentedev/hive/commit/0e033d1819ceb45808493f5d7b97d98cbb8c4123))
+
 ## [1.25.0](https://github.com/mlorentedev/hive/compare/v1.24.0...v1.25.0) (2026-06-01)
 
 
