@@ -154,6 +154,23 @@ async def _two_clients_append(
     )
 
 
+# ── observability (slice 4) helpers ───────────────────────────────────────
+
+
+async def _session_calls(url: str, token: str, tool: str, args: dict[str, str],
+                         times: int) -> None:
+    """Open one MCP session, call *tool* *times*, then disconnect."""
+    from fastmcp import Client
+    from fastmcp.client.transports import StreamableHttpTransport
+
+    transport = StreamableHttpTransport(
+        url, headers={"Authorization": f"Bearer {token}"},
+    )
+    async with Client(transport) as client:
+        for _ in range(times):
+            await client.call_tool(tool, args)
+
+
 @pytest.fixture
 def daemon_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
     """Env pointing every DB + the vault + daemon state dir at a temp dir."""
@@ -352,6 +369,55 @@ def test_two_clients_share_one_daemon(
             f"expected {1 + 2 * n_each} commits (init + per-append), got "
             f"{commit_count}: {log!r}"
         )
+    finally:
+        daemon.terminate()
+        try:
+            daemon.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            daemon.kill()
+
+
+def test_status_aggregates_across_sessions(
+    daemon_env: tuple[dict[str, str], Path],
+) -> None:
+    """The daemon's /status endpoint reports per-tool metrics aggregated across
+    sessions and surviving their disconnect, and is gated by the bearer token."""
+    import httpx
+
+    env, state_dir = daemon_env
+    args = _seed_demo_project(state_dir / "vault")
+    port = _free_port()
+    daemon = _spawn_daemon(env, port)
+    k = 3
+    try:
+        assert _wait_ready(port), "daemon did not bind its loopback port"
+        token = (state_dir / "daemon.token").read_text(encoding="utf-8").strip()
+        mcp_url = f"http://{HOST}:{port}/mcp"
+
+        # Two sequential sessions: each opens, calls vault_query k times, then
+        # fully disconnects before the next starts. If /status still counts both,
+        # the metrics survived the disconnects and aggregate across sessions.
+        asyncio.run(_session_calls(mcp_url, token, "vault_query", args, k))
+        asyncio.run(_session_calls(mcp_url, token, "vault_query", args, k))
+
+        status_url = f"http://{HOST}:{port}/status"
+        resp = httpx.get(status_url, headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200, f"/status not served: {resp.status_code}"
+        payload = resp.json()
+
+        assert payload["tools"]["vault_query"]["calls"] == 2 * k, (
+            f"metrics did not aggregate across sessions: {payload['tools']!r}"
+        )
+        assert payload["tools"]["vault_query"]["errors"] == 0
+        assert payload["sessions_started"] >= 2, (
+            f"expected >=2 sessions, got {payload['sessions_started']}"
+        )
+        assert payload["version"]
+        assert payload["uptime_s"] >= 0
+
+        # The bare loopback port must stay token-gated (ADR-011 §2).
+        bad = httpx.get(status_url)
+        assert bad.status_code == 401, f"/status not token-gated: {bad.status_code}"
     finally:
         daemon.terminate()
         try:

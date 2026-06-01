@@ -7,7 +7,7 @@ import logging.handlers
 import sys
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hive import _compat as _hive_compat
 
@@ -19,6 +19,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from fastmcp.server.auth import AuthProvider
+    from starlette.requests import Request
+    from starlette.responses import Response
 
 from hive._context import ServerContext  # noqa: E402
 from hive._diagnostics import LifecycleMiddleware  # noqa: E402
@@ -32,7 +34,12 @@ from hive._helpers import (  # noqa: E402
 )
 from hive._lesson_reinforcement import LessonReinforcementTracker  # noqa: E402
 from hive._lock_eviction import LockEvictionTracker  # noqa: E402
-from hive._vault_health import health_report_text, register_vault_health  # noqa: E402
+from hive._metrics import METRICS  # noqa: E402
+from hive._vault_health import (  # noqa: E402
+    _hive_version,
+    health_report_text,
+    register_vault_health,
+)
 from hive._vault_read import list_projects_text, register_vault_read  # noqa: E402
 from hive._vault_write import register_vault_write  # noqa: E402
 from hive._workers import register_workers  # noqa: E402
@@ -41,6 +48,26 @@ from hive.clients import OllamaClient, OpenRouterClient  # noqa: E402
 from hive.config import settings  # noqa: E402
 from hive.relevance import RelevanceTracker  # noqa: E402
 from hive.usage import UsageTracker  # noqa: E402
+
+
+def _status_payload(ctx: ServerContext) -> dict[str, Any]:
+    """Assemble the /status JSON: live metrics + budget + version + uptime.
+
+    Live metrics come from the in-memory core (no DB read on the hot path);
+    the budget snapshot is an on-demand read, acceptable here since /status is
+    an operator query, not the request hot path.
+    """
+    stats = ctx.budget.month_stats(ctx.openrouter_budget)
+    uptime_s = max(0, int(time.monotonic() - ctx.started_at_monotonic))
+    return {
+        "version": _hive_version(),
+        "uptime_s": uptime_s,
+        "budget": {
+            "spent": round(float(stats["spent"]), 4),
+            "remaining": round(float(stats["remaining"]), 4),
+        },
+        **METRICS.snapshot(),
+    }
 
 
 def create_server(
@@ -433,6 +460,22 @@ Total estimated savings: ~C tokens
     register_vault_write(mcp, ctx)
     register_vault_health(mcp, ctx)
     register_workers(mcp, ctx)
+
+    # ── /status — cross-session observability (ADR-011 §4) ───────────────
+    # Live metrics from memory (no DB on the hot path). Token-gated with the
+    # same bearer as /mcp: a bare loopback port must not leak metrics to any
+    # local process. Served only in daemon (HTTP) mode; harmless over stdio.
+
+    @mcp.custom_route("/status", methods=["GET"])
+    async def status_route(request: Request) -> Response:
+        from starlette.responses import JSONResponse
+
+        verify = getattr(auth, "verify_token", None)
+        header = request.headers.get("authorization", "")
+        token = header[7:].strip() if header.lower().startswith("bearer ") else ""
+        if verify is None or not token or await verify(token) is None:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return JSONResponse(_status_payload(ctx))
 
     mcp._usage_tracker = tracker  # type: ignore[attr-defined]
     mcp._hive_ctx = ctx  # type: ignore[attr-defined]

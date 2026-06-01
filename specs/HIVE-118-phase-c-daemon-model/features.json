@@ -16,9 +16,9 @@
       "id": "cross-session-observability",
       "ac": "Cross-session observability surface",
       "behavior": "A single call (`hive status` / `/status` / extended `worker_status`) returns metrics aggregated across >=2 sessions and persists across a session disconnect.",
-      "verification": "pytest tests/test_daemon_observability.py -k cross_session",
+      "verification": "uv run pytest tests/test_daemon.py -k status_aggregates_across_sessions",
       "state": "planned",
-      "evidence": null
+      "evidence": "Slice 4 built the core + primary surface: src/hive/_metrics.py (in-memory MetricsCore singleton, hot-path no-DB) fed by LifecycleMiddleware, exposed via a token-gated GET /status (ADR-011 §4 primary). Test: 2 sequential sessions call a tool then fully disconnect; /status still aggregates their per-tool counts (metrics live in the daemon, survive disconnect) and rejects a no-token request (401). Unit tests in tests/test_metrics.py cover counts/errors/percentiles/reset. Deferred: hive status CLI + worker_status block over the same core; precise concurrent-active session count (no on_disconnect hook in middleware). Awaiting harness pass-state."
     },
     {
       "id": "transparent-fallback",
