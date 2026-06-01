@@ -24,9 +24,9 @@
       "id": "transparent-fallback",
       "ac": "Transparent fallback",
       "behavior": "With no daemon running, a client call still succeeds via in-process stdio and the response/health flags degraded (non-daemon) mode.",
-      "verification": "pytest tests/test_daemon_fallback.py -k no_daemon",
+      "verification": "uv run pytest tests/test_daemon.py -k client_falls_back",
       "state": "planned",
-      "evidence": null
+      "evidence": "Implemented in slice 2 (src/hive/_client.py: `hive client` shim falls back to in-process create_server() when no live daemon is reachable). Tests green locally via `make check` (exit 0): test_client_falls_back_without_daemon (no state files) + test_client_falls_back_on_stale_state (dead port behind stale state). Degraded mode surfaced via the `hive.client.mode=fallback reason={no_daemon_state,daemon_unreachable}` startup log. Awaiting harness pass-state."
     },
     {
       "id": "transport-cross-os",
