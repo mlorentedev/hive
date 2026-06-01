@@ -67,10 +67,12 @@ def _seed_demo_project(vault: Path) -> dict[str, str]:
 
 async def _drive_shim(
     env: dict[str, str], tool: str, args: dict[str, str],
-) -> tuple[list[str], str]:
+) -> dict[str, object]:
     """Spawn the `hive client` stdio shim and drive it with a fastmcp client.
 
-    Returns (tool names the shim exposes, text of the forwarded tool call).
+    Returns the tool / resource / prompt names the shim exposes plus the text
+    of the forwarded tool call — enough to assert that the proxy forwards the
+    whole MCP surface, not just `tools/list`.
     """
     from fastmcp import Client
     from fastmcp.client.transports import StdioTransport
@@ -80,8 +82,15 @@ async def _drive_shim(
     )
     async with Client(transport) as client:
         tools = [t.name for t in await client.list_tools()]
+        resources = [str(r.uri) for r in await client.list_resources()]
+        prompts = [p.name for p in await client.list_prompts()]
         result = await client.call_tool(tool, args)
-    return tools, str(getattr(result, "data", result))
+    return {
+        "tools": tools,
+        "resources": resources,
+        "prompts": prompts,
+        "text": str(getattr(result, "data", result)),
+    }
 
 
 def _client_mode(state_dir: Path) -> str:
@@ -163,21 +172,38 @@ def test_hive_serve_rejects_bad_token(daemon_env: tuple[dict[str, str], Path]) -
 
 def test_client_forwards_to_daemon(daemon_env: tuple[dict[str, str], Path]) -> None:
     """With a daemon running, the thin stdio shim connects over the token-gated
-    transport and forwards a `vault_query` to it — reporting `daemon` mode."""
+    transport and forwards the full MCP surface to it — reporting `daemon` mode,
+    without leaking the bearer token into the logs."""
     env, state_dir = daemon_env
     args = _seed_demo_project(state_dir / "vault")
     port = _free_port()
     daemon = _spawn_daemon(env, port)
     try:
         assert _wait_ready(port), "daemon did not bind its loopback port"
+        token = (state_dir / "daemon.token").read_text(encoding="utf-8").strip()
 
-        tools, text = asyncio.run(_drive_shim(env, "vault_query", args))
-        assert "vault_query" in tools
-        assert "session_briefing" in tools
-        assert _DEMO_MARKER in text, f"forwarded query did not round-trip: {text!r}"
+        surface = asyncio.run(_drive_shim(env, "vault_query", args))
+        assert "vault_query" in surface["tools"]
+        assert "session_briefing" in surface["tools"]
+        assert _DEMO_MARKER in surface["text"], (
+            f"forwarded query did not round-trip: {surface['text']!r}"
+        )
+        # The proxy forwards resources + prompts too, not just tools (L2).
+        assert any(str(uri).startswith("hive://") for uri in surface["resources"]), (
+            f"proxy did not forward resources: {surface['resources']!r}"
+        )
+        assert "retrospective" in surface["prompts"], (
+            f"proxy did not forward prompts: {surface['prompts']!r}"
+        )
 
         mode = _client_mode(state_dir)
         assert mode.startswith("daemon"), f"shim did not report daemon mode: {mode!r}"
+
+        # The bearer token must never reach disk in any hive log (L4).
+        logs = "".join(
+            f.read_text(errors="replace") for f in state_dir.glob("hive-*.log")
+        )
+        assert token and token not in logs, "bearer token leaked into a hive log"
     finally:
         daemon.terminate()
         try:
@@ -194,9 +220,9 @@ def test_client_falls_back_without_daemon(
     env, state_dir = daemon_env
     args = _seed_demo_project(state_dir / "vault")
 
-    tools, text = asyncio.run(_drive_shim(env, "vault_query", args))
-    assert "vault_query" in tools
-    assert _DEMO_MARKER in text, f"in-process query failed: {text!r}"
+    surface = asyncio.run(_drive_shim(env, "vault_query", args))
+    assert "vault_query" in surface["tools"]
+    assert _DEMO_MARKER in surface["text"], f"in-process query failed: {surface['text']!r}"
 
     mode = _client_mode(state_dir)
     assert mode.startswith("fallback"), f"expected fallback mode, got {mode!r}"
@@ -210,14 +236,24 @@ def test_client_falls_back_on_stale_state(
     probes liveness, finds nothing listening, and falls back rather than hang."""
     env, state_dir = daemon_env
     args = _seed_demo_project(state_dir / "vault")
-    dead_port = _free_port()  # bound + closed → nothing is listening
-    (state_dir / "daemon.port").write_text(str(dead_port), encoding="utf-8")
-    (state_dir / "daemon.token").write_text("stale-token", encoding="utf-8")
+    # Bound but NOT listening, held open: connects are refused deterministically
+    # (no accept queue => RST) and no other process can grab the port mid-test.
+    dead = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    dead.bind((HOST, 0))
+    try:
+        (state_dir / "daemon.port").write_text(
+            str(dead.getsockname()[1]), encoding="utf-8",
+        )
+        (state_dir / "daemon.token").write_text("stale-token", encoding="utf-8")
 
-    tools, text = asyncio.run(_drive_shim(env, "vault_query", args))
-    assert "vault_query" in tools
-    assert _DEMO_MARKER in text, f"in-process query failed: {text!r}"
+        surface = asyncio.run(_drive_shim(env, "vault_query", args))
+        assert "vault_query" in surface["tools"]
+        assert _DEMO_MARKER in surface["text"], (
+            f"in-process query failed: {surface['text']!r}"
+        )
 
-    mode = _client_mode(state_dir)
-    assert mode.startswith("fallback"), f"expected fallback mode, got {mode!r}"
-    assert "daemon_unreachable" in mode, f"unexpected fallback reason: {mode!r}"
+        mode = _client_mode(state_dir)
+        assert mode.startswith("fallback"), f"expected fallback mode, got {mode!r}"
+        assert "daemon_unreachable" in mode, f"unexpected fallback reason: {mode!r}"
+    finally:
+        dead.close()
