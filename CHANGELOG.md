@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.0](https://github.com/mlorentedev/hive/compare/v1.24.0...v1.25.0) (2026-06-01)
+
+
+### Features
+
+* add `hive client` stdio shim that proxies to the daemon (HIVE-118) ([#167](https://github.com/mlorentedev/hive/issues/167)) ([619e656](https://github.com/mlorentedev/hive/commit/619e65610088fe3290fa177c995e337db6bc7adc))
+
 ## [1.24.0](https://github.com/mlorentedev/hive/compare/v1.23.1...v1.24.0) (2026-05-31)
 
 
