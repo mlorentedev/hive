@@ -23,15 +23,17 @@ created: "2026-05-29"
 - [x] **Spike (transport):** loopback Streamable-HTTP + bearer-token round-trip. **Linux + Windows: DONE** (`spike/transport_spike.py`, 5/5 both — round-trip, missing/wrong-token 401, owner-only token file via `0600`/`icacls`). Closed ADR-011's transport residual.
 - [x] **Spike (load/concurrency):** N parallel sessions → one daemon owning a shared SQLite. **Linux + Windows: DONE** (`spike/load_spike.py`, 4/4 both — zero failures, no lost writes, no head-of-line blocking). Pre-validated the single-owner concurrency model (ADR-011 §1).
 - [x] **Spike (idempotency / resilience / robustness):** **Linux + Windows: DONE** — `idempotency_spike.py` 3/3 (§6.2 at-most-once incl. concurrent dupes → one row), `resilience_spike.py` 4/4 (§4 — state durable + `integrity_check=ok` after `SIGKILL`/`TerminateProcess`, reconnect, disconnect survival), `robustness_spike.py` 3/3 (1 MB payload, auth unbypassable, port-in-use exits cleanly). De-risked §6.2 + §4 + transport edges before building.
-- [ ] Write failing test: daemon starts, owns the SQLite DBs, answers a `tools/list`
-- [ ] Implement `hive serve` daemon entrypoint (long-lived; single owner of `ServerContext`)
-- [ ] Write failing test: thin client connects over transport and round-trips one `vault_query`
-- [ ] Implement client/stdio-shim that forwards MCP over the transport
+- [x] Write failing test: daemon starts, owns the SQLite DBs, answers a `tools/list` — **#164** (`tests/test_daemon.py::test_hive_serve_answers_tools_list`)
+- [x] Implement `hive serve` daemon entrypoint (long-lived; single owner of `ServerContext`) — **#164** (`src/hive/_daemon.py`)
+- [x] Write failing test: thin client connects over transport and round-trips one `vault_query` — slice 2 (`test_client_forwards_to_daemon`)
+- [x] Implement client/stdio-shim that forwards MCP over the transport — slice 2 (`src/hive/_client.py`: `hive client` → `create_proxy` over token-gated HTTP)
 - [ ] Write failing test: 2 concurrent clients, single daemon process owns DBs+git (multi-client integration)
 - [ ] Write failing test: cross-session aggregated metrics survive a client disconnect
 - [ ] Implement cross-session observability surface (`hive status` / `/status` / extended `worker_status`) over an internal metrics core
-- [ ] Write failing test: no daemon -> client falls back to in-process stdio, response flags degraded mode
-- [ ] Implement transparent fallback path + client auto-reconnect when daemon returns
+- [x] Write failing test: no daemon -> client falls back to in-process stdio, response flags degraded mode — **pulled forward into slice 2** (`test_client_falls_back_without_daemon` + `test_client_falls_back_on_stale_state`); degraded mode surfaced via the `hive.client.mode=fallback reason=...` startup log, not an MCP-visible flag (the rich surface is the observability slice above)
+- [~] Implement transparent fallback path **[done — slice 2]** + client auto-reconnect when daemon returns **[deferred — resilience slice]**: the shim picks its mode once at startup (TCP liveness probe of the published port); mid-session reconnect when a dead daemon returns lands with the supervised-restart work below
+
+> **Reorder note (2026-05-31, slice 2):** the fallback test + transparent-fallback path were pulled ahead of the multi-client / observability steps. Reason: a forwarding-only shim wired into `~/.claude.json` would break every session whenever the daemon is down, so fallback is a safety prerequisite for shipping the shim at all, not a later refinement. Auto-reconnect (mid-session daemon recovery) stays deferred to the resilience slice.
 - [ ] **Resilience:** structured single-daemon logging with `correlation_id` + `session_id` (replace per-PID logs)
 - [ ] **Resilience:** liveness + readiness probes
 - [ ] **DR:** write failing test — `SIGKILL` under load -> supervisor restart, durable state (SQLite+git) intact, clients reconnect/fallback

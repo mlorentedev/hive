@@ -495,13 +495,28 @@ def _run_serve(argv: list[str]) -> None:
     run_serve(host=opts.host, port=opts.port)
 
 
+def _run_client(argv: list[str]) -> None:
+    """``hive client`` — thin stdio shim: proxy to the daemon, else fallback."""
+    import argparse
+
+    from hive._client import run_client
+    from hive._daemon import DEFAULT_HOST
+
+    parser = argparse.ArgumentParser(prog="hive client")
+    parser.add_argument("--host", default=DEFAULT_HOST)
+    opts = parser.parse_args(argv)
+    run_client(host=opts.host)
+
+
 def main() -> None:
     """Entry point for the hive CLI command.
 
     Bare ``hive`` runs the stdio MCP server (the v1 per-session contract).
     ``hive serve`` runs the Phase C single-owner daemon over loopback HTTP +
-    bearer token (ADR-011). ``create_server()`` is called here rather than at
-    module import so importing ``hive.server`` is side-effect free.
+    bearer token (ADR-011). ``hive client`` runs the thin stdio shim that
+    proxies to that daemon (falling back to the in-process server when none is
+    reachable). ``create_server()`` is called here rather than at module import
+    so importing ``hive.server`` is side-effect free.
     """
     _setup_file_logging()
     _log = logging.getLogger("hive")
@@ -509,6 +524,8 @@ def main() -> None:
     try:
         if argv and argv[0] == "serve":
             _run_serve(argv[1:])
+        elif argv and argv[0] == "client":
+            _run_client(argv[1:])
         else:
             create_server().run()
     except BaseException as exc:
