@@ -8,9 +8,9 @@
       "id": "single-owner-multi-client",
       "ac": "Single-owner daemon serves multiple clients",
       "behavior": "With `hive serve` running, >=2 concurrent client sessions complete vault reads/writes through it and exactly one hive daemon process owns the SQLite DBs + git working tree.",
-      "verification": "pytest tests/test_daemon_integration.py -k multi_client",
+      "verification": "uv run pytest tests/test_daemon.py -k two_clients_share_one_daemon",
       "state": "planned",
-      "evidence": "Concurrency model pre-validated cross-OS by spike/load_spike.py (4/4 Linux+Windows: 200/200 zero-failure, no lost writes, no HOL)."
+      "evidence": "Implemented in slice 3 as a real vault+git multi-client test: 2 concurrent `hive client` shims append to the same file through one daemon -> all 8 writes land (no lost updates) and the daemon owns the git history (9 commits = init + 2x4, one per append, deterministic across 3 runs). No new production code needed: the single-owner daemon turns the old inter-process write filelock into an intra-process threading.Lock. Pre-validated cross-OS by spike/load_spike.py (4/4 Linux+Windows). Awaiting harness pass-state."
     },
     {
       "id": "cross-session-observability",

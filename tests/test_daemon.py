@@ -103,6 +103,57 @@ def _client_mode(state_dir: Path) -> str:
     return ""
 
 
+# ── multi-client (slice 3) helpers ────────────────────────────────────────
+
+
+def _git_init_vault(vault: Path) -> None:
+    """Make *vault* a git repo with one commit, so vault_write can auto-commit."""
+    for cmd in (
+        ["git", "init"],
+        ["git", "config", "user.email", "test@test.com"],
+        ["git", "config", "user.name", "Test"],
+        ["git", "add", "."],
+        ["git", "commit", "-m", "init"],
+    ):
+        subprocess.run(cmd, cwd=vault, capture_output=True, check=True)
+
+
+async def _client_appends(env: dict[str, str], markers: list[str]) -> int:
+    """One shim session: append each marker to demo/context, count completions."""
+    from fastmcp import Client
+    from fastmcp.client.transports import StdioTransport
+
+    transport = StdioTransport(
+        command=sys.executable, args=["-m", "hive.server", "client"], env=env,
+    )
+    done = 0
+    async with Client(transport) as client:
+        for marker in markers:
+            await client.call_tool(
+                "vault_write",
+                {
+                    "project": "demo",
+                    "section": "context",
+                    "operation": "append",
+                    "content": f"\n{marker}\n",
+                },
+            )
+            done += 1
+    return done
+
+
+async def _two_clients_append(
+    env: dict[str, str], markers_a: list[str], markers_b: list[str],
+) -> list[int]:
+    """Two shim sessions append concurrently against the same daemon."""
+    return list(
+        await asyncio.gather(
+            _client_appends(env, markers_a),
+            _client_appends(env, markers_b),
+        ),
+    )
+
+
 @pytest.fixture
 def daemon_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
     """Env pointing every DB + the vault + daemon state dir at a temp dir."""
@@ -257,3 +308,53 @@ def test_client_falls_back_on_stale_state(
         assert "daemon_unreachable" in mode, f"unexpected fallback reason: {mode!r}"
     finally:
         dead.close()
+
+
+def test_two_clients_share_one_daemon(
+    daemon_env: tuple[dict[str, str], Path],
+) -> None:
+    """Two concurrent client shims write to the vault through ONE daemon: every
+    write lands (the single owner serialized them — no lost updates to the same
+    file) and the daemon owns the resulting git commits (single-owner AC)."""
+    env, state_dir = daemon_env
+    vault = state_dir / "vault"
+    _seed_demo_project(vault)  # 10_projects/demo/00-context.md
+    _git_init_vault(vault)
+
+    n_each = 4
+    markers_a = [f"MARKER-A-{i}" for i in range(n_each)]
+    markers_b = [f"MARKER-B-{i}" for i in range(n_each)]
+
+    port = _free_port()
+    daemon = _spawn_daemon(env, port)
+    try:
+        assert _wait_ready(port), "daemon did not bind its loopback port"
+
+        done = asyncio.run(_two_clients_append(env, markers_a, markers_b))
+        assert done == [n_each, n_each], f"a client session aborted early: {done}"
+
+        # No lost writes: every marker from both concurrent sessions survived,
+        # proving the single owner serialized the read-append-write cycles.
+        context = vault / "10_projects" / "demo" / "00-context.md"
+        content = context.read_text(encoding="utf-8")
+        missing = [m for m in markers_a + markers_b if m not in content]
+        assert not missing, f"lost writes — single-owner serialization failed: {missing}"
+
+        # The daemon owns git: each append produced exactly one commit on top of
+        # `init` (init + 2*n_each). A different count would mean a dropped commit
+        # or coalesced/lost writes — i.e. broken single-owner serialization.
+        log = subprocess.run(
+            ["git", "log", "--oneline"],
+            cwd=vault, capture_output=True, text=True, check=True,
+        ).stdout
+        commit_count = len(log.splitlines())
+        assert commit_count == 1 + 2 * n_each, (
+            f"expected {1 + 2 * n_each} commits (init + per-append), got "
+            f"{commit_count}: {log!r}"
+        )
+    finally:
+        daemon.terminate()
+        try:
+            daemon.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            daemon.kill()
