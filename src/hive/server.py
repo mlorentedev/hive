@@ -70,6 +70,30 @@ def _status_payload(ctx: ServerContext) -> dict[str, Any]:
     }
 
 
+def _health_payload(ctx: ServerContext) -> dict[str, Any]:
+    """Assemble the unauthenticated /health liveness+readiness payload.
+
+    Deliberately minimal and NON-sensitive: status + readiness + version +
+    uptime, nothing more. A supervisor (systemd readiness check), the
+    restart-on-upgrade wait, and the client's reconnect probe poll this WITHOUT
+    the bearer token, so it must not leak the metrics/budget surface that
+    ``/status`` keeps token-gated (ADR-011 §2).
+
+    ``ready`` separates liveness from readiness: liveness is "the process
+    answers at all" (a 200 here), readiness is "it can actually serve" — the
+    vault working tree the tools operate on is resolvable. A daemon whose vault
+    has gone missing is alive but not ready, so a client can fall back while the
+    supervisor leaves the (healthy) process running.
+    """
+    uptime_s = max(0, int(time.monotonic() - ctx.started_at_monotonic))
+    return {
+        "status": "ok",
+        "ready": ctx.vault.is_dir(),
+        "version": _hive_version(),
+        "uptime_s": uptime_s,
+    }
+
+
 def create_server(
     vault_path: Path | None = None,
     usage_tracker: UsageTracker | None = None,
@@ -476,6 +500,19 @@ Total estimated savings: ~C tokens
         if verify is None or not token or await verify(token) is None:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         return JSONResponse(_status_payload(ctx))
+
+    # ── /health — UNAUTHENTICATED liveness + readiness probe (ADR-011 §4) ──
+    # Polled by the supervisor (systemd readiness), restart-on-upgrade's
+    # wait-for-ready, and the client's reconnect probe — none of which hold the
+    # bearer token — so it carries only non-sensitive liveness info. The
+    # metrics/budget stay token-gated on /status above. Served only in daemon
+    # (HTTP) mode; inert over stdio.
+
+    @mcp.custom_route("/health", methods=["GET"])
+    async def health_route(request: Request) -> Response:
+        from starlette.responses import JSONResponse
+
+        return JSONResponse(_health_payload(ctx))
 
     mcp._usage_tracker = tracker  # type: ignore[attr-defined]
     mcp._hive_ctx = ctx  # type: ignore[attr-defined]

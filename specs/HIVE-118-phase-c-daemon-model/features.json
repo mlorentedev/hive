@@ -53,6 +53,15 @@
       "evidence": "idempotency_spike 3/3 on Linux AND Windows (2026-05-31), incl. 12 concurrent duplicates -> one row. Real impl wires the key through the tool envelope + a shared applied-key store."
     },
     {
+      "id": "liveness-readiness-probe",
+      "ac": "Liveness + readiness probe (supporting)",
+      "behavior": "The daemon serves an UNAUTHENTICATED GET /health returning 200 + {status, ready, version, uptime_s}; readiness reflects vault resolvability; the token-gated per-tool metrics + budget on /status are never leaked to a no-token caller.",
+      "verification": "uv run pytest tests/test_daemon.py -k health_probe",
+      "state": "planned",
+      "evidence": "Slice 1.1 (2026-05-31): src/hive/server.py _health_payload + unauthenticated /health route. Liveness (200 + status=ok) vs readiness (ready = vault working tree resolvable) on one endpoint; sensitive metrics/budget stay token-gated on /status. The foundation the supervised systemd unit (readiness check), restart-on-upgrade (wait-for-ready), and the client reconnect probe consume. Test green locally via make check (659 passed). Awaiting harness pass-state.",
+      "supports": "supervised-recovery"
+    },
+    {
       "id": "supervised-recovery",
       "ac": "Supervised recovery",
       "behavior": "Killing the daemon (SIGKILL) triggers supervisor auto-restart; durable state (SQLite + git) is intact, and in-flight clients reconnect or fall back.",
