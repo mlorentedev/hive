@@ -52,6 +52,15 @@ created: "2026-05-29"
 - [ ] Service install/lifecycle: systemd `--user` unit (`Restart=on-failure`) + launchd/Windows recovery stubs
 - [ ] **Cross-OS CI lane** (extend the `cross_worker_lock` Linux+Windows matrix). Port the five spike scenarios into `tests/` as pytest integration tests **against the real `hive serve` daemon** — transport+token round-trip, single-owner concurrency, idempotency (§6.2), crash-only durability (§4), and transport/auth edges. The spikes (`spike/*.py`) are the executable spec for these tests; once the daemon exists they become real coverage of hive's own code (not just FastMCP) and gate every PR on both OSes. Until then they stay runnable as-is for manual cross-OS checks.
 
+## Activation / rollout — EXIT CRITERION (added 2026-05-31, [#176](https://github.com/mlorentedev/hive/issues/176))
+
+> **Note (freeze amendment):** building the daemon is pointless if it is never used. Activation is Phase C's exit criterion, **gated** on the resilience + auto-reconnect slices above landing first (else auto-starting an unsupervised daemon everywhere ships a fragile SPOF). The H1 in-process fallback (#169) is the safety net that makes this low-risk.
+
+- [ ] **Supervised auto-start** ready: the systemd `--user` unit (above) auto-starts on login (`WantedBy=default.target`) + `Restart=on-failure`; launchd `KeepAlive` / Windows equivalent. Gated on restart-on-upgrade + startup self-heal being done.
+- [ ] **Auto-reconnect proven** (the resilience slice closes M1): a `hive client` whose daemon dies mid-session reconnects to a restarted daemon, not just first-call fallback.
+- [ ] **Rollout — CROSS-REPO (`mlorentedev/dotfiles`):** `setup-*.sh` flips the `~/.claude.json` hive entry `uvx hive-vault` (stdio) → `hive client` and installs + enables the per-OS service unit. (Tracked here because it gates Phase C "done"; the change itself lands in dotfiles.)
+- [ ] **ROI gate:** confirm the daemon's value (cross-session observability + zero cold-starts) justifies activation for real usage; otherwise keep "daemon optional" as the rollout (client still falls back to stdio).
+
 ## Closing
 
 - [ ] Every acceptance criterion from `proposal.md` is covered by at least one test
