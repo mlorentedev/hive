@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.1](https://github.com/mlorentedev/hive/compare/v1.26.0...v1.26.1) (2026-06-01)
+
+
+### Documentation
+
+* **spec:** record Phase C activation/rollout as the exit criterion (HIVE-118) ([#177](https://github.com/mlorentedev/hive/issues/177)) ([8b94358](https://github.com/mlorentedev/hive/commit/8b94358d070f28634e18ac003fa2f84fed50454f))
+
 ## [1.26.0](https://github.com/mlorentedev/hive/compare/v1.25.1...v1.26.0) (2026-06-01)
 
 
