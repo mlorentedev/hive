@@ -377,6 +377,49 @@ def test_two_clients_share_one_daemon(
             daemon.kill()
 
 
+def test_health_probe_is_unauthenticated_and_reports_ready(
+    daemon_env: tuple[dict[str, str], Path],
+) -> None:
+    """The daemon exposes an UNAUTHENTICATED `/health` liveness probe a
+    supervisor (systemd readiness, restart-on-upgrade wait, the client's
+    reconnect probe) can poll without the bearer token.
+
+    Contract: 200 + `status=ok` + `ready=true` (DBs open + vault resolvable) +
+    `version` + `uptime_s`. Liveness is the minimal NON-sensitive surface — it
+    must never leak the token-gated metrics/budget that live on `/status`
+    (ADR-011 §2: the bare loopback port stays closed for everything sensitive).
+    """
+    import httpx
+
+    env, state_dir = daemon_env
+    port = _free_port()
+    daemon = _spawn_daemon(env, port)
+    try:
+        assert _wait_ready(port), "daemon did not bind its loopback port"
+
+        # No Authorization header: a supervisor must probe liveness tokenless.
+        resp = httpx.get(f"http://{HOST}:{port}/health")
+        assert resp.status_code == 200, (
+            f"/health not served unauthenticated: {resp.status_code}"
+        )
+        payload = resp.json()
+        assert payload["status"] == "ok", f"unexpected health status: {payload!r}"
+        assert payload["ready"] is True, f"daemon reported not ready: {payload!r}"
+        assert payload["version"], "health probe missing version"
+        assert payload["uptime_s"] >= 0
+
+        # The sensitive surface (per-tool metrics + budget) must NOT leak from an
+        # unauthenticated probe — those stay token-gated on /status.
+        assert "budget" not in payload, "health probe leaked budget to no-token caller"
+        assert "tools" not in payload, "health probe leaked metrics to no-token caller"
+    finally:
+        daemon.terminate()
+        try:
+            daemon.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            daemon.kill()
+
+
 def test_status_aggregates_across_sessions(
     daemon_env: tuple[dict[str, str], Path],
 ) -> None:
