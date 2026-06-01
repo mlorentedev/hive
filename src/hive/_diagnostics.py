@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING, Any
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 
+from hive._metrics import METRICS
+
 if TYPE_CHECKING:
     from fastmcp.server.middleware import CallNext
 
@@ -45,6 +47,7 @@ class LifecycleMiddleware(Middleware):
             result = await call_next(context)
         except asyncio.CancelledError:
             elapsed_ms = (time.monotonic() - start) * 1000
+            _record(tool, elapsed_ms, ok=False)
             _log.info(
                 "mcp cancelled method=%s tool=%s id=%s elapsed_ms=%.0f",
                 method, tool, request_id, elapsed_ms,
@@ -52,6 +55,7 @@ class LifecycleMiddleware(Middleware):
             raise
         except Exception as exc:
             elapsed_ms = (time.monotonic() - start) * 1000
+            _record(tool, elapsed_ms, ok=False)
             _log.warning(
                 "mcp error method=%s tool=%s id=%s elapsed_ms=%.0f exc=%r",
                 method, tool, request_id, elapsed_ms, exc,
@@ -59,11 +63,25 @@ class LifecycleMiddleware(Middleware):
             raise
         else:
             elapsed_ms = (time.monotonic() - start) * 1000
+            _record(tool, elapsed_ms, ok=True)
+            if method == "initialize":
+                METRICS.record_session_start()
             _log.info(
                 "mcp ok method=%s tool=%s id=%s elapsed_ms=%.0f",
                 method, tool, request_id, elapsed_ms,
             )
             return result
+
+
+def _record(tool: str, elapsed_ms: float, *, ok: bool) -> None:
+    """Feed the live-metrics core, but only for real tool calls.
+
+    ``tool`` is ``"-"`` for non-``tools/call`` methods (initialize, list_*,
+    notifications); those are not per-tool metrics, so they are skipped here —
+    session starts are counted separately by the caller.
+    """
+    if tool != "-":
+        METRICS.record_call(tool, elapsed_ms, ok=ok)
 
 
 def _extract_request_id(context: MiddlewareContext[Any]) -> str:
