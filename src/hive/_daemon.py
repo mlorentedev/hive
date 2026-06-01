@@ -86,6 +86,13 @@ def run_serve(host: str = DEFAULT_HOST, port: int = 0) -> None:
 
     resolved_port = port or _free_port()
     token = secrets.token_urlsafe(32)
+    # Each startup republishes a fresh token + port, overwriting any state a
+    # prior daemon left behind. We deliberately do NOT clean these up on stop:
+    # uvicorn's SIGTERM handling exits the process via the signal (rc -15),
+    # bypassing `finally`/`atexit`, and SIGTERM is exactly how systemd / kill
+    # stop the daemon. Stale state is benign — the client's TCP liveness probe
+    # falls back (`daemon_unreachable`) and a restart overwrites it. See ADR-011
+    # startup self-heal for the crash path.
     write_owner_only(token_file_path(), token)
     write_owner_only(port_file_path(), str(resolved_port))
 

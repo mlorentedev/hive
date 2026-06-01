@@ -38,6 +38,13 @@ _log = logging.getLogger("hive")
 # must tolerate a momentarily busy machine. 500 ms is the spike's proven budget.
 _PROBE_TIMEOUT_S = 0.5
 
+# Bound for the MCP ``initialize`` handshake to the daemon. The TCP probe only
+# proves the port *accepts* connections; this caps the gap where it accepts but
+# the MCP layer never replies (a wedged daemon), turning what would otherwise be
+# an unbounded hang into a fast, bounded failure. fastmcp's global default is
+# ``None`` (no timeout), so this must be set explicitly.
+_DAEMON_INIT_TIMEOUT_S = 5.0
+
 
 def _read_state() -> tuple[int, str] | None:
     """Read the daemon's published port + token, or ``None`` if either is absent.
@@ -78,7 +85,20 @@ def _serve_in_process() -> None:
 
 
 def _serve_proxy(host: str, port: int, token: str) -> None:
-    """Daemon mode: forward stdio MCP to the daemon over token-gated HTTP."""
+    """Daemon mode: forward stdio MCP to the daemon over token-gated HTTP.
+
+    The backend transport is wrapped in a ``Client`` carrying a bounded
+    ``init_timeout`` so a daemon that accepts TCP but stalls the MCP handshake
+    (the gap the TCP probe cannot see) fails fast instead of hanging the
+    session. The per-request ``timeout`` is deliberately left unset: tool calls
+    such as ``delegate_task`` legitimately run for tens of seconds and the
+    daemon owns their deadline budget — capping it here would sever long calls.
+
+    ``create_proxy`` treats a disconnected ``Client`` as a per-request session
+    factory (``Client.new()``), which preserves ``init_timeout`` on every
+    forwarded call and keeps concurrent sessions isolated.
+    """
+    from fastmcp import Client
     from fastmcp.client.transports import StreamableHttpTransport
     from fastmcp.server import create_proxy
 
@@ -86,7 +106,8 @@ def _serve_proxy(host: str, port: int, token: str) -> None:
         f"http://{host}:{port}{MCP_PATH}",
         headers={"Authorization": f"Bearer {token}"},
     )
-    create_proxy(transport).run()
+    backend = Client(transport, init_timeout=_DAEMON_INIT_TIMEOUT_S)
+    create_proxy(backend).run()
 
 
 def run_client(host: str = DEFAULT_HOST) -> None:
