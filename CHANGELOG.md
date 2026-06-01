@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.0](https://github.com/mlorentedev/hive/compare/v1.25.1...v1.26.0) (2026-06-01)
+
+
+### Features
+
+* cross-session metrics core + token-gated /status endpoint (HIVE-118) ([#172](https://github.com/mlorentedev/hive/issues/172)) ([5c288b0](https://github.com/mlorentedev/hive/commit/5c288b0f90c61c821960394a1daa774500aa4ce9))
+
 ## [1.25.1](https://github.com/mlorentedev/hive/compare/v1.25.0...v1.25.1) (2026-06-01)
 
 
