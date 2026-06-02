@@ -137,6 +137,11 @@ def _should_defer_to_external_committer(vault_path: Path) -> bool:
     return _is_external_committer_healthy(vault_path, interval)
 
 
+_IDEMPOTENT_NOOP = (
+    "Idempotent no-op — idempotency_key already applied; no change written."
+)
+
+
 def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
     """Register vault write tools on the MCP server."""
 
@@ -150,6 +155,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         path: str = "",
         doc_type: str = "",
         commit: bool = True,
+        idempotency_key: str = "",
     ) -> str:
         """Write to the vault: append, replace a section, or create a new file.
 
@@ -171,6 +177,10 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 files are persisted to disk regardless; only the *commit* is
                 deferred. A crash before the next flush loses the commit, not
                 the file content.
+            idempotency_key: Optional at-most-once token. If set, a retry with
+                the same key is a no-op (safe for transparent retries after a
+                daemon restart cuts an in-flight write — ADR-013). Empty
+                (default) disables idempotency.
         """  # noqa: E501
         guard = _vault_guard(ctx)
         if guard:
@@ -215,6 +225,12 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
             try:
                 with vault_write_lock(ctx.vault):
+                    if idempotency_key and ctx.idempotency.is_applied(
+                        idempotency_key,
+                    ):
+                        return track(
+                            ctx, "vault_write", _IDEMPOTENT_NOOP, project,
+                        )
                     if filepath.exists():
                         return track(
                             ctx, "vault_write",
@@ -235,6 +251,8 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                             project,
                         )
                     mark_disk_write_done()
+                    if idempotency_key:
+                        ctx.idempotency.claim(idempotency_key)
 
                     rel = filepath.relative_to(ctx.vault)
                     display = "00_meta" if project == "_meta" else project
@@ -293,6 +311,12 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
         try:
             with vault_write_lock(ctx.vault):
+                if idempotency_key and ctx.idempotency.is_applied(
+                    idempotency_key,
+                ):
+                    return track(
+                        ctx, "vault_write", _IDEMPOTENT_NOOP, project,
+                    )
                 try:
                     if operation == "append":
                         existing = (
@@ -312,6 +336,8 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                         project,
                     )
                 mark_disk_write_done()
+                if idempotency_key:
+                    ctx.idempotency.claim(idempotency_key)
 
                 rel = filepath.relative_to(ctx.vault)
                 should_defer = (
@@ -350,6 +376,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         commit: bool = True,
         old_string: str = "",
         new_string: str = "",
+        idempotency_key: str = "",
     ) -> str:
         """Surgical find-and-replace in a vault file with auto git commit.
 
@@ -378,6 +405,9 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 the durability contract.
             old_string: Alias of `find` (#151). Prefer `find`.
             new_string: Alias of `replace` (#151). Prefer `replace`.
+            idempotency_key: Optional at-most-once token. If set, a retry with
+                the same key is a no-op after the first apply (ADR-013). Empty
+                (default) disables idempotency.
         """
         find = find or old_string  # #151: accept Edit-tool param names as aliases
         replace = replace or new_string
@@ -433,6 +463,12 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         n = 0
         try:
             with vault_write_lock(ctx.vault):
+                if idempotency_key and ctx.idempotency.is_applied(
+                    idempotency_key,
+                ):
+                    return track(
+                        ctx, "vault_patch", _IDEMPOTENT_NOOP, project,
+                    )
                 try:
                     content = filepath.read_text(encoding="utf-8")
                 except (OSError, UnicodeDecodeError) as exc:
@@ -473,6 +509,8 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                         project,
                     )
                 mark_disk_write_done()
+                if idempotency_key:
+                    ctx.idempotency.claim(idempotency_key)
 
                 rel = filepath.relative_to(ctx.vault)
                 n = len(patch_list)
