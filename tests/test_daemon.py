@@ -758,3 +758,90 @@ def test_status_aggregates_across_sessions(
             daemon.wait(timeout=10)
         except subprocess.TimeoutExpired:
             daemon.kill()
+
+
+# ── slice 1.3: restart-on-upgrade (drift detection + cooperative stop) ─────
+
+
+@pytest.mark.parametrize(
+    ("boot", "current", "expected"),
+    [
+        ("1.30.0", "1.30.0", False),       # steady state — no restart
+        ("1.30.0", "1.31.0", True),        # in-place upgrade — restart
+        ("1.30.0", "1.29.0", True),        # rollback ships new code too — restart
+        ("1.30.0", "<not-found>", False),  # transient swap window — must NOT bounce
+        ("<not-found>", "1.30.0", False),  # never resolved at boot — don't churn
+    ],
+)
+def test_upgrade_detected_predicate(boot: str, current: str, expected: bool) -> None:
+    """The drift predicate decides when an in-place package swap warrants a
+    supervised restart. A resolvable version that DIFFERS from the boot snapshot
+    is drift (upgrade and rollback both ship code the running process is not
+    executing). The ``<not-found>`` sentinel — returned by ``_current_version``
+    during the brief window where ``uv tool upgrade`` has removed the old
+    ``*.dist-info`` but not yet written the new one — must NEVER trigger a
+    restart, or a transient unreadable read would bounce a healthy daemon."""
+    from hive._daemon import _upgrade_detected
+
+    assert _upgrade_detected(boot, current) is expected
+
+
+def test_watch_for_upgrade_sets_should_exit_on_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The poll loop flips the owned server's ``should_exit`` and returns True the
+    moment it observes a resolvable version different from boot — the cooperative
+    stop the spike proved (vs a signal that cuts the in-flight handler)."""
+    import hive._daemon as daemon
+
+    # boot read, one steady poll, then the upgraded version appears.
+    versions = iter(["1.30.0", "1.30.0", "1.31.0"])
+    monkeypatch.setattr(daemon, "_current_version", lambda *a, **k: next(versions))
+
+    class _FakeServer:
+        should_exit = False
+
+    server = _FakeServer()
+    boot = daemon._current_version()  # consumes the first "1.30.0"
+    drifted = asyncio.run(daemon._watch_for_upgrade(server, boot=boot, poll_s=0.01))
+
+    assert drifted is True
+    assert server.should_exit is True
+
+
+def test_watch_for_upgrade_returns_false_on_external_stop() -> None:
+    """A signal-driven stop (``systemctl stop``) flips ``should_exit`` out from
+    under the watcher; it must report 'not drift' so ``run_serve`` exits 0 and the
+    supervisor does not restart a daemon that was asked to stop."""
+    import hive._daemon as daemon
+
+    class _FakeServer:
+        should_exit = True  # already stopping for another reason
+
+    drifted = asyncio.run(
+        daemon._watch_for_upgrade(_FakeServer(), boot="1.30.0", poll_s=0.01),
+    )
+    assert drifted is False
+
+
+def test_run_serve_maps_drift_to_restart_exit_code(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """run_serve maps a drift-caused stop to the dedicated restart exit code so a
+    ``Restart=on-failure`` supervisor relaunches into the new code, while a clean
+    stop returns 0 (consistent with the singleton-decline path, which also
+    exits 0 to avoid a no-op restart loop)."""
+    import hive._daemon as daemon
+
+    # Stub the owned-serve loop so no real port is bound / server built.
+    monkeypatch.setattr(daemon, "daemon_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(daemon, "token_file_path", lambda: tmp_path / "daemon.token")
+    monkeypatch.setattr(daemon, "port_file_path", lambda: tmp_path / "daemon.port")
+    monkeypatch.setattr(daemon, "lock_file_path", lambda: tmp_path / "daemon.lock")
+    monkeypatch.setattr(daemon, "_startup_self_heal", lambda vault: None)
+
+    monkeypatch.setattr(daemon, "_serve_owned", lambda *a, **k: True)
+    assert daemon.run_serve(port=54321) == daemon.EXIT_RESTART_ON_UPGRADE
+
+    monkeypatch.setattr(daemon, "_serve_owned", lambda *a, **k: False)
+    assert daemon.run_serve(port=54321) == 0

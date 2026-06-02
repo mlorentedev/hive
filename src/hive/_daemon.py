@@ -12,6 +12,10 @@ resilience/observability pillar (ADR-011 §4) lands in later slices.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import importlib
+import importlib.metadata as metadata
 import logging
 import os
 import secrets
@@ -26,6 +30,7 @@ import filelock
 from hive.config import settings
 
 if TYPE_CHECKING:
+    import uvicorn
     from fastmcp.server.auth import AuthProvider
 
 DEFAULT_HOST = "127.0.0.1"
@@ -33,6 +38,16 @@ MCP_PATH = "/mcp"
 TOKEN_FILENAME = "daemon.token"
 PORT_FILENAME = "daemon.port"
 LOCK_FILENAME = "daemon.lock"
+PACKAGE_NAME = "hive-vault"  # PyPI distribution name (the `hive` name was taken)
+NOT_FOUND = "<not-found>"  # _current_version sentinel for the upgrade swap window
+# EX_TEMPFAIL: a drift-triggered clean stop exits non-zero so a `Restart=on-failure`
+# supervisor relaunches into the new code (decline + signal stops exit 0 instead).
+EXIT_RESTART_ON_UPGRADE = 75
+# Bound the graceful-shutdown wait: MCP streamable-http holds connections open, so
+# an unbounded wait could hang the restart. The real in-flight drain is unreachable
+# anyway (the spike found the handler is cancelled), so idempotency + auto-reconnect
+# cover the cut call; this only caps how long we wait before letting serve() return.
+GRACEFUL_SHUTDOWN_S = 2
 
 _log = logging.getLogger(__name__)
 IS_WINDOWS = sys.platform == "win32"
@@ -178,15 +193,135 @@ def _startup_self_heal(vault: Path) -> None:
     _log.info("hive.daemon.self_heal cleared stale index.lock at %s", lock_path)
 
 
-def run_serve(host: str = DEFAULT_HOST, port: int = 0) -> None:
+# ── Restart-on-upgrade: drift detection + cooperative stop (ADR-011 §1) ──
+
+
+def _current_version(package: str = PACKAGE_NAME) -> str:
+    """The installed version of *package*, or ``NOT_FOUND`` if unreadable.
+
+    ``importlib.metadata`` reads the on-disk ``*.dist-info`` live, so a
+    long-lived process sees the NEW version the instant ``uv tool upgrade``
+    swaps it — no venv watching, stdlib only. ``invalidate_caches`` guards a
+    stale finder cache on coarse-mtime filesystems. The brief swap window (old
+    dist-info gone, new one not yet written) surfaces as ``PackageNotFoundError``
+    → the sentinel, which ``_upgrade_detected`` treats as "not drift".
+    """
+    try:
+        importlib.invalidate_caches()
+        return metadata.version(package)
+    except metadata.PackageNotFoundError:
+        return NOT_FOUND
+
+
+def _upgrade_detected(boot: str, current: str) -> bool:
+    """True iff the installed version drifted from the boot snapshot in a way
+    that warrants a supervised restart.
+
+    Contract (pinned by ``test_upgrade_detected_predicate``):
+    * A resolvable version DIFFERENT from ``boot`` is drift — an upgrade and a
+      rollback both ship code the running process is not executing.
+    * The ``NOT_FOUND`` sentinel (transient swap window, or never installed via
+      metadata) is NEVER drift — a momentary unreadable version must not bounce
+      a healthy daemon.
+    """
+    if NOT_FOUND in (boot, current):
+        return False
+    return current != boot
+
+
+async def _watch_for_upgrade(
+    uv_server: uvicorn.Server,
+    *,
+    boot: str,
+    poll_s: float,
+    package: str = PACKAGE_NAME,
+) -> bool:
+    """Poll the installed version; on drift, cooperatively stop *uv_server*.
+
+    Returns True iff an in-place upgrade triggered the stop. Setting
+    ``should_exit`` (vs sending a signal) lets uvicorn return from ``serve()``
+    cleanly — the spike proved a signal cuts the in-flight handler (rc -15). A
+    ``should_exit`` already set when we wake means an external stop
+    (``systemctl stop``) won the race → report 'not drift' so ``run_serve``
+    exits 0 and the supervisor does not restart a daemon asked to stop.
+    """
+    while not uv_server.should_exit:
+        await asyncio.sleep(poll_s)
+        if uv_server.should_exit:
+            return False
+        current = _current_version(package)
+        if _upgrade_detected(boot, current):
+            _log.warning(
+                "hive.daemon.upgrade.detected boot=%s installed=%s; "
+                "stopping for supervised restart",
+                boot,
+                current,
+            )
+            uv_server.should_exit = True
+            return True
+    return False
+
+
+async def _serve_until_drift_or_signal(uv_server: uvicorn.Server) -> bool:
+    """Run *uv_server* alongside a drift watcher; True iff an upgrade stopped it."""
+    watcher = asyncio.create_task(
+        _watch_for_upgrade(
+            uv_server, boot=_current_version(), poll_s=settings.upgrade_poll_s,
+        ),
+    )
+    try:
+        await uv_server.serve()
+    finally:
+        drifted = (
+            watcher.done()
+            and not watcher.cancelled()
+            and watcher.exception() is None
+            and bool(watcher.result())
+        )
+        watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watcher
+    return drifted
+
+
+def _serve_owned(host: str, port: int, token: str) -> bool:
+    """Own the ``uvicorn.Server`` so the drift watcher can clean-stop it.
+
+    Built from the PUBLIC ``mcp.http_app()`` (the spike-validated seam) rather
+    than ``mcp.run(transport="http")``, whose internal signal-only stop cuts
+    in-flight calls. uvicorn's default signal handlers stay installed so
+    ``systemctl stop`` (SIGTERM) still stops it gracefully. Returns True iff an
+    in-place upgrade caused the stop.
+    """
+    import uvicorn
+
+    from hive.server import create_server
+
+    server = create_server(auth=_token_verifier(token))
+    app = server.http_app(path=MCP_PATH, transport="http")
+    config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        lifespan="on",
+        log_level="warning",
+        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_S,
+    )
+    return asyncio.run(_serve_until_drift_or_signal(uvicorn.Server(config)))
+
+
+def run_serve(host: str = DEFAULT_HOST, port: int = 0) -> int:
     """Run hive as a single-owner daemon over loopback Streamable-HTTP + token.
 
     Generates a per-daemon token, publishes it (owner-only) and the chosen port
     to the state dir, then serves the real ``create_server()`` instance. A
     ``port`` of 0 picks a free loopback port.
-    """
-    from hive.server import create_server
 
+    Returns a process exit code: ``EXIT_RESTART_ON_UPGRADE`` when an in-place
+    package upgrade triggered a clean stop (so a ``Restart=on-failure``
+    supervisor relaunches into the new code), else ``0`` — a signal-driven stop
+    (``systemctl stop``) or a singleton-decline no-op.
+    """
     # Single-owner guard (ADR-011 §1). A second daemon — even on a different
     # auto-port — collides here and declines cleanly rather than double-owning
     # the SQLite DBs + git tree. Exit 0 keeps a no-op start from looping under
@@ -201,7 +336,7 @@ def run_serve(host: str = DEFAULT_HOST, port: int = 0) -> None:
             "hive: another daemon already owns this state dir; declining to start",
             file=sys.stderr,
         )
-        return
+        return 0
 
     try:
         # Single ownership is now proven, so clearing a prior crash's stale
@@ -219,10 +354,7 @@ def run_serve(host: str = DEFAULT_HOST, port: int = 0) -> None:
         write_owner_only(token_file_path(), token)
         write_owner_only(port_file_path(), str(resolved_port))
 
-        server = create_server(auth=_token_verifier(token))
-        server.run(
-            transport="http", host=host, port=resolved_port,
-            path=MCP_PATH, show_banner=False,
-        )
+        drifted = _serve_owned(host, resolved_port, token)
+        return EXIT_RESTART_ON_UPGRADE if drifted else 0
     finally:
         singleton.release()

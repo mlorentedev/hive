@@ -64,6 +64,10 @@ class HiveSettings(BaseSettings):
     # thread to escape ``_filelock_with_telemetry``'s ``__exit__`` naturally
     # on the happy path. Default 5.0s matches HIVE_OUTBOX_TICK_S for symmetry.
     post_kill_drain_s: float = Field(default=5.0, ge=0.5, le=30.0)
+    # HIVE-118 / ADR-011: how often the daemon polls its own installed package
+    # version to detect an in-place upgrade (`uv tool upgrade`). On drift it
+    # clean-stops and exits non-zero so the supervisor restarts into new code.
+    upgrade_poll_s: float = Field(default=30.0, gt=0.0, le=3600.0)
 
     @field_validator("vault_scopes")
     @classmethod
