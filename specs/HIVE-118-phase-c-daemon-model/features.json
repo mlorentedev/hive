@@ -48,9 +48,9 @@
       "id": "write-idempotency",
       "ac": "Write idempotency across reconnect/fallback (ADR-011 §6.2)",
       "behavior": "A vault_write/patch carries an idempotency key; a retried key is a no-op (at-most-once), safe for append mode, including under concurrency.",
-      "verification": "uv run python specs/HIVE-118-phase-c-daemon-model/spike/idempotency_spike.py",
-      "state": "spiked",
-      "evidence": "idempotency_spike 3/3 on Linux AND Windows (2026-05-31), incl. 12 concurrent duplicates -> one row. Real impl wires the key through the tool envelope + a shared applied-key store."
+      "verification": "uv run pytest tests/test_idempotency.py",
+      "state": "planned",
+      "evidence": "Slice 2 / ADR-013 (2026-06-02): src/hive/_idempotency.py IdempotencyStore(_SqliteTracker) with is_applied (check) + claim (record) + release (pruning primitive). vault_write + vault_patch gain idempotency_key (empty default = backward compatible); the owner checks is_applied at the top of the write critical section (before retry-sensitive validation), then records the key AFTER the disk write succeeds, so a retried key short-circuits to a no-op. 5 tests in tests/test_idempotency.py: repeated key append no-op, distinct keys both apply, empty key at-least-once, patch retry no-op, 16-thread concurrent claim -> one winner. Spike-proven cross-OS 3/3 (idempotency_spike.py). make check green locally. Awaiting harness pass-state."
     },
     {
       "id": "liveness-readiness-probe",
