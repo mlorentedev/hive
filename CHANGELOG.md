@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.29.0](https://github.com/mlorentedev/hive/compare/v1.28.0...v1.29.0) (2026-06-02)
+
+
+### Features
+
+* at-most-once write idempotency via idempotency_key (HIVE-118) ([#184](https://github.com/mlorentedev/hive/issues/184)) ([328cdeb](https://github.com/mlorentedev/hive/commit/328cdebc494fa9258dfe7fe3a35ac10527095022))
+
+## [1.28.0](https://github.com/mlorentedev/hive/compare/v1.27.0...v1.28.0) (2026-06-02)
+
+
+### Features
+
+* daemon startup self-heal + single-owner lock (HIVE-118) ([#181](https://github.com/mlorentedev/hive/issues/181)) ([a4be2d7](https://github.com/mlorentedev/hive/commit/a4be2d7adfbf7e25bba16111883309081527b577))
+
 ## [1.27.0](https://github.com/mlorentedev/hive/compare/v1.26.1...v1.27.0) (2026-06-01)
 
 

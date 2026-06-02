@@ -32,6 +32,7 @@ from hive._helpers import (  # noqa: E402
     _truncate,
     register_lock_eviction_tracker,
 )
+from hive._idempotency import IdempotencyStore  # noqa: E402
 from hive._lesson_reinforcement import LessonReinforcementTracker  # noqa: E402
 from hive._lock_eviction import LockEvictionTracker  # noqa: E402
 from hive._metrics import METRICS  # noqa: E402
@@ -104,6 +105,7 @@ def create_server(
     relevance_tracker: RelevanceTracker | None = None,
     lesson_tracker: LessonReinforcementTracker | None = None,
     lock_eviction_tracker: LockEvictionTracker | None = None,
+    idempotency_store: IdempotencyStore | None = None,
     auth: AuthProvider | None = None,
 ) -> FastMCP:
     """Create and configure the Hive MCP server.
@@ -147,6 +149,9 @@ def create_server(
             _Path(settings.db_path).parent / "lock_evictions.db",
         ),
     )
+    idempotency = idempotency_store or IdempotencyStore(
+        db_path=str(_Path(settings.db_path).parent / "idempotency.db"),
+    )
 
     # Clean stale 0-byte WAL files on startup.
     _clean_stale_wal_files(_Path(settings.db_path).parent)
@@ -161,6 +166,7 @@ def create_server(
         relevance=relevance,
         lessons=lessons,
         lock_eviction=lock_eviction,
+        idempotency=idempotency,
         stale_days=settings.stale_threshold_days,
         openrouter_budget=settings.openrouter_budget,
         openrouter_paid_model=settings.openrouter_paid_model,

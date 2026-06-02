@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from hive._idempotency import IdempotencyStore
     from hive._lesson_reinforcement import LessonReinforcementTracker
     from hive._lock_eviction import LockEvictionTracker
     from hive.budget import BudgetTracker
@@ -29,6 +30,7 @@ class ServerContext:
     relevance: RelevanceTracker
     lessons: LessonReinforcementTracker
     lock_eviction: LockEvictionTracker
+    idempotency: IdempotencyStore
     stale_days: int
     openrouter_budget: float
     openrouter_paid_model: str
@@ -43,3 +45,4 @@ class ServerContext:
         self.relevance.close()
         self.lessons.close()
         self.lock_eviction.close()
+        self.idempotency.close()
