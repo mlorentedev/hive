@@ -1,25 +1,31 @@
 """``hive client`` — the thin stdio shim Claude Code spawns (HIVE-118 / ADR-011).
 
 Claude Code keeps its v1 stdio MCP contract (``~/.claude.json`` unchanged): it
-spawns this shim over stdio exactly as it spawns ``hive`` today. The shim then
-chooses a backend at startup:
+spawns this shim over stdio exactly as it spawns ``hive`` today. The shim runs
+in one of two modes:
 
 * **daemon mode** — a single-owner ``hive serve`` daemon is reachable on its
   published loopback port. The shim becomes a transparent FastMCP *proxy* that
   forwards every request to the daemon over the token-gated Streamable-HTTP
   transport (ADR-011 §2). One daemon owns SQLite + git; N shims proxy into it.
   The shim re-implements no tools — it forwards the protocol, so the daemon is
-  the single source of truth for the tool surface.
+  the single source of truth for the tool surface. Crucially the proxy resolves
+  its backend through a reconnecting factory on *every* forwarded call, so a
+  daemon that dies and is restarted on a new port + token is followed without
+  restarting the shim (closes M1 — the one-shot startup decision could never
+  survive the daemon's death).
 * **fallback mode** — no daemon is reachable (none started, or a crashed daemon
   left stale state files behind a dead port). The shim serves
   ``create_server()`` in-process over stdio — exactly today's per-session
   behavior — so a daemon outage *degrades* rather than *breaks* hive (proposal
   item 4 / the "Transparent fallback" acceptance criterion).
 
-The chosen mode is logged once at startup as ``hive.client.mode=<mode> ...`` so
-an operator can confirm which path a session took. This is deliberately a log
-signal, not an MCP-visible flag: slice 2 must not change the tool surface (the
-richer cross-session ``hive status`` observability surface is a later slice).
+The active mode is logged as ``hive.client.mode=<mode> ...`` on the first call
+and on every transition, so an operator can confirm which path a session took
+and *see* a recovery (a new ``endpoint=`` port is a reconnect) without a line
+per forwarded call. This is deliberately a log signal, not an MCP-visible flag:
+the tool surface stays unchanged (the richer cross-session ``hive status``
+observability surface is a later slice).
 """
 
 from __future__ import annotations
@@ -27,8 +33,12 @@ from __future__ import annotations
 import contextlib
 import logging
 import socket
+from typing import TYPE_CHECKING, Any
 
 from hive._daemon import DEFAULT_HOST, MCP_PATH, port_file_path, token_file_path
+
+if TYPE_CHECKING:
+    from fastmcp import Client, FastMCP
 
 _log = logging.getLogger("hive")
 
@@ -84,30 +94,93 @@ def _serve_in_process() -> None:
     create_server().run()
 
 
-def _serve_proxy(host: str, port: int, token: str) -> None:
-    """Daemon mode: forward stdio MCP to the daemon over token-gated HTTP.
+def _remote_client(host: str, port: int, token: str) -> Client[Any]:
+    """A fresh proxy backend bound to the daemon's CURRENT port + token.
 
-    The backend transport is wrapped in a ``Client`` carrying a bounded
-    ``init_timeout`` so a daemon that accepts TCP but stalls the MCP handshake
-    (the gap the TCP probe cannot see) fails fast instead of hanging the
-    session. The per-request ``timeout`` is deliberately left unset: tool calls
-    such as ``delegate_task`` legitimately run for tens of seconds and the
-    daemon owns their deadline budget — capping it here would sever long calls.
-
-    ``create_proxy`` treats a disconnected ``Client`` as a per-request session
-    factory (``Client.new()``), which preserves ``init_timeout`` on every
-    forwarded call and keeps concurrent sessions isolated.
+    The transport carries a bounded ``init_timeout`` so a daemon that accepts
+    TCP but stalls the MCP handshake (the gap the TCP probe cannot see) fails
+    fast instead of hanging the session. The per-request ``timeout`` is
+    deliberately left unset: tool calls such as ``delegate_task`` legitimately
+    run for tens of seconds and the daemon owns their deadline budget — capping
+    it here would sever long calls.
     """
     from fastmcp import Client
     from fastmcp.client.transports import StreamableHttpTransport
-    from fastmcp.server import create_proxy
 
     transport = StreamableHttpTransport(
         f"http://{host}:{port}{MCP_PATH}",
         headers={"Authorization": f"Bearer {token}"},
     )
-    backend = Client(transport, init_timeout=_DAEMON_INIT_TIMEOUT_S)
-    create_proxy(backend).run()
+    return Client(transport, init_timeout=_DAEMON_INIT_TIMEOUT_S)
+
+
+class _ReconnectingBackend:
+    """Per-call backend selector for the stdio proxy (HIVE-118 slice 3, M1).
+
+    FastMCP's proxy calls this on EVERY forwarded operation
+    (``FastMCPProxy._get_client``), so re-reading the daemon's published
+    port + token here is the seam that follows a *restarted* daemon to its new
+    port and new token without restarting the shim — closing M1.
+
+    Routing prefers the daemon: while it is reachable every call is forwarded
+    to it, so the in-process fallback — itself a full git + SQLite owner — does
+    no writes and two owners never write concurrently (the single-owner
+    invariant holds at the routing layer). That fallback server is built lazily,
+    only the first time the daemon is found unreachable, and cached; a session
+    whose daemon stays healthy never creates a second owner at all. The narrow
+    up-transition race (a fallback write in flight as the daemon returns) is
+    covered by the idempotency key (slice 2) and ``.git/index.lock`` self-heal
+    (slice 1.2) — exactly the multi-owner defenses already shipped.
+    """
+
+    def __init__(self, host: str) -> None:
+        self._host = host
+        self._in_process: FastMCP | None = None
+        self._logged_mode = ""
+
+    def __call__(self) -> Client[Any]:
+        from fastmcp import Client
+
+        state = _read_state()
+        if state is not None and _daemon_reachable(self._host, state[0]):
+            port, token = state
+            self._log_mode(f"daemon endpoint={self._host}:{port}")
+            return _remote_client(self._host, port, token)
+        reason = "no_daemon_state" if state is None else "daemon_unreachable"
+        self._log_mode(f"fallback reason={reason}")
+        return Client(self._in_process_server())
+
+    def _in_process_server(self) -> FastMCP:
+        """Lazily build + cache the in-process server (today's fallback owner)."""
+        if self._in_process is None:
+            from hive.server import create_server
+
+            self._in_process = create_server()
+        return self._in_process
+
+    def _log_mode(self, mode: str) -> None:
+        """Log the active mode once and on every transition (incl. reconnect).
+
+        A steady session logs a single line; a flapping or restarted daemon
+        leaves one line per transition (a new ``endpoint=`` port marks a
+        reconnect), so recovery is visible without a line per forwarded call.
+        """
+        if mode != self._logged_mode:
+            _log.info("hive.client.mode=%s", mode)
+            self._logged_mode = mode
+
+
+def _serve_proxy(host: str) -> None:
+    """Daemon mode: forward stdio MCP to the daemon, reconnecting per call.
+
+    The proxy resolves its backend through ``_ReconnectingBackend`` on every
+    forwarded request, so a daemon that dies and restarts on a new port + token
+    is followed transparently (M1), and a daemon that dies without returning
+    degrades to the in-process server rather than erroring every call.
+    """
+    from fastmcp.server.providers.proxy import FastMCPProxy
+
+    FastMCPProxy(client_factory=_ReconnectingBackend(host)).run()
 
 
 def run_client(host: str = DEFAULT_HOST) -> None:
@@ -115,7 +188,11 @@ def run_client(host: str = DEFAULT_HOST) -> None:
 
     Decision order: no published state -> ``no_daemon_state`` fallback; state
     present but the port is dead -> ``daemon_unreachable`` fallback; otherwise
-    proxy to the daemon. The mode is logged once before the server loop starts.
+    engage the reconnecting proxy. A cold start with no daemon serves in-process
+    directly (today's behavior, unchanged). Once the proxy is engaged its
+    per-call factory owns the mode decision — following a restarted daemon and
+    degrading to in-process if it dies, recovering when it returns (M1). The
+    initial ``daemon`` mode is logged by the factory on its first forwarded call.
     """
     state = _read_state()
     if state is None:
@@ -123,11 +200,9 @@ def run_client(host: str = DEFAULT_HOST) -> None:
         _serve_in_process()
         return
 
-    port, token = state
-    if not _daemon_reachable(host, port):
+    if not _daemon_reachable(host, state[0]):
         _log.info("hive.client.mode=fallback reason=daemon_unreachable")
         _serve_in_process()
         return
 
-    _log.info("hive.client.mode=daemon endpoint=%s:%d", host, port)
-    _serve_proxy(host, port, token)
+    _serve_proxy(host)

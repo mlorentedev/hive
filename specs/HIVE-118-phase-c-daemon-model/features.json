@@ -29,6 +29,15 @@
       "evidence": "Implemented in slice 2 (src/hive/_client.py: `hive client` shim falls back to in-process create_server() when no live daemon is reachable). Tests green locally via `make check` (exit 0): test_client_falls_back_without_daemon (no state files) + test_client_falls_back_on_stale_state (dead port behind stale state). Degraded mode surfaced via the `hive.client.mode=fallback reason={no_daemon_state,daemon_unreachable}` startup log. Awaiting harness pass-state."
     },
     {
+      "id": "client-auto-reconnect",
+      "ac": "Client auto-reconnect (closes M1)",
+      "behavior": "A `hive client` proxying to a daemon that dies mid-session follows the daemon to a restarted instance on a NEW port + token without restarting the shim, and a write retried across that restart (same idempotency_key) is applied at-most-once. If the daemon dies without returning, the shim degrades to the in-process owner rather than erroring every call.",
+      "verification": "uv run pytest tests/test_daemon.py -k \"reconnects_to_restarted_daemon or degrades_in_process\"",
+      "state": "planned",
+      "evidence": "Slice 3 (2026-06-02): src/hive/_client.py _ReconnectingBackend is the proxy's client_factory; FastMCP calls it on every forwarded operation (FastMCPProxy._get_client), so re-reading the published port+token per call follows a restarted daemon (the seam spike-proven 3/3 cross-OS by spike/reconnect_spike.py, #186). Prefer-daemon routing preserves the single-owner invariant: while the daemon is reachable every call is forwarded to it, so the in-process fallback (a full git+SQLite owner) does no writes; it is built lazily only on first unreachability and cached. Two TDD tests: test_client_reconnects_to_restarted_daemon_without_duplicate_write (A dies → B restarts on a new port+token → shim follows; a retried idempotency_key write is deduped across the restart via the shared idempotency.db) + test_client_degrades_in_process_when_daemon_dies_mid_session (daemon gone → in-process degrade + logged daemon->fallback transition). Composes with slice 1.2 (killed A frees the singleton flock → B reacquires + self-heals) and slice 2 (idempotency makes the retry the auto-reconnect enables safe). make check green locally. Awaiting harness pass-state.",
+      "supports": "supervised-recovery"
+    },
+    {
       "id": "transport-cross-os",
       "ac": "Cross-OS transport validated",
       "behavior": "Loopback Streamable-HTTP + per-daemon bearer token round-trips a tools/call and rejects missing/wrong tokens (401) on Linux AND Windows.",
