@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.0](https://github.com/mlorentedev/hive/compare/v1.30.0...v1.31.0) (2026-06-02)
+
+
+### Features
+
+* restart-on-upgrade via owned uvicorn + version-drift poll (HIVE-118) ([#190](https://github.com/mlorentedev/hive/issues/190)) ([1e3b0ce](https://github.com/mlorentedev/hive/commit/1e3b0ce7de79290771cfc9b37806d6087bd81dd4))
+
 ## [1.30.0](https://github.com/mlorentedev/hive/compare/v1.29.0...v1.30.0) (2026-06-02)
 
 
