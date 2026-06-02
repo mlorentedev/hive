@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.30.0](https://github.com/mlorentedev/hive/compare/v1.29.0...v1.30.0) (2026-06-02)
+
+
+### Features
+
+* client auto-reconnect to a restarted daemon (HIVE-118) ([#187](https://github.com/mlorentedev/hive/issues/187)) ([cbe0b68](https://github.com/mlorentedev/hive/commit/cbe0b68dd5cf5c8f326ba5fb95ad3a5477fec859))
+
 ## [1.29.0](https://github.com/mlorentedev/hive/compare/v1.28.0...v1.29.0) (2026-06-02)
 
 
