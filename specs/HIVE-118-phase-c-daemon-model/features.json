@@ -62,6 +62,15 @@
       "supports": "supervised-recovery"
     },
     {
+      "id": "startup-self-heal",
+      "ac": "Startup self-heal + single-owner guard",
+      "behavior": "On startup the daemon acquires a singleton advisory lock on <state_dir>/daemon.lock; a second `hive serve` -- even on a different auto-port -- declines cleanly (exit 0) instead of double-owning the SQLite DBs + git tree. Holding that lock proves single ownership, so the daemon then clears a stale `.git/index.lock` left by a prior unclean exit (a lock naming a live PID is spared), letting writes commit again.",
+      "verification": "uv run pytest tests/test_daemon.py -k \"self_heals_stale_index_lock or declines_when_state_owned\"",
+      "state": "planned",
+      "evidence": "Slice 1.2 (2026-06-01): src/hive/_daemon.py _acquire_singleton_lock (filelock, non-blocking timeout=0, kernel-released on crash so a supervised restart re-acquires) + _startup_self_heal (clears a stale .git/index.lock under the proven single-owner invariant; _index_lock_is_live spares a live external committer). Closes the auto-port single-owner gap (_free_port lets two daemons bind different ports). Two TDD tests green locally via make check (661 passed, mypy --strict + ruff clean): a planted dead-PID index.lock is cleared and the next write commits; a second daemon on a different port declines exit 0 without binding. Awaiting harness pass-state.",
+      "supports": "supervised-recovery"
+    },
+    {
       "id": "supervised-recovery",
       "ac": "Supervised recovery",
       "behavior": "Killing the daemon (SIGKILL) triggers supervisor auto-restart; durable state (SQLite + git) is intact, and in-flight clients reconnect or fall back.",
