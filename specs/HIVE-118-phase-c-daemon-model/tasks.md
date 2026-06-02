@@ -43,7 +43,8 @@ created: "2026-05-29"
 - [ ] **Resilience:** structured single-daemon logging with `correlation_id` + `session_id` (replace per-PID logs)
 - [x] **Resilience:** liveness + readiness probes — unauthenticated `GET /health` → 200 `{status, ready, version, uptime_s}` (liveness=200, readiness=`ready` via vault resolvability); metrics/budget stay token-gated on `/status`. The contract the supervised unit, restart-on-upgrade wait, and the client reconnect probe consume. (2026-05-31, slice 1.1)
 - [ ] **DR:** write failing test — `SIGKILL` under load -> supervisor restart, durable state (SQLite+git) intact, clients reconnect/fallback
-- [ ] **DR:** startup self-heal (clear own stale locks/zombie state from prior unclean exit) + restart-on-upgrade drain/swap
+- [x] **DR:** startup self-heal — singleton `daemon.lock` flock (closes the auto-port single-owner gap: two `hive serve` on different free ports collide on one advisory lock; the loser declines cleanly, exit 0) + clear a stale `.git/index.lock` from a prior unclean exit, safe under the now-proven single-owner invariant. A live-PID lock is spared; 0-byte WAL is handled by `_clean_stale_wal_files`, non-empty WAL untouched. (2026-06-01, `feat/daemon-startup-self-heal`)
+- [ ] **DR:** restart-on-upgrade drain/swap (waits for `/health` ready before swapping; the supervised-restart half of this slice)
 - [ ] **Post-mortem:** in-memory black-box ring buffer of last-N requests + lock events
 - [ ] **Post-mortem:** write failing test — abnormal exit flushes a crash artifact with required fields AND no secrets/API keys
 - [ ] **Post-mortem:** `hive status --verbose` / debug endpoint dumps live state (active requests, lock holders, queue depths) from a running daemon

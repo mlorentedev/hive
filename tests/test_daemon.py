@@ -420,6 +420,98 @@ def test_health_probe_is_unauthenticated_and_reports_ready(
             daemon.kill()
 
 
+def test_daemon_self_heals_stale_index_lock(
+    daemon_env: tuple[dict[str, str], Path],
+) -> None:
+    """A prior daemon crashed mid-commit, leaving a stale `.git/index.lock`
+    owned by a now-dead PID. On startup — holding the singleton `daemon.lock`,
+    so single ownership is proven — the daemon clears the stale lock, and a
+    subsequent vault_write COMMITS normally instead of silently failing on a
+    lock git will never release on its own (the write succeeds to disk either
+    way; the discriminator is whether the commit lands)."""
+    env, state_dir = daemon_env
+    vault = state_dir / "vault"
+    _seed_demo_project(vault)
+    _git_init_vault(vault)
+
+    # A crashed prior daemon's lock: an implausible, certainly-dead PID.
+    stale_lock = vault / ".git" / "index.lock"
+    stale_lock.write_text("999999\n", encoding="utf-8")
+
+    port = _free_port()
+    daemon = _spawn_daemon(env, port)
+    try:
+        assert _wait_ready(port), "daemon did not bind its loopback port"
+
+        done = asyncio.run(_client_appends(env, ["HEAL-MARKER"]))
+        assert done == 1, "vault_write did not complete"
+
+        assert not stale_lock.exists(), (
+            "startup self-heal did not clear the stale .git/index.lock"
+        )
+        # The write committed: git log grew past `init`. If the stale lock had
+        # survived, the daemon's best-effort commit would have failed silently
+        # and the log would still be a single `init` commit.
+        log = subprocess.run(
+            ["git", "log", "--oneline"],
+            cwd=vault, capture_output=True, text=True, check=True,
+        ).stdout
+        assert len(log.splitlines()) >= 2, f"write did not commit: {log!r}"
+        content = (vault / "10_projects" / "demo" / "00-context.md").read_text(
+            encoding="utf-8",
+        )
+        assert "HEAL-MARKER" in content
+    finally:
+        daemon.terminate()
+        try:
+            daemon.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            daemon.kill()
+
+
+def test_second_daemon_declines_when_state_owned(
+    daemon_env: tuple[dict[str, str], Path],
+) -> None:
+    """Two `hive serve` invocations with auto-port bind DIFFERENT free ports, so
+    the OS port-in-use guard never fires — both would end up owning the same
+    SQLite DBs + git tree (a single-owner violation, ADR-011 §1). A singleton
+    flock on `daemon.lock` closes the gap: the second daemon, even on a
+    different port, finds the state dir already owned and declines cleanly
+    (exit 0) without binding a second port.
+
+    Explicit distinct ports stand in deterministically for the `_free_port()`
+    race the auto-port path would produce.
+    """
+    env, state_dir = daemon_env
+    (state_dir / "vault" / "10_projects").mkdir(parents=True, exist_ok=True)
+
+    port_a = _free_port()
+    daemon_a = _spawn_daemon(env, port_a)
+    daemon_b: subprocess.Popen[bytes] | None = None
+    try:
+        assert _wait_ready(port_a), "first daemon did not bind its loopback port"
+
+        port_b = _free_port()
+        assert port_b != port_a, "test setup: ports must differ"
+        daemon_b = _spawn_daemon(env, port_b)
+
+        # The second daemon must decline promptly, not run forever.
+        rc = daemon_b.wait(timeout=15)
+        assert rc == 0, f"second daemon did not decline cleanly: rc={rc}"
+        assert not _wait_ready(port_b, deadline_s=2.0), (
+            "second daemon bound a port despite the singleton lock"
+        )
+    finally:
+        for d in (daemon_a, daemon_b):
+            if d is None:
+                continue
+            d.terminate()
+            try:
+                d.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                d.kill()
+
+
 def test_status_aggregates_across_sessions(
     daemon_env: tuple[dict[str, str], Path],
 ) -> None:
