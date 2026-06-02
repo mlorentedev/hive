@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.0](https://github.com/mlorentedev/hive/compare/v1.28.0...v1.29.0) (2026-06-02)
+
+
+### Features
+
+* at-most-once write idempotency via idempotency_key (HIVE-118) ([#184](https://github.com/mlorentedev/hive/issues/184)) ([328cdeb](https://github.com/mlorentedev/hive/commit/328cdebc494fa9258dfe7fe3a35ac10527095022))
+
 ## [1.28.0](https://github.com/mlorentedev/hive/compare/v1.27.0...v1.28.0) (2026-06-02)
 
 
