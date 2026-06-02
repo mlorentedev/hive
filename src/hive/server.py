@@ -568,8 +568,12 @@ def _setup_file_logging() -> None:
         logger.setLevel(level)
 
 
-def _run_serve(argv: list[str]) -> None:
-    """``hive serve`` — run the Phase C single-owner daemon (ADR-011)."""
+def _run_serve(argv: list[str]) -> int:
+    """``hive serve`` — run the Phase C single-owner daemon (ADR-011).
+
+    Returns the daemon's exit code (``EXIT_RESTART_ON_UPGRADE`` on a clean
+    restart-on-upgrade stop, else 0) for the supervisor.
+    """
     import argparse
 
     from hive._daemon import DEFAULT_HOST, run_serve
@@ -578,7 +582,7 @@ def _run_serve(argv: list[str]) -> None:
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=0, help="0 = pick a free port")
     opts = parser.parse_args(argv)
-    run_serve(host=opts.host, port=opts.port)
+    return run_serve(host=opts.host, port=opts.port)
 
 
 def _run_client(argv: list[str]) -> None:
@@ -609,11 +613,15 @@ def main() -> None:
     argv = sys.argv[1:]
     try:
         if argv and argv[0] == "serve":
-            _run_serve(argv[1:])
-        elif argv and argv[0] == "client":
+            raise SystemExit(_run_serve(argv[1:]))
+        if argv and argv[0] == "client":
             _run_client(argv[1:])
         else:
             create_server().run()
+    except SystemExit:
+        # Clean exit-code propagation (e.g. restart-on-upgrade = 75). Not a
+        # crash, so it must not be logged at CRITICAL nor swallowed.
+        raise
     except BaseException as exc:
         _log.critical("hive server exiting: %r", exc, exc_info=True)
         raise

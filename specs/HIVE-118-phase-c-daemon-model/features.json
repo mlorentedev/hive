@@ -80,6 +80,14 @@
       "supports": "supervised-recovery"
     },
     {
+      "id": "restart-on-upgrade",
+      "ac": "Restart-on-upgrade: daemon adopts a new installed version via supervised restart (ADR-011 §1)",
+      "behavior": "A long-lived `hive serve` polls its own installed version (`importlib.metadata.version(\"hive-vault\")`) every `HIVE_UPGRADE_POLL_S`; when an in-place `uv tool upgrade` swaps the on-disk dist-info, it cooperatively stops (owned `uvicorn.Server.should_exit`) and exits 75 (EX_TEMPFAIL) so a `Restart=on-failure` supervisor relaunches into the new code. A signal stop (`systemctl stop`) or a singleton-decline exits 0 (no restart).",
+      "verification": "uv run pytest tests/test_daemon.py -k 'upgrade or watch_for_upgrade or maps_drift'",
+      "state": "planned",
+      "evidence": "Implemented on feat/restart-on-upgrade (2026-06-02). run_serve now owns the uvicorn.Server via the public mcp.http_app() instead of mcp.run(transport='http'); new _daemon.py fns _current_version/_upgrade_detected/_watch_for_upgrade/_serve_until_drift_or_signal/_serve_owned; consts EXIT_RESTART_ON_UPGRADE=75 + GRACEFUL_SHUTDOWN_S=2; new HIVE_UPGRADE_POLL_S (default 30s). Clean-stop only: the in-flight drain is unreachable (streamable-http cancels the active handler), so cut-call safety rests on idempotency (slice 2) + auto-reconnect (slice 3). 8 unit tests green (predicate incl. rollback=drift and <not-found>=not-drift, watcher drift/external-stop, exit-code map); spike/upgrade_spike.py 2/2 is the e2e evidence. make check green (676 passed, 2 skipped; mypy --strict + ruff clean). Awaiting harness pass-state."
+    },
+    {
       "id": "supervised-recovery",
       "ac": "Supervised recovery",
       "behavior": "Killing the daemon (SIGKILL) triggers supervisor auto-restart; durable state (SQLite + git) is intact, and in-flight clients reconnect or fall back.",
