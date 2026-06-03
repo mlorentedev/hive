@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.32.0](https://github.com/mlorentedev/hive/compare/v1.31.0...v1.32.0) (2026-06-03)
+
+
+### Features
+
+* hive service install/uninstall/status for per-user supervision (HIVE-118) ([#192](https://github.com/mlorentedev/hive/issues/192)) ([6a169c4](https://github.com/mlorentedev/hive/commit/6a169c4d87b4a34877cb256b667cc33e346a2ed9))
+
 ## [1.31.0](https://github.com/mlorentedev/hive/compare/v1.30.0...v1.31.0) (2026-06-02)
 
 
