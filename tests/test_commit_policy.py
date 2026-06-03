@@ -254,6 +254,25 @@ class TestVaultHealthExternalCommitter:
         assert "external_committer" in result
         assert "obsidian-git" in result
 
+    async def test_health_warns_about_commit_race(
+        self,
+        git_vault: Path,
+    ) -> None:
+        """An ON obsidian-git auto-commit timer races Hive's semantic commits to
+        vault master (#174 / adr-014). vault_health must flag the racy config and
+        name the concrete fix so it is visible, not silently tolerated."""
+        plugin_dir = git_vault / ".obsidian" / "plugins" / "obsidian-git"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "data.json").write_text(
+            json.dumps({"commitInterval": 10}),
+            encoding="utf-8",
+        )
+        mcp = create_server(vault_path=git_vault)
+        result = _text(await mcp.call_tool("vault_health", {}))
+        assert "warning" in result.lower()
+        assert "race" in result.lower()
+        assert "autoSaveInterval" in result  # the concrete fix is named
+
     async def test_health_omits_external_committer_when_absent(
         self,
         git_vault: Path,

@@ -267,6 +267,12 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
             "and `vault_patch(commit=False)` are safe; the plugin will "
             "auto-commit on its interval."
         )
+        lines.append(
+            "- warning: obsidian-git's auto-commit timer races Hive's semantic "
+            "commits to vault master (merge commits, rejected pushes — #174). "
+            "Set autoSaveInterval=0 + syncMethod=rebase so Hive stays the single "
+            "deliberate committer (see docs/adr/adr-014)."
+        )
         lines.append("")
 
     # ── Ghost-response counter (HIVE-104 Fase C + HIVE-115 PR-3 source) ──
