@@ -23,13 +23,16 @@ def tracker(tmp_path: Path) -> LockEvictionTracker:
 
 class TestLockEvictionTracker:
     def test_empty_tracker_returns_zero(
-        self, tracker: LockEvictionTracker,
+        self,
+        tracker: LockEvictionTracker,
     ) -> None:
         assert tracker.count_last_30d() == 0
         assert tracker.last_iso() is None
 
     def test_record_then_count(
-        self, tracker: LockEvictionTracker, tmp_path: Path,
+        self,
+        tracker: LockEvictionTracker,
+        tmp_path: Path,
     ) -> None:
         tracker.record(tmp_path, killed_pids=[111, 222])
         assert tracker.count_last_30d() == 1
@@ -39,22 +42,25 @@ class TestLockEvictionTracker:
         assert last.endswith("+00:00") or last.endswith("Z")
 
     def test_multiple_records_ordered(
-        self, tracker: LockEvictionTracker, tmp_path: Path,
+        self,
+        tracker: LockEvictionTracker,
+        tmp_path: Path,
     ) -> None:
         for i in range(5):
             tracker.record(tmp_path, killed_pids=[1000 + i])
         assert tracker.count_last_30d() == 5
 
     def test_old_events_excluded_from_30d_count(
-        self, tracker: LockEvictionTracker, tmp_path: Path,
+        self,
+        tracker: LockEvictionTracker,
+        tmp_path: Path,
     ) -> None:
         """Manually insert a row dated 40 days ago; not in 30d window."""
-        old_ts = (
-            _dt.datetime.now(_dt.UTC) - _dt.timedelta(days=40)
-        ).isoformat(timespec="microseconds")
+        old_ts = (_dt.datetime.now(_dt.UTC) - _dt.timedelta(days=40)).isoformat(
+            timespec="microseconds"
+        )
         tracker._conn.execute(
-            "INSERT INTO lock_evictions "
-            "(iso_ts, vault_path, killed_pids_json) VALUES (?, ?, ?)",
+            "INSERT INTO lock_evictions (iso_ts, vault_path, killed_pids_json) VALUES (?, ?, ?)",
             (old_ts, str(tmp_path), "[]"),
         )
         tracker._conn.commit()

@@ -178,13 +178,15 @@ def _cleanup_index_lock(vault: Path, our_pids: list[int]) -> None:
         # Lock file present but unparseable PID — never touch.
         _log.debug(
             "index.lock at %s has unparseable owner %r; leaving in place",
-            lock_path, contents,
+            lock_path,
+            contents,
         )
         return
     if owner not in our_pids:
         _log.info(
             "mcp.index_lock.skip_cleanup owner_pid=%s our_pids=%s",
-            owner, our_pids,
+            owner,
+            our_pids,
         )
         return
     try:
@@ -249,7 +251,10 @@ async def bounded_call[T](
         _log.warning(
             "mcp.bounded_call.deadline_exceeded tool=%s elapsed_s=%.1f "
             "deadline_s=%.1f killed_pids=%s",
-            tool_name or "<unknown>", elapsed, deadline_s, killed,
+            tool_name or "<unknown>",
+            elapsed,
+            deadline_s,
+            killed,
         )
         # HIVE-116 AC-1: cooperative filelock eviction. Mirrors the
         # ``tool_span`` branch; both supervisors share the eviction
@@ -260,7 +265,8 @@ async def bounded_call[T](
             from hive._helpers import _drain_and_evict
 
             await _drain_and_evict(
-                vault_for_index_cleanup, killed,
+                vault_for_index_cleanup,
+                killed,
                 tool_name or "<unknown>",
             )
         raise TimeoutError(

@@ -33,12 +33,7 @@ def _text(result: ToolResult) -> str:
 
 
 _LESSONS_HEADER = (
-    "---\n"
-    "id: testproject-lessons\n"
-    "type: lesson\n"
-    "status: active\n"
-    "---\n\n"
-    "# Test: Lessons\n\n"
+    "---\nid: testproject-lessons\ntype: lesson\nstatus: active\n---\n\n# Test: Lessons\n\n"
 )
 
 
@@ -56,8 +51,7 @@ def _git_init_commit(vault: Path, msg: str = "init") -> None:
 def _seed_three_lessons(project_dir: Path) -> None:
     project_dir.mkdir(parents=True)
     (project_dir / "00-context.md").write_text(
-        "---\nid: testproject\ntype: project\nstatus: active\n---\n\n"
-        "# Test\n\nOverview.\n",
+        "---\nid: testproject\ntype: project\nstatus: active\n---\n\n# Test\n\nOverview.\n",
     )
     (project_dir / "90-lessons.md").write_text(
         _LESSONS_HEADER
@@ -93,7 +87,8 @@ def e2e_mcp(
     lesson_tracker: LessonReinforcementTracker,
 ) -> Generator[FastMCP, None, None]:
     mcp = create_server(
-        vault_path=e2e_vault, lesson_tracker=lesson_tracker,
+        vault_path=e2e_vault,
+        lesson_tracker=lesson_tracker,
     )
     yield mcp
     ctx = getattr(mcp, "_hive_ctx", None)
@@ -130,13 +125,16 @@ class TestE2ECaptureThenSearchRanked:
         )
         # Direct verification on tracker state.
         alpha = lesson_tracker.get(
-            "testproject", "[2026-01-01] alpha bug fix",
+            "testproject",
+            "[2026-01-01] alpha bug fix",
         )
         beta = lesson_tracker.get(
-            "testproject", "[2026-01-02] beta refactor",
+            "testproject",
+            "[2026-01-02] beta refactor",
         )
         gamma = lesson_tracker.get(
-            "testproject", "[2026-01-03] gamma docs",
+            "testproject",
+            "[2026-01-03] gamma docs",
         )
         assert alpha is not None
         assert beta is not None
@@ -148,10 +146,12 @@ class TestE2ECaptureThenSearchRanked:
         assert gamma["reinforcements"] == 1
 
         # Now verify the ranked search response surfaces alpha first.
-        result = _text(await e2e_mcp.call_tool(
-            "vault_search",
-            {"query": "Context", "rank_by": "reinforcements"},
-        ))
+        result = _text(
+            await e2e_mcp.call_tool(
+                "vault_search",
+                {"query": "Context", "rank_by": "reinforcements"},
+            )
+        )
         alpha_pos = result.find("alpha bug fix")
         beta_pos = result.find("beta refactor")
         gamma_pos = result.find("gamma docs")
@@ -171,31 +171,38 @@ class TestE2ECaptureLessonFindMode:
         e2e_mcp: FastMCP,
         lesson_tracker: LessonReinforcementTracker,
     ) -> None:
-        result = _text(await e2e_mcp.call_tool(
-            "capture_lesson",
-            {"project": "testproject", "find": "alpha"},
-        ))
+        result = _text(
+            await e2e_mcp.call_tool(
+                "capture_lesson",
+                {"project": "testproject", "find": "alpha"},
+            )
+        )
         # Response surfaces the matching lesson.
         assert "alpha bug fix" in result
         # The matching lesson got incremented.
         alpha = lesson_tracker.get(
-            "testproject", "[2026-01-01] alpha bug fix",
+            "testproject",
+            "[2026-01-01] alpha bug fix",
         )
         assert alpha is not None
         assert alpha["reinforcements"] == 1
         # Non-matching lessons untouched.
         beta = lesson_tracker.get(
-            "testproject", "[2026-01-02] beta refactor",
+            "testproject",
+            "[2026-01-02] beta refactor",
         )
         assert beta is None
 
     async def test_find_mode_no_matches_returns_clear_message(
-        self, e2e_mcp: FastMCP,
+        self,
+        e2e_mcp: FastMCP,
     ) -> None:
-        result = _text(await e2e_mcp.call_tool(
-            "capture_lesson",
-            {"project": "testproject", "find": "nonexistent-xyz"},
-        ))
+        result = _text(
+            await e2e_mcp.call_tool(
+                "capture_lesson",
+                {"project": "testproject", "find": "nonexistent-xyz"},
+            )
+        )
         lower = result.lower()
         assert "no" in lower and "lesson" in lower
 
@@ -226,10 +233,12 @@ class TestE2EReadThenRank:
             assert row is not None
             assert row["reinforcements"] == 1
         # Now rank_by search finds them (body content lookup).
-        result = _text(await e2e_mcp.call_tool(
-            "vault_search",
-            {"query": "Context", "rank_by": "reinforcements"},
-        ))
+        result = _text(
+            await e2e_mcp.call_tool(
+                "vault_search",
+                {"query": "Context", "rank_by": "reinforcements"},
+            )
+        )
         assert "alpha" in result or "beta" in result or "gamma" in result
 
 
@@ -246,7 +255,8 @@ class TestE2EBackCompat:
         identical regardless of tracker state. Stronger than T2.5 — checks
         every search variant (filter, regex, plain)."""
         mcp1 = create_server(
-            vault_path=e2e_vault, lesson_tracker=lesson_tracker,
+            vault_path=e2e_vault,
+            lesson_tracker=lesson_tracker,
         )
         try:
             queries = [
@@ -254,10 +264,7 @@ class TestE2EBackCompat:
                 {"query": "alpha"},
                 {"query": "context", "type_filter": "project"},
             ]
-            golden = [
-                _text(await mcp1.call_tool("vault_search", q))
-                for q in queries
-            ]
+            golden = [_text(await mcp1.call_tool("vault_search", q)) for q in queries]
         finally:
             ctx = getattr(mcp1, "_hive_ctx", None)
             if ctx is not None:
@@ -269,20 +276,20 @@ class TestE2EBackCompat:
         lesson_tracker.ensure("testproject", "[2026-01-01] alpha bug fix")
         for _ in range(10):
             lesson_tracker.increment(
-                "testproject", "[2026-01-01] alpha bug fix",
+                "testproject",
+                "[2026-01-01] alpha bug fix",
             )
 
         # Re-run with the SAME tracker and a fresh server. Default outputs
         # must match byte-for-byte.
         mcp2 = create_server(
-            vault_path=e2e_vault, lesson_tracker=lesson_tracker,
+            vault_path=e2e_vault,
+            lesson_tracker=lesson_tracker,
         )
         try:
             for i, q in enumerate(queries):
                 replay = _text(await mcp2.call_tool("vault_search", q))
-                assert replay == golden[i], (
-                    f"default vault_search query {q} drifted between runs"
-                )
+                assert replay == golden[i], f"default vault_search query {q} drifted between runs"
         finally:
             ctx = getattr(mcp2, "_hive_ctx", None)
             if ctx is not None:
@@ -295,7 +302,10 @@ class TestE2EBackCompat:
 
 
 def _subprocess_increment_target(
-    db_path: str, project: str, heading: str, n: int,
+    db_path: str,
+    project: str,
+    heading: str,
+    n: int,
 ) -> None:
     """Target for multiprocessing.Process — opens its OWN tracker over
     the same on-disk SQLite file and increments N times. Validates the
@@ -346,8 +356,7 @@ class TestE2ECrossProcessIncrement:
             row = verifier.get(project, heading)
             assert row is not None
             assert row["reinforcements"] == 10, (
-                f"expected 10 cumulative increments across 2 processes, "
-                f"got {row['reinforcements']}"
+                f"expected 10 cumulative increments across 2 processes, got {row['reinforcements']}"
             )
         finally:
             verifier.close()
@@ -359,7 +368,8 @@ class TestE2EConcurrentLazyEnsureRace:
     count == 2 (INSERT OR IGNORE wins the race)."""
 
     def test_concurrent_first_touch_no_duplicate_key(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         db_path = str(tmp_path / "lesson.db")
         project = "p"
@@ -384,10 +394,7 @@ class TestE2EConcurrentLazyEnsureRace:
             row = verifier.get(project, heading)
             assert row is not None, "lazy-create lost the race entirely"
             assert row["reinforcements"] == 2, (
-                f"expected exactly 2 increments under lazy-create race, "
-                f"got {row['reinforcements']}"
+                f"expected exactly 2 increments under lazy-create race, got {row['reinforcements']}"
             )
         finally:
             verifier.close()
-
-

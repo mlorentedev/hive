@@ -39,15 +39,23 @@ def _porcelain(vault: Path) -> str:
     """Run git status --porcelain in the vault and return stdout."""
     return subprocess.run(
         ["git", "status", "--porcelain"],
-        cwd=vault, capture_output=True, text=True, check=True,
+        cwd=vault,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
 
 
 def _commit_count(vault: Path) -> int:
-    return int(subprocess.run(
-        ["git", "rev-list", "--count", "HEAD"],
-        cwd=vault, capture_output=True, text=True, check=True,
-    ).stdout.strip())
+    return int(
+        subprocess.run(
+            ["git", "rev-list", "--count", "HEAD"],
+            cwd=vault,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    )
 
 
 @pytest.mark.asyncio
@@ -55,20 +63,23 @@ class TestCommitFalseLeavesFileDirty:
     """vault_write(commit=False) / vault_patch(commit=False) skip git commit."""
 
     async def test_vault_write_commit_false_leaves_file_dirty(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         before = _commit_count(git_vault)
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_write",
-            {
-                "project": "testproject",
-                "section": "tasks",
-                "operation": "append",
-                "content": "\n- [ ] uncommitted task\n",
-                "commit": False,
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_write",
+                {
+                    "project": "testproject",
+                    "section": "tasks",
+                    "operation": "append",
+                    "content": "\n- [ ] uncommitted task\n",
+                    "commit": False,
+                },
+            )
+        )
         # No new commit made
         assert _commit_count(git_vault) == before
         # File is dirty in working tree
@@ -77,20 +88,23 @@ class TestCommitFalseLeavesFileDirty:
         assert "uncommitted" in result.lower()
 
     async def test_vault_patch_commit_false_leaves_file_dirty(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         before = _commit_count(git_vault)
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-                "find": "- [ ] Task one",
-                "replace": "- [x] Task one done",
-                "commit": False,
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "find": "- [ ] Task one",
+                    "replace": "- [x] Task one done",
+                    "commit": False,
+                },
+            )
+        )
         assert _commit_count(git_vault) == before
         assert "11-tasks.md" in _porcelain(git_vault)
         assert "uncommitted" in result.lower()
@@ -117,7 +131,8 @@ class TestVaultCommitTool:
     """vault_commit(message) flushes the working tree into a single commit."""
 
     async def test_vault_commit_returns_sha_and_clears_dirty(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         mcp = create_server(vault_path=git_vault)
         # Dirty the tree without committing
@@ -144,10 +159,12 @@ class TestVaultCommitTool:
         assert _porcelain(git_vault) != ""
         before = _commit_count(git_vault)
 
-        result = _text(await mcp.call_tool(
-            "vault_commit",
-            {"message": "batch update"},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_commit",
+                {"message": "batch update"},
+            )
+        )
 
         assert _commit_count(git_vault) == before + 1
         assert _porcelain(git_vault) == ""
@@ -158,14 +175,17 @@ class TestVaultCommitTool:
         ), f"expected 40-char SHA in result, got: {result!r}"
 
     async def test_vault_commit_noop_when_clean(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         mcp = create_server(vault_path=git_vault)
         before = _commit_count(git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_commit",
-            {"message": "noop"},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_commit",
+                {"message": "noop"},
+            )
+        )
         assert _commit_count(git_vault) == before
         assert "clean" in result.lower() or "nothing" in result.lower()
 
@@ -174,34 +194,40 @@ class TestObsidianGitDetection:
     """detect_obsidian_git uses pathlib joining (Risk #4 cross-platform)."""
 
     def test_detect_returns_interval_when_data_json_present(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         plugin_dir = tmp_path / ".obsidian" / "plugins" / "obsidian-git"
         plugin_dir.mkdir(parents=True)
         (plugin_dir / "data.json").write_text(
-            json.dumps({"commitInterval": 10}), encoding="utf-8",
+            json.dumps({"commitInterval": 10}),
+            encoding="utf-8",
         )
         result = detect_obsidian_git(tmp_path)
         assert result is not None
         assert result["commit_interval"] == 10
 
     def test_detect_returns_none_when_no_obsidian_dir(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         assert detect_obsidian_git(tmp_path) is None
 
     def test_detect_returns_none_when_interval_zero(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         plugin_dir = tmp_path / ".obsidian" / "plugins" / "obsidian-git"
         plugin_dir.mkdir(parents=True)
         (plugin_dir / "data.json").write_text(
-            json.dumps({"commitInterval": 0}), encoding="utf-8",
+            json.dumps({"commitInterval": 0}),
+            encoding="utf-8",
         )
         assert detect_obsidian_git(tmp_path) is None
 
     def test_detect_returns_none_when_malformed_json(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         plugin_dir = tmp_path / ".obsidian" / "plugins" / "obsidian-git"
         plugin_dir.mkdir(parents=True)
@@ -214,12 +240,14 @@ class TestVaultHealthExternalCommitter:
     """vault_health surfaces external_committer when obsidian-git is present."""
 
     async def test_health_surfaces_external_committer(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         plugin_dir = git_vault / ".obsidian" / "plugins" / "obsidian-git"
         plugin_dir.mkdir(parents=True)
         (plugin_dir / "data.json").write_text(
-            json.dumps({"commitInterval": 5}), encoding="utf-8",
+            json.dumps({"commitInterval": 5}),
+            encoding="utf-8",
         )
         mcp = create_server(vault_path=git_vault)
         result = _text(await mcp.call_tool("vault_health", {}))
@@ -227,7 +255,8 @@ class TestVaultHealthExternalCommitter:
         assert "obsidian-git" in result
 
     async def test_health_omits_external_committer_when_absent(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         mcp = create_server(vault_path=git_vault)
         result = _text(await mcp.call_tool("vault_health", {}))

@@ -107,7 +107,8 @@ def test_git_commit_warning_carries_cause_git_error(
     _git_commit(git_vault, [bogus.relative_to(git_vault)], "test")
 
     git_warnings = [
-        rec.message for rec in caplog.records
+        rec.message
+        for rec in caplog.records
         if rec.levelno >= logging.WARNING
         and ("git add" in rec.message or "git commit" in rec.message)
     ]

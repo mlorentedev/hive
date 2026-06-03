@@ -61,11 +61,15 @@ def _install_obsidian_git_config(
     if commit:
         subprocess.run(  # noqa: S603, S607
             ["git", "add", ".obsidian"],
-            cwd=vault, check=True, capture_output=True,
+            cwd=vault,
+            check=True,
+            capture_output=True,
         )
         subprocess.run(  # noqa: S603, S607
             ["git", "commit", "-m", "test: stage obsidian-git config"],
-            cwd=vault, check=True, capture_output=True,
+            cwd=vault,
+            check=True,
+            capture_output=True,
         )
 
 
@@ -74,7 +78,8 @@ def _install_obsidian_git_config(
 
 @_POSIX_ONLY
 def test_defer_when_env_true_and_recent_commit(
-    git_vault: Path, monkeypatch: pytest.MonkeyPatch,
+    git_vault: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """env=true + obsidian-git present + last commit is recent → defer."""
     from hive._vault_write import _should_defer_to_external_committer
@@ -92,7 +97,8 @@ def test_defer_when_env_true_and_recent_commit(
 
 @_POSIX_ONLY
 def test_no_defer_when_env_false(
-    git_vault: Path, monkeypatch: pytest.MonkeyPatch,
+    git_vault: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """env=false (default) + obsidian-git healthy → still commits via hive.
 
@@ -109,7 +115,8 @@ def test_no_defer_when_env_false(
 
 @_POSIX_ONLY
 def test_no_defer_when_env_explicitly_false(
-    git_vault: Path, monkeypatch: pytest.MonkeyPatch,
+    git_vault: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Explicitly setting env to 'false' must also skip deferral."""
     from hive._vault_write import _should_defer_to_external_committer
@@ -125,7 +132,8 @@ def test_no_defer_when_env_explicitly_false(
 
 @_POSIX_ONLY
 def test_fallback_when_obsidian_stale_and_dirty(
-    git_vault: Path, monkeypatch: pytest.MonkeyPatch,
+    git_vault: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """env=true + obsidian present + last commit > 2*interval AND vault is
     dirty → external committer is genuinely broken → fall back.
@@ -141,12 +149,14 @@ def test_fallback_when_obsidian_stale_and_dirty(
     # Make the existing init commit appear ancient (> 2 minutes ago).
     ancient_iso = "2024-01-01T00:00:00Z"
     subprocess.run(  # noqa: S603, S607
-        ["git", "commit", "--amend", "--no-edit",
-         "--date", ancient_iso],
-        cwd=git_vault, env={
+        ["git", "commit", "--amend", "--no-edit", "--date", ancient_iso],
+        cwd=git_vault,
+        env={
             **subprocess.os.environ,
             "GIT_COMMITTER_DATE": ancient_iso,
-        }, check=True, capture_output=True,
+        },
+        check=True,
+        capture_output=True,
     )
 
     # Leave a dirty file.
@@ -160,7 +170,8 @@ def test_fallback_when_obsidian_stale_and_dirty(
 
 @_POSIX_ONLY
 def test_defer_when_obsidian_present_and_vault_idle(
-    git_vault: Path, monkeypatch: pytest.MonkeyPatch,
+    git_vault: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """env=true + obsidian present + last commit > 2*interval BUT vault
     is idle (clean porcelain) → defer is safe; nothing to commit anyway.
@@ -168,24 +179,31 @@ def test_defer_when_obsidian_present_and_vault_idle(
     from hive._vault_write import _should_defer_to_external_committer
 
     _install_obsidian_git_config(
-        git_vault, auto_save_interval_minutes=1, commit=True,
+        git_vault,
+        auto_save_interval_minutes=1,
+        commit=True,
     )
     monkeypatch.setenv("HIVE_AUTO_DEFER_TO_EXTERNAL_COMMITTER", "true")
 
     # Make the commit ancient AND leave the vault clean.
     ancient_iso = "2024-01-01T00:00:00Z"
     subprocess.run(  # noqa: S603, S607
-        ["git", "commit", "--amend", "--no-edit",
-         "--date", ancient_iso],
-        cwd=git_vault, env={
+        ["git", "commit", "--amend", "--no-edit", "--date", ancient_iso],
+        cwd=git_vault,
+        env={
             **subprocess.os.environ,
             "GIT_COMMITTER_DATE": ancient_iso,
-        }, check=True, capture_output=True,
+        },
+        check=True,
+        capture_output=True,
     )
     # Clean porcelain — assert it actually is clean
     porcelain = subprocess.run(  # noqa: S603, S607
         ["git", "status", "--porcelain"],
-        cwd=git_vault, capture_output=True, text=True, check=True,
+        cwd=git_vault,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
     assert porcelain == "", f"vault not idle: {porcelain!r}"
 
@@ -197,7 +215,8 @@ def test_defer_when_obsidian_present_and_vault_idle(
 
 @_POSIX_ONLY
 def test_no_defer_when_obsidian_absent(
-    git_vault: Path, monkeypatch: pytest.MonkeyPatch,
+    git_vault: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """env=true but obsidian-git absent → fall back to hive's commit."""
     from hive._vault_write import _should_defer_to_external_committer
@@ -213,7 +232,8 @@ def test_no_defer_when_obsidian_absent(
 
 @_POSIX_ONLY
 def test_vault_write_response_announces_deferral(
-    git_vault: Path, monkeypatch: pytest.MonkeyPatch,
+    git_vault: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When a write is deferred, the tool response says so explicitly.
 
@@ -234,7 +254,8 @@ def test_vault_write_response_announces_deferral(
 
 @_POSIX_ONLY
 def test_vault_write_suffix_empty_when_no_defer(
-    git_vault: Path, monkeypatch: pytest.MonkeyPatch,
+    git_vault: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No defer + commit=True → empty deferral suffix (existing behaviour)."""
     from hive._helpers import _vault_write_deferral_suffix

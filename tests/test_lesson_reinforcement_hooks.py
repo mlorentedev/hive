@@ -30,12 +30,7 @@ def _text(result: ToolResult) -> str:
 
 
 _LESSONS_HEADER = (
-    "---\n"
-    "id: testproject-lessons\n"
-    "type: lesson\n"
-    "status: active\n"
-    "---\n\n"
-    "# Test: Lessons\n\n"
+    "---\nid: testproject-lessons\ntype: lesson\nstatus: active\n---\n\n# Test: Lessons\n\n"
 )
 
 
@@ -53,32 +48,49 @@ def _three_lessons_body() -> str:
 
 def _git_init_commit(vault: Path, msg: str = "init") -> None:
     subprocess.run(
-        ["git", "init"], cwd=vault, check=True, capture_output=True,
+        ["git", "init"],
+        cwd=vault,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "config", "user.email", "t@t.com"],
-        cwd=vault, check=True, capture_output=True,
+        cwd=vault,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "config", "user.name", "T"],
-        cwd=vault, check=True, capture_output=True,
+        cwd=vault,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
-        ["git", "add", "."], cwd=vault, check=True, capture_output=True,
+        ["git", "add", "."],
+        cwd=vault,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "commit", "-m", msg],
-        cwd=vault, check=True, capture_output=True,
+        cwd=vault,
+        check=True,
+        capture_output=True,
     )
 
 
 def _git_recommit(vault: Path, msg: str = "update") -> None:
     subprocess.run(
-        ["git", "add", "."], cwd=vault, check=True, capture_output=True,
+        ["git", "add", "."],
+        cwd=vault,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "commit", "-m", msg],
-        cwd=vault, check=True, capture_output=True,
+        cwd=vault,
+        check=True,
+        capture_output=True,
     )
 
 
@@ -159,7 +171,9 @@ class TestCaptureLessonInsertsBaseline:
                 {
                     "project": "testproject",
                     "title": title,
-                    "context": "c", "problem": "p", "solution": "s",
+                    "context": "c",
+                    "problem": "p",
+                    "solution": "s",
                 },
             )
         for title in ("L1", "L2", "L3"):
@@ -189,8 +203,7 @@ class TestVaultQueryIncrementsLessons:
             row = lesson_tracker.get("testproject", heading)
             assert row is not None, f"no increment for {heading}"
             assert row["reinforcements"] == 1, (
-                f"{heading}: expected single dedup increment, got "
-                f"{row['reinforcements']}"
+                f"{heading}: expected single dedup increment, got {row['reinforcements']}"
             )
 
     async def test_vault_query_non_lesson_file_is_noop_on_db(
@@ -223,16 +236,22 @@ class TestVaultSearchRankBy:
         """Back-compat: default vault_search output is byte-identical
         regardless of tracker state. The hook must NOT mutate the
         rank_by='bm25' code path."""
-        before = _text(await lesson_mcp.call_tool(
-            "vault_search", {"query": "lesson"},
-        ))
+        before = _text(
+            await lesson_mcp.call_tool(
+                "vault_search",
+                {"query": "lesson"},
+            )
+        )
         # Mutate the tracker — this must NOT change subsequent default output.
         lesson_tracker.ensure("testproject", "[2026-01-01] alpha lesson")
         lesson_tracker.increment("testproject", "[2026-01-01] alpha lesson")
         lesson_tracker.increment("testproject", "[2026-01-01] alpha lesson")
-        after = _text(await lesson_mcp.call_tool(
-            "vault_search", {"query": "lesson"},
-        ))
+        after = _text(
+            await lesson_mcp.call_tool(
+                "vault_search",
+                {"query": "lesson"},
+            )
+        )
         assert before == after, "default vault_search output drifted with tracker state"
 
     async def test_rank_by_reinforcements_filters_to_lessons_file_only(
@@ -244,28 +263,32 @@ class TestVaultSearchRankBy:
         rank_by=reinforcements only the lesson hit must appear."""
         lesson_tracker.ensure("testproject", "[2026-01-01] alpha lesson")
         lesson_tracker.increment("testproject", "[2026-01-01] alpha lesson")
-        result = _text(await lesson_mcp.call_tool(
-            "vault_search",
-            {"query": "alpha", "rank_by": "reinforcements"},
-        ))
+        result = _text(
+            await lesson_mcp.call_tool(
+                "vault_search",
+                {"query": "alpha", "rank_by": "reinforcements"},
+            )
+        )
         assert "90-lessons.md" in result
         assert "00-context.md" not in result
 
     async def test_rank_by_invalid_returns_clear_error(
-        self, lesson_mcp: FastMCP,
+        self,
+        lesson_mcp: FastMCP,
     ) -> None:
         """`rank_by='bogus'` MUST NOT silently fall back to bm25 — it
         must surface a clear error mentioning both the field and the bad
         value so typos are caught immediately."""
-        result = _text(await lesson_mcp.call_tool(
-            "vault_search",
-            {"query": "alpha", "rank_by": "bogus"},
-        ))
+        result = _text(
+            await lesson_mcp.call_tool(
+                "vault_search",
+                {"query": "alpha", "rank_by": "bogus"},
+            )
+        )
         lower = result.lower()
         assert "rank_by" in lower
         assert "bogus" in result, (
-            "Error message must include the bad value 'bogus' so the "
-            "user sees what to fix"
+            "Error message must include the bad value 'bogus' so the user sees what to fix"
         )
 
 
@@ -279,15 +302,20 @@ class TestLazyEnsureForPreExistingLessons:
         lesson_tracker: LessonReinforcementTracker,
     ) -> None:
         # Tracker is empty before the call.
-        assert lesson_tracker.get(
-            "testproject", "[2026-01-01] alpha lesson",
-        ) is None
+        assert (
+            lesson_tracker.get(
+                "testproject",
+                "[2026-01-01] alpha lesson",
+            )
+            is None
+        )
         await lesson_mcp.call_tool(
             "vault_query",
             {"project": "testproject", "section": "lessons"},
         )
         row = lesson_tracker.get(
-            "testproject", "[2026-01-01] alpha lesson",
+            "testproject",
+            "[2026-01-01] alpha lesson",
         )
         assert row is not None, "first read should lazy-create the DB row"
         # First read counts as the lazy-create + the increment.
@@ -320,7 +348,8 @@ class TestHeadingParserEdgeCases:
         _git_recommit(lesson_vault)
 
         mcp = create_server(
-            vault_path=lesson_vault, lesson_tracker=lesson_tracker,
+            vault_path=lesson_vault,
+            lesson_tracker=lesson_tracker,
         )
         try:
             await mcp.call_tool(
@@ -335,12 +364,14 @@ class TestHeadingParserEdgeCases:
                 ctx.relevance.close()
 
         real = lesson_tracker.get(
-            "testproject", "[2026-01-01] real heading",
+            "testproject",
+            "[2026-01-01] real heading",
         )
         assert real is not None
         assert real["reinforcements"] == 1
         fake = lesson_tracker.get(
-            "testproject", "[2026-12-31] fake heading inside code",
+            "testproject",
+            "[2026-12-31] fake heading inside code",
         )
         assert fake is None, "heading inside code block must NOT be counted"
 
@@ -362,7 +393,8 @@ class TestHeadingParserEdgeCases:
         _git_recommit(lesson_vault)
 
         mcp = create_server(
-            vault_path=lesson_vault, lesson_tracker=lesson_tracker,
+            vault_path=lesson_vault,
+            lesson_tracker=lesson_tracker,
         )
         try:
             # The call must not raise.
@@ -378,6 +410,10 @@ class TestHeadingParserEdgeCases:
                 ctx.relevance.close()
 
         assert lesson_tracker.get("testproject", "no date here") is None
-        assert lesson_tracker.get(
-            "testproject", "[not-a-date] also broken",
-        ) is None
+        assert (
+            lesson_tracker.get(
+                "testproject",
+                "[not-a-date] also broken",
+            )
+            is None
+        )

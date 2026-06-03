@@ -88,10 +88,7 @@ class TestThreadSafety:
             except Exception as exc:
                 errors.append(exc)
 
-        threads = [
-            threading.Thread(target=worker, args=(i,))
-            for i in range(n_threads)
-        ]
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(n_threads)]
         for th in threads:
             th.start()
         for th in threads:

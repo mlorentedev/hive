@@ -185,7 +185,10 @@ async def test_partial_commit_prevention(git_vault: Path) -> None:
 
     head_before = subprocess.run(  # noqa: S603, S607
         ["git", "rev-parse", "HEAD"],
-        cwd=git_vault, capture_output=True, text=True, check=True,
+        cwd=git_vault,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
 
     registry: list[subprocess.Popen[bytes]] = []
@@ -193,7 +196,9 @@ async def test_partial_commit_prevention(git_vault: Path) -> None:
     async def two_step_commit() -> None:
         add = subprocess.Popen(  # noqa: S603, S607
             ["git", "add", new_file.name],
-            cwd=git_vault, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cwd=git_vault,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
         registry.append(add)
         await asyncio.to_thread(add.wait)
@@ -204,7 +209,9 @@ async def test_partial_commit_prevention(git_vault: Path) -> None:
         # Should never reach here under a 1s deadline.
         commit = subprocess.Popen(  # noqa: S603, S607
             ["git", "commit", "-m", "should-not-happen"],
-            cwd=git_vault, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cwd=git_vault,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
         registry.append(commit)
         await asyncio.to_thread(commit.wait)
@@ -219,7 +226,10 @@ async def test_partial_commit_prevention(git_vault: Path) -> None:
 
     head_after = subprocess.run(  # noqa: S603, S607
         ["git", "rev-parse", "HEAD"],
-        cwd=git_vault, capture_output=True, text=True, check=True,
+        cwd=git_vault,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
 
     assert head_before == head_after, "HEAD moved despite mid-commit kill"
@@ -227,7 +237,10 @@ async def test_partial_commit_prevention(git_vault: Path) -> None:
     # Index reflects the staged add even though no commit landed.
     porcelain = subprocess.run(  # noqa: S603, S607
         ["git", "status", "--porcelain"],
-        cwd=git_vault, capture_output=True, text=True, check=True,
+        cwd=git_vault,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
     assert "audit-pr3-newfile.md" in porcelain, (
         "staged file disappeared from porcelain — recovery path broken"
@@ -290,7 +303,8 @@ async def test_windows_subprocess_terminated_reaches_descendants() -> None:
         proc = subprocess.Popen(  # noqa: S603
             ["cmd", "/c", "timeout", "/t", "60", "/nobreak"],
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
         registry.append(proc)
         try:
@@ -349,8 +363,10 @@ async def test_concurrent_bounded_writes_no_deadlock(git_vault: Path) -> None:
                     ["git", "commit", "-m", f"writer-{idx}"],
                 ):
                     proc = subprocess.Popen(  # noqa: S603, S607
-                        argv, cwd=git_vault,
-                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        argv,
+                        cwd=git_vault,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
                     )
                     registry.append(proc)
                     try:
@@ -358,14 +374,15 @@ async def test_concurrent_bounded_writes_no_deadlock(git_vault: Path) -> None:
                         if rc != 0:
                             _, err = proc.communicate(timeout=1)
                             raise RuntimeError(
-                                f"git {argv[1]} rc={rc}: "
-                                f"{err.decode('utf-8', 'replace').strip()}",
+                                f"git {argv[1]} rc={rc}: {err.decode('utf-8', 'replace').strip()}",
                             )
                     finally:
                         registry.remove(proc)
 
         await bounded_call(
-            commit_seq, deadline_s=30.0, process_registry=registry,
+            commit_seq,
+            deadline_s=30.0,
+            process_registry=registry,
         )
 
     start = time.monotonic()
@@ -378,7 +395,10 @@ async def test_concurrent_bounded_writes_no_deadlock(git_vault: Path) -> None:
 
     log = subprocess.run(  # noqa: S603, S607
         ["git", "log", "--oneline"],
-        cwd=git_vault, capture_output=True, text=True, check=True,
+        cwd=git_vault,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
     # All 3 commits landed
     for i in range(3):

@@ -79,24 +79,36 @@ class TestRespondPatchPreventsKill:
 def _init_git_repo(repo: Path) -> None:
     """Initialize a minimal git repo with an initial commit."""
     subprocess.run(
-        ["git", "init", "-q"], cwd=repo, check=True, capture_output=True,
+        ["git", "init", "-q"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "config", "user.email", "test@hive.local"],
-        cwd=repo, check=True, capture_output=True,
+        cwd=repo,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "config", "user.name", "hive-test"],
-        cwd=repo, check=True, capture_output=True,
+        cwd=repo,
+        check=True,
+        capture_output=True,
     )
     seed = repo / "README.md"
     seed.write_text("seed\n", encoding="utf-8")
     subprocess.run(
-        ["git", "add", "README.md"], cwd=repo, check=True, capture_output=True,
+        ["git", "add", "README.md"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "commit", "-q", "-m", "seed"],
-        cwd=repo, check=True, capture_output=True,
+        cwd=repo,
+        check=True,
+        capture_output=True,
     )
 
 
@@ -125,10 +137,7 @@ def _append_to_shared_file_worker(vault: str, shared_file: str, line: str) -> st
     vault_path = _Path(vault)
     file_path = vault_path / shared_file
     with _git_filelock(vault_path).acquire(timeout=30):
-        existing = (
-            file_path.read_text(encoding="utf-8")
-            if file_path.exists() else ""
-        )
+        existing = file_path.read_text(encoding="utf-8") if file_path.exists() else ""
         file_path.write_text(existing + line + "\n", encoding="utf-8")
         _git_commit(vault_path, [_Path(shared_file)], f"append: {line}")
     return line
@@ -138,7 +147,8 @@ class TestInterProcessGitContention:
     """Concurrent ``_git_commit`` from multiple processes must serialize cleanly."""
 
     def test_concurrent_processes_complete_within_budget(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """8 concurrent processes committing distinct files must all succeed in <60s.
 
@@ -165,18 +175,19 @@ class TestInterProcessGitContention:
         # All files should be committed (not just written) — verify via git log.
         log = subprocess.run(
             ["git", "log", "--pretty=format:%s"],
-            cwd=tmp_path, check=True, capture_output=True, text=True,
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
         ).stdout.splitlines()
-        committed_files = {
-            ln.removeprefix("add ").strip()
-            for ln in log if ln.startswith("add ")
-        }
+        committed_files = {ln.removeprefix("add ").strip() for ln in log if ln.startswith("add ")}
         assert committed_files == set(file_names), (
             f"missing commits: {set(file_names) - committed_files}"
         )
 
     def test_concurrent_appends_to_same_file_lose_no_lines(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """8 processes appending unique lines to one file must all survive.
 
@@ -196,7 +207,8 @@ class TestInterProcessGitContention:
         ctx = mp.get_context("spawn")
         with ctx.Pool(processes=4) as pool:
             collected = pool.starmap_async(
-                _append_to_shared_file_worker, args,
+                _append_to_shared_file_worker,
+                args,
             ).get(timeout=90)
 
         assert set(collected) == set(lines)

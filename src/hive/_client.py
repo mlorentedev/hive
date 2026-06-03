@@ -80,8 +80,12 @@ def _daemon_reachable(host: str, port: int) -> bool:
     The bearer token still guards against *using* a wrong server, so a deeper
     MCP handshake is left to the auto-reconnect slice.
     """
-    with contextlib.suppress(OSError), socket.create_connection(
-        (host, port), timeout=_PROBE_TIMEOUT_S,
+    with (
+        contextlib.suppress(OSError),
+        socket.create_connection(
+            (host, port),
+            timeout=_PROBE_TIMEOUT_S,
+        ),
     ):
         return True
     return False

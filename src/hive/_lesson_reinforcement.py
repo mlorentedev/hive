@@ -92,8 +92,7 @@ CREATE TABLE IF NOT EXISTS lesson_reinforcement (
         )
         self._outbox: Outbox[tuple[str, str]] = Outbox()
         self._outbox_tick_s = (
-            outbox_tick_s if outbox_tick_s is not None
-            else _default_outbox_tick_s()
+            outbox_tick_s if outbox_tick_s is not None else _default_outbox_tick_s()
         )
         self._stop_reconciler = threading.Event()
         self._reconciler_thread: threading.Thread | None = None
@@ -165,17 +164,15 @@ CREATE TABLE IF NOT EXISTS lesson_reinforcement (
                 "  reinforcements = reinforcements + 1, "
                 "  confidence = MIN(1.0, confidence + ? * (1.0 - confidence)), "
                 "  last_referenced = date('now')",
-                [
-                    (project, heading, bumped, _GROWTH_RATE)
-                    for project, heading in pending
-                ],
+                [(project, heading, bumped, _GROWTH_RATE) for project, heading in pending],
             )
             target.commit()
         except sqlite3.OperationalError as exc:
             # Lock contention or other operational issue — re-queue.
             _log.warning(
                 "mcp.lesson_reconciler.flush_blocked entries=%d exc=%s",
-                len(pending), exc,
+                len(pending),
+                exc,
             )
             self._outbox.extend(pending)
             raise
@@ -218,7 +215,8 @@ CREATE TABLE IF NOT EXISTS lesson_reinforcement (
         except sqlite3.Error as exc:
             _log.warning(
                 "mcp.lesson_reconciler.connect_failed db=%s exc=%s",
-                self._db_path, exc,
+                self._db_path,
+                exc,
             )
             return
 
@@ -307,7 +305,9 @@ CREATE TABLE IF NOT EXISTS lesson_reinforcement (
         }
 
     def lookup(
-        self, project: str, headings: list[str],
+        self,
+        project: str,
+        headings: list[str],
     ) -> dict[str, dict[str, object]]:
         """Batch metadata fetch for a list of headings (for hybrid ranking)."""
         if not headings:
@@ -352,10 +352,7 @@ CREATE TABLE IF NOT EXISTS lesson_reinforcement (
             return self._top_by_confidence(project, limit)
         if by == "hybrid":
             return self._top_by_hybrid(project, limit, bm25_scores or {})
-        msg = (
-            f"Unknown rank_by={by!r}. Expected one of: "
-            f"reinforcements, confidence, hybrid."
-        )
+        msg = f"Unknown rank_by={by!r}. Expected one of: reinforcements, confidence, hybrid."
         raise ValueError(msg)
 
     def _top_by_counter(self, project: str, limit: int) -> list[str]:
@@ -385,21 +382,22 @@ CREATE TABLE IF NOT EXISTS lesson_reinforcement (
         return [row[0] for row in rows]
 
     def _top_by_hybrid(
-        self, project: str, limit: int, bm25_scores: dict[str, float],
+        self,
+        project: str,
+        limit: int,
+        bm25_scores: dict[str, float],
     ) -> list[str]:
         with self._lock:
             with contextlib.suppress(sqlite3.OperationalError):
                 self._flush_locked()
             rows = self._conn.execute(
-                "SELECT heading, confidence FROM lesson_reinforcement "
-                "WHERE project = ?",
+                "SELECT heading, confidence FROM lesson_reinforcement WHERE project = ?",
                 (project,),
             ).fetchall()
         scored = [
             (
                 heading,
-                _HYBRID_ALPHA * bm25_scores.get(heading, 0.0)
-                + (1.0 - _HYBRID_ALPHA) * confidence,
+                _HYBRID_ALPHA * bm25_scores.get(heading, 0.0) + (1.0 - _HYBRID_ALPHA) * confidence,
             )
             for heading, confidence in rows
         ]

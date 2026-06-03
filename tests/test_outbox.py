@@ -80,9 +80,7 @@ def test_same_process_top_does_not_double_count(tmp_path: Path) -> None:
         row = tracker.get("proj", "[2026-05-22] a")
         assert row is not None
         # Counter should be 2 (one flushed + one buffered), not 1 or 3.
-        assert row["reinforcements"] == 2, (
-            f"expected reinforcements=2; got {row!r}"
-        )
+        assert row["reinforcements"] == 2, f"expected reinforcements=2; got {row!r}"
     finally:
         tracker.close()
 
@@ -104,7 +102,8 @@ def test_cross_process_eventual_consistency(tmp_path: Path) -> None:
     tick = 0.5  # fast tick to keep test runtime sane
 
     proc_a = LessonReinforcementTracker(
-        db_path=str(db), outbox_tick_s=tick,
+        db_path=str(db),
+        outbox_tick_s=tick,
     )
     try:
         proc_a.increment("proj", "[2026-05-22] cross-proc")
@@ -116,7 +115,8 @@ def test_cross_process_eventual_consistency(tmp_path: Path) -> None:
     # Open a fresh tracker (mimics "process B" with its own connection
     # and outbox); reads must see the DB row written by proc_a.
     proc_b = LessonReinforcementTracker(
-        db_path=str(db), outbox_tick_s=tick,
+        db_path=str(db),
+        outbox_tick_s=tick,
     )
     try:
         row = proc_b.get("proj", "[2026-05-22] cross-proc")
@@ -146,7 +146,8 @@ def test_reconciler_busy_timeout_guard_does_not_hang(tmp_path: Path) -> None:
     db = tmp_path / "lesson.db"
 
     tracker = LessonReinforcementTracker(
-        db_path=str(db), outbox_tick_s=0.2,
+        db_path=str(db),
+        outbox_tick_s=0.2,
     )
     try:
         tracker.increment("proj", "[2026-05-22] busy-test")
@@ -170,10 +171,9 @@ def test_reconciler_busy_timeout_guard_does_not_hang(tmp_path: Path) -> None:
 
         # Reconciler is still running (no thread crash). Sanity check
         # — the daemon thread is alive on the tracker.
-        assert (
-            tracker._reconciler_thread is None
-            or tracker._reconciler_thread.is_alive()
-        ), "reconciler thread crashed"
+        assert tracker._reconciler_thread is None or tracker._reconciler_thread.is_alive(), (
+            "reconciler thread crashed"
+        )
         # Outbox preserved (counter not yet visible from sibling's view —
         # we'll release and verify the recovery path).
         sibling.execute("ROLLBACK")
@@ -238,9 +238,7 @@ def test_outbox_drain_is_atomic_under_concurrent_appends() -> None:
     # No entries lost: drained + remaining + already-drained-pre-thread = 200
     remaining = box.drain()
     total = sum(len(d) for d in drained) + len(remaining)
-    assert total == 200, (
-        f"entries lost: drained={drained!r}, remaining={remaining!r}"
-    )
+    assert total == 200, f"entries lost: drained={drained!r}, remaining={remaining!r}"
 
 
 def test_outbox_crash_loss_contract_is_documented() -> None:

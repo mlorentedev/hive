@@ -69,33 +69,40 @@ class TestVaultNotFound:
 
     async def test_vault_query(self, missing_vault_mcp: FastMCP) -> None:
         result = await missing_vault_mcp.call_tool(
-            "vault_query", {"project": "test"},
+            "vault_query",
+            {"project": "test"},
         )
         assert "Vault not found" in _text(result)
 
     async def test_vault_search(self, missing_vault_mcp: FastMCP) -> None:
         result = await missing_vault_mcp.call_tool(
-            "vault_search", {"query": "hello"},
+            "vault_search",
+            {"query": "hello"},
         )
         assert "Vault not found" in _text(result)
 
     async def test_session_briefing(self, missing_vault_mcp: FastMCP) -> None:
         result = await missing_vault_mcp.call_tool(
-            "session_briefing", {"project": "test"},
+            "session_briefing",
+            {"project": "test"},
         )
         assert "Vault not found" in _text(result)
 
     async def test_vault_write(self, missing_vault_mcp: FastMCP) -> None:
         result = await missing_vault_mcp.call_tool(
-            "vault_write", {"project": "test", "content": "hello"},
+            "vault_write",
+            {"project": "test", "content": "hello"},
         )
         assert "Vault not found" in _text(result)
 
     async def test_vault_patch(self, missing_vault_mcp: FastMCP) -> None:
         result = await missing_vault_mcp.call_tool(
-            "vault_patch", {
-                "project": "test", "path": "f.md",
-                "find": "a", "replace": "b",
+            "vault_patch",
+            {
+                "project": "test",
+                "path": "f.md",
+                "find": "a",
+                "replace": "b",
             },
         )
         assert "Vault not found" in _text(result)
@@ -106,9 +113,13 @@ class TestVaultNotFound:
 
     async def test_capture_lesson(self, missing_vault_mcp: FastMCP) -> None:
         result = await missing_vault_mcp.call_tool(
-            "capture_lesson", {
-                "project": "test", "title": "t",
-                "context": "c", "problem": "p", "solution": "s",
+            "capture_lesson",
+            {
+                "project": "test",
+                "title": "t",
+                "context": "c",
+                "problem": "p",
+                "solution": "s",
             },
         )
         assert "Vault not found" in _text(result)
@@ -171,7 +182,8 @@ class TestUnicodeDecodeErrors:
         bad.write_bytes(b"\xff\xfe invalid utf-8")
         mcp = create_server(vault_path=mock_vault)
         result = await mcp.call_tool(
-            "vault_query", {"project": "testproject", "path": "bad.md"},
+            "vault_query",
+            {"project": "testproject", "path": "bad.md"},
         )
         text = _text(result)
         assert "utf-8" in text.lower() or "error" in text.lower()
@@ -181,22 +193,27 @@ class TestUnicodeDecodeErrors:
         bad.write_bytes(b"\xff\xfe invalid utf-8")
         mcp = create_server(vault_path=git_vault)
         result = await mcp.call_tool(
-            "vault_patch", {
-                "project": "testproject", "path": "bad.md",
-                "find": "a", "replace": "b",
+            "vault_patch",
+            {
+                "project": "testproject",
+                "path": "bad.md",
+                "find": "a",
+                "replace": "b",
             },
         )
         text = _text(result)
         assert "utf-8" in text.lower() or "error" in text.lower()
 
     async def test_vault_write_append_non_utf8(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         bad = git_vault / "10_projects" / "testproject" / "90-lessons.md"
         bad.write_bytes(b"\xff\xfe invalid utf-8")
         mcp = create_server(vault_path=git_vault)
         result = await mcp.call_tool(
-            "vault_write", {
+            "vault_write",
+            {
                 "project": "testproject",
                 "content": "\nnew content\n",
                 "section": "lessons",
@@ -368,13 +385,15 @@ class TestVaultSearch:
 
     async def test_invalid_regex_rejected(self, vault_mcp: FastMCP) -> None:
         result = await vault_mcp.call_tool(
-            "vault_search", {"query": "[invalid", "use_regex": True},
+            "vault_search",
+            {"query": "[invalid", "use_regex": True},
         )
         assert "invalid regex" in _text(result).lower()
 
     async def test_negative_since_days_rejected(self, vault_mcp: FastMCP) -> None:
         result = await vault_mcp.call_tool(
-            "vault_search", {"query": "test", "since_days": -5},
+            "vault_search",
+            {"query": "test", "since_days": -5},
         )
         assert "positive" in _text(result).lower()
 
@@ -413,9 +432,7 @@ class TestVaultSearch:
         assert "adr-001-test" in text
 
     async def test_type_filter_excludes_non_matching(self, vault_mcp: FastMCP) -> None:
-        result = await vault_mcp.call_tool(
-            "vault_search", {"query": "Test", "type_filter": "adr"}
-        )
+        result = await vault_mcp.call_tool("vault_search", {"query": "Test", "type_filter": "adr"})
         text = _text(result)
         assert "00-context.md" not in text
 
@@ -455,15 +472,11 @@ class TestVaultSearch:
         assert "extra-lesson" in text
 
     async def test_regex_too_long_rejected(self, vault_mcp: FastMCP) -> None:
-        result = await vault_mcp.call_tool(
-            "vault_search", {"query": "a" * 201, "use_regex": True}
-        )
+        result = await vault_mcp.call_tool("vault_search", {"query": "a" * 201, "use_regex": True})
         assert "too long" in _text(result).lower()
 
     async def test_regex_at_max_length_accepted(self, vault_mcp: FastMCP) -> None:
-        result = await vault_mcp.call_tool(
-            "vault_search", {"query": "a" * 200, "use_regex": True}
-        )
+        result = await vault_mcp.call_tool("vault_search", {"query": "a" * 200, "use_regex": True})
         text = _text(result)
         # Should not be rejected — either finds matches or returns "no matches"
         assert "too long" not in text.lower()
@@ -472,9 +485,7 @@ class TestVaultSearch:
         bare = mock_vault / "10_projects" / "testproject" / "bare.md"
         bare.write_text("# No frontmatter\nSome active content.\n")
         mcp = create_server(vault_path=mock_vault)
-        result = await mcp.call_tool(
-            "vault_search", {"query": "active", "type_filter": "project"}
-        )
+        result = await mcp.call_tool("vault_search", {"query": "active", "type_filter": "project"})
         text = _text(result)
         assert "bare.md" not in text
 
@@ -560,7 +571,8 @@ class TestVaultHealth:
     # -- ghost-response counter surface (HIVE-104 Fase C) --
 
     async def test_ghost_responses_block_when_counter_nonzero(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         """When _compat.GHOST_RESPONSES has entries, vault_health surfaces them."""
         from hive import _compat as _hc
@@ -576,7 +588,8 @@ class TestVaultHealth:
             _hc.GHOST_RESPONSES.reset()
 
     async def test_ghost_responses_block_omitted_when_zero(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         """When no ghost responses recorded, the block is omitted."""
         from hive import _compat as _hc
@@ -595,7 +608,8 @@ class TestVaultHealthIdentity:
     """Identity block is always present at the top of vault_health output."""
 
     async def test_identity_block_present_no_args(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         """Default vault_health() includes the ## server identity block."""
         result = _text(await vault_mcp.call_tool("vault_health", {}))
@@ -607,7 +621,8 @@ class TestVaultHealthIdentity:
         assert "- started_at:" in result
 
     async def test_identity_appears_before_project_stats(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         """Identity block is prepended — appears before per-project blocks."""
         result = _text(await vault_mcp.call_tool("vault_health", {}))
@@ -618,12 +633,14 @@ class TestVaultHealthIdentity:
         assert idx_server < idx_project
 
     async def test_identity_with_validation_mode(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         """Identity block also appears when checks=[...] is passed."""
         result = _text(
             await vault_mcp.call_tool(
-                "vault_health", {"checks": ["frontmatter"]},
+                "vault_health",
+                {"checks": ["frontmatter"]},
             ),
         )
         assert "## server" in result
@@ -641,14 +658,16 @@ class TestVaultHealthIdentity:
             _close_server(mcp)
 
     async def test_identity_backends_no_api_keys(
-        self, mock_vault: Path,
+        self,
+        mock_vault: Path,
     ) -> None:
         """The identity block never embeds API key material."""
         secret = "sk-DO-NOT-LEAK-CANARY-12345"
         mcp = create_server(
             vault_path=mock_vault,
             openrouter_client=OpenRouterClient(
-                api_key=secret, default_model="qwen/qwen3-coder:free",
+                api_key=secret,
+                default_model="qwen/qwen3-coder:free",
             ),
         )
         try:
@@ -661,7 +680,8 @@ class TestVaultHealthIdentity:
             _close_server(mcp)
 
     async def test_identity_total_length_bounded(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         """Acceptance: identity block adds <10 lines to the report."""
         result = _text(await vault_mcp.call_tool("vault_health", {}))
@@ -673,10 +693,7 @@ class TestVaultHealthIdentity:
         )
         assert start is not None
         end = next(
-            (
-                i for i, line in enumerate(lines[start + 1 :], start + 1)
-                if line.startswith("## ")
-            ),
+            (i for i, line in enumerate(lines[start + 1 :], start + 1) if line.startswith("## ")),
             len(lines),
         )
         assert (end - start) < 10
@@ -686,18 +703,21 @@ class TestVaultHealthRuntime:
     """include_runtime=True activates the optional ## runtime block."""
 
     async def test_runtime_block_omitted_by_default(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         result = _text(await vault_mcp.call_tool("vault_health", {}))
         assert "## runtime" not in result
         assert "uptime_s" not in result
 
     async def test_runtime_block_present_when_opted_in(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         result = _text(
             await vault_mcp.call_tool(
-                "vault_health", {"include_runtime": True},
+                "vault_health",
+                {"include_runtime": True},
             ),
         )
         assert "## runtime" in result
@@ -706,21 +726,27 @@ class TestVaultHealthRuntime:
         assert "openrouter_budget" in result
 
     async def test_runtime_lists_registered_tool_names(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         """tools_registered must include the known hive tools."""
         result = _text(
             await vault_mcp.call_tool(
-                "vault_health", {"include_runtime": True},
+                "vault_health",
+                {"include_runtime": True},
             ),
         )
         for expected in (
-            "vault_query", "vault_search", "vault_health", "vault_list",
+            "vault_query",
+            "vault_search",
+            "vault_health",
+            "vault_list",
         ):
             assert expected in result
 
     async def test_runtime_orthogonal_to_include_usage(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         """include_runtime is independent from include_usage — both can stack."""
         result = _text(
@@ -731,20 +757,19 @@ class TestVaultHealthRuntime:
         )
         assert "## runtime" in result
         # usage block surfaces 'No vault tool calls' or 'Total calls:'
-        assert (
-            "no vault tool calls" in result.lower()
-            or "Total calls:" in result
-        )
+        assert "no vault tool calls" in result.lower() or "Total calls:" in result
 
     async def test_runtime_block_includes_wal_size_bytes(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         """HIVE-115 / ADR-009: wal_size_bytes field present as non-negative int."""
         import re
 
         result = _text(
             await vault_mcp.call_tool(
-                "vault_health", {"include_runtime": True},
+                "vault_health",
+                {"include_runtime": True},
             ),
         )
         m = re.search(r"wal_size_bytes:\s*(\d+)", result)
@@ -752,14 +777,16 @@ class TestVaultHealthRuntime:
         assert int(m.group(1)) >= 0
 
     async def test_runtime_block_includes_competing_pid_count(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         """HIVE-115 / ADR-009: competing_pid_count field present (non-negative int)."""
         import re
 
         result = _text(
             await vault_mcp.call_tool(
-                "vault_health", {"include_runtime": True},
+                "vault_health",
+                {"include_runtime": True},
             ),
         )
         m = re.search(r"competing_pid_count:\s*(\d+)", result)
@@ -767,12 +794,14 @@ class TestVaultHealthRuntime:
         assert int(m.group(1)) >= 0
 
     async def test_runtime_block_includes_last_git_lock_wait_ms(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         """HIVE-115 / ADR-010: last_git_lock_wait_ms surfaces mean + p99 + samples."""
         result = _text(
             await vault_mcp.call_tool(
-                "vault_health", {"include_runtime": True},
+                "vault_health",
+                {"include_runtime": True},
             ),
         )
         assert "last_git_lock_wait_ms:" in result
@@ -781,21 +810,24 @@ class TestVaultHealthRuntime:
         assert "samples:" in result
 
     async def test_runtime_block_includes_obsidian_git_present(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         """HIVE-115 / ADR-010: obsidian_git_present field is true/false."""
         import re
 
         result = _text(
             await vault_mcp.call_tool(
-                "vault_health", {"include_runtime": True},
+                "vault_health",
+                {"include_runtime": True},
             ),
         )
         m = re.search(r"obsidian_git_present:\s*(true|false)", result)
         assert m is not None, f"obsidian_git_present field missing in:\n{result}"
 
     async def test_runtime_block_obsidian_git_present_when_plugin_active(
-        self, mock_vault: Path,
+        self,
+        mock_vault: Path,
     ) -> None:
         """When the obsidian-git plugin config exists, presence flips to true."""
         import json
@@ -803,13 +835,15 @@ class TestVaultHealthRuntime:
         plugin_dir = mock_vault / ".obsidian" / "plugins" / "obsidian-git"
         plugin_dir.mkdir(parents=True)
         (plugin_dir / "data.json").write_text(
-            json.dumps({"commitInterval": 10}), encoding="utf-8",
+            json.dumps({"commitInterval": 10}),
+            encoding="utf-8",
         )
         mcp = create_server(vault_path=mock_vault)
         try:
             result = _text(
                 await mcp.call_tool(
-                    "vault_health", {"include_runtime": True},
+                    "vault_health",
+                    {"include_runtime": True},
                 ),
             )
             assert "obsidian_git_present: true" in result
@@ -817,14 +851,16 @@ class TestVaultHealthRuntime:
             _close_server(mcp)
 
     async def test_runtime_block_includes_lock_eviction(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         """HIVE-116 PR-2 / AC-8: lock_eviction.count_30d + last_iso fields."""
         import re
 
         result = _text(
             await vault_mcp.call_tool(
-                "vault_health", {"include_runtime": True},
+                "vault_health",
+                {"include_runtime": True},
             ),
         )
         assert "lock_eviction:" in result
@@ -836,19 +872,22 @@ class TestVaultHealthRuntime:
         assert "last_iso: null" in result
 
     async def test_runtime_budget_does_not_leak_api_key(
-        self, mock_vault: Path,
+        self,
+        mock_vault: Path,
     ) -> None:
         secret = "sk-RUNTIME-NEVER-LEAK-ABCDEF"
         mcp = create_server(
             vault_path=mock_vault,
             openrouter_client=OpenRouterClient(
-                api_key=secret, default_model="qwen/qwen3-coder:free",
+                api_key=secret,
+                default_model="qwen/qwen3-coder:free",
             ),
         )
         try:
             result = _text(
                 await mcp.call_tool(
-                    "vault_health", {"include_runtime": True},
+                    "vault_health",
+                    {"include_runtime": True},
                 ),
             )
             assert secret not in result
@@ -875,8 +914,10 @@ class TestVaultWrite:
         result = await mcp.call_tool(
             "vault_write",
             {
-                "project": "testproject", "section": "nonexistent",
-                "operation": "append", "content": "x",
+                "project": "testproject",
+                "section": "nonexistent",
+                "operation": "append",
+                "content": "x",
             },
         )
         text = _text(result)
@@ -1118,7 +1159,9 @@ class TestCaptureLesson:
         subprocess.run(["git", "add", "."], cwd=git_vault, capture_output=True, check=True)
         subprocess.run(
             ["git", "commit", "-m", "remove lessons"],
-            cwd=git_vault, capture_output=True, check=True,
+            cwd=git_vault,
+            capture_output=True,
+            check=True,
         )
 
         mcp = create_server(vault_path=git_vault)
@@ -1170,7 +1213,10 @@ class TestCaptureLesson:
 
         log = subprocess.run(
             ["git", "log", "--oneline", "-1"],
-            cwd=git_vault, capture_output=True, text=True, check=True,
+            cwd=git_vault,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         assert "capture_lesson" in log.stdout or "lesson" in log.stdout.lower()
 
@@ -1228,16 +1274,15 @@ class TestCaptureLessonXmlDefense:
         )
 
         # The lesson WAS written (warn-don't-reject contract).
-        lessons = (
-            git_vault / "10_projects" / "testproject" / "90-lessons.md"
-        ).read_text()
+        lessons = (git_vault / "10_projects" / "testproject" / "90-lessons.md").read_text()
         # HTML comment marker visible during manual review.
         assert "POSSIBLE_CORRUPTION" in lessons, (
             "expected POSSIBLE_CORRUPTION marker in lessons file"
         )
 
     async def test_clean_lesson_has_no_warning_or_marker(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         """Normal lesson body without suspect patterns → no warning, no marker."""
         mcp = create_server(vault_path=git_vault)
@@ -1256,9 +1301,7 @@ class TestCaptureLessonXmlDefense:
         assert "WARNING" not in text
         assert "POSSIBLE_CORRUPTION" not in text
 
-        lessons = (
-            git_vault / "10_projects" / "testproject" / "90-lessons.md"
-        ).read_text()
+        lessons = (git_vault / "10_projects" / "testproject" / "90-lessons.md").read_text()
         assert "POSSIBLE_CORRUPTION" not in lessons
 
 
@@ -1429,7 +1472,8 @@ class TestDelegateTaskSummarize:
         assert "type=project" in text
 
     async def test_large_file_returns_summary_or_content(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         """Files >50 lines: worker summary if available, raw content otherwise."""
         result = await vault_mcp.call_tool(
@@ -1467,16 +1511,13 @@ class TestDelegateTaskSummarize:
         """max_summary_lines is a valid parameter (used when workers are online)."""
         result = await vault_mcp.call_tool(
             "delegate_task",
-            {"project": "testproject", "path": "92-large-doc.md",
-             "max_summary_lines": 10},
+            {"project": "testproject", "path": "92-large-doc.md", "max_summary_lines": 10},
         )
         text = _text(result)
         assert "Large Document" in text
 
     async def test_missing_project(self, vault_mcp: FastMCP) -> None:
-        result = await vault_mcp.call_tool(
-            "delegate_task", {"project": "nonexistent"}
-        )
+        result = await vault_mcp.call_tool("delegate_task", {"project": "nonexistent"})
         assert "not found" in _text(result).lower()
 
     async def test_missing_file(self, vault_mcp: FastMCP) -> None:
@@ -1497,9 +1538,7 @@ class TestDelegateTaskSummarize:
         bare = mock_vault / "10_projects" / "testproject" / "bare.md"
         bare.write_text("# Bare\nJust text.\n")
         mcp = create_server(vault_path=mock_vault)
-        result = await mcp.call_tool(
-            "delegate_task", {"project": "testproject", "path": "bare.md"}
-        )
+        result = await mcp.call_tool("delegate_task", {"project": "testproject", "path": "bare.md"})
         text = _text(result)
         assert "# Bare" in text
         assert "**Metadata:**" not in text
@@ -1511,14 +1550,13 @@ class TestDelegateTaskSummarize:
 class TestVaultSearchRanked:
     async def test_empty_query_rejected(self, vault_mcp: FastMCP) -> None:
         result = await vault_mcp.call_tool(
-            "vault_search", {"ranked": True},
+            "vault_search",
+            {"ranked": True},
         )
         assert "Query is required" in _text(result)
 
     async def test_finds_matching_files(self, vault_mcp: FastMCP) -> None:
-        result = await vault_mcp.call_tool(
-            "vault_search", {"query": "Task one", "ranked": True}
-        )
+        result = await vault_mcp.call_tool("vault_search", {"query": "Task one", "ranked": True})
         text = _text(result)
         assert "11-tasks.md" in text
         assert "score:" in text
@@ -1531,9 +1569,7 @@ class TestVaultSearchRanked:
 
     async def test_active_ranks_above_terminal(self, vault_mcp: FastMCP) -> None:
         """Active files should score higher than completed/accepted files."""
-        result = await vault_mcp.call_tool(
-            "vault_search", {"query": "Lesson", "ranked": True}
-        )
+        result = await vault_mcp.call_tool("vault_search", {"query": "Lesson", "ranked": True})
         text = _text(result)
         lines = text.splitlines()
         score_lines = [ln for ln in lines if "score:" in ln]
@@ -1551,10 +1587,7 @@ class TestVaultSearchRanked:
             "alpha alpha alpha\nalpha again\nalpha more\n"
         )
         few = mock_vault / "10_projects" / "testproject" / "few-matches.md"
-        few.write_text(
-            "---\nid: few\ntype: lesson\nstatus: active\n---\n\n"
-            "alpha once\n"
-        )
+        few.write_text("---\nid: few\ntype: lesson\nstatus: active\n---\n\nalpha once\n")
         mcp = create_server(vault_path=mock_vault)
         result = await mcp.call_tool("vault_search", {"query": "alpha", "ranked": True})
         text = _text(result)
@@ -1587,18 +1620,14 @@ class TestVaultSearchRanked:
         assert "truncated" in text.lower()
 
     async def test_case_insensitive(self, vault_mcp: FastMCP) -> None:
-        result = await vault_mcp.call_tool(
-            "vault_search", {"query": "task ONE", "ranked": True}
-        )
+        result = await vault_mcp.call_tool("vault_search", {"query": "task ONE", "ranked": True})
         assert "11-tasks.md" in _text(result)
 
     async def test_files_without_frontmatter_searchable(self, mock_vault: Path) -> None:
         bare = mock_vault / "10_projects" / "testproject" / "bare.md"
         bare.write_text("# Bare\nSearchable bare content.\n")
         mcp = create_server(vault_path=mock_vault)
-        result = await mcp.call_tool(
-            "vault_search", {"query": "Searchable bare", "ranked": True}
-        )
+        result = await mcp.call_tool("vault_search", {"query": "Searchable bare", "ranked": True})
         text = _text(result)
         assert "bare.md" in text
         assert "score:" in text
@@ -1790,12 +1819,15 @@ class TestRelevanceTracking:
 
         relevance = RelevanceTracker()
         mcp = create_server(vault_path=git_vault, relevance_tracker=relevance)
-        await mcp.call_tool("vault_write", {
-            "project": "testproject",
-            "section": "lessons",
-            "operation": "append",
-            "content": "\n## New Lesson\nTest.",
-        })
+        await mcp.call_tool(
+            "vault_write",
+            {
+                "project": "testproject",
+                "section": "lessons",
+                "operation": "append",
+                "content": "\n## New Lesson\nTest.",
+            },
+        )
         scores = relevance.get_scores("testproject")
         assert "lessons" in scores
 
@@ -1824,7 +1856,8 @@ class TestAdaptiveBriefing:
         assert "Lessons" in text
 
     async def test_briefing_prioritizes_high_score_sections(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         """After repeated task queries, briefing should show tasks first."""
         from hive.relevance import RelevanceTracker
@@ -1841,7 +1874,8 @@ class TestAdaptiveBriefing:
         assert tasks_pos < lessons_pos
 
     async def test_briefing_reorders_when_lessons_dominate(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         """When lessons are accessed more, they should appear before tasks."""
         from hive.relevance import RelevanceTracker
@@ -1882,13 +1916,13 @@ class TestVaultSearchRecent:
         import subprocess
 
         new_file = git_vault / "10_projects" / "testproject" / "new-note.md"
-        new_file.write_text(
-            "---\nid: new-note\ntype: lesson\nstatus: active\n---\n\n# New\n"
-        )
+        new_file.write_text("---\nid: new-note\ntype: lesson\nstatus: active\n---\n\n# New\n")
         subprocess.run(["git", "add", "."], cwd=git_vault, capture_output=True, check=True)
         subprocess.run(
             ["git", "commit", "-m", "add note"],
-            cwd=git_vault, capture_output=True, check=True,
+            cwd=git_vault,
+            capture_output=True,
+            check=True,
         )
         mcp = create_server(vault_path=git_vault)
         result = await mcp.call_tool("vault_search", {"since_days": 1})
@@ -1906,12 +1940,12 @@ class TestVaultSearchRecent:
         subprocess.run(["git", "add", "."], cwd=git_vault, capture_output=True, check=True)
         subprocess.run(
             ["git", "commit", "-m", "add other"],
-            cwd=git_vault, capture_output=True, check=True,
+            cwd=git_vault,
+            capture_output=True,
+            check=True,
         )
         mcp = create_server(vault_path=git_vault)
-        result = await mcp.call_tool(
-            "vault_search", {"since_days": 1, "project": "testproject"}
-        )
+        result = await mcp.call_tool("vault_search", {"since_days": 1, "project": "testproject"})
         text = _text(result)
         assert "other" not in text.lower() or "testproject" in text
 
@@ -1947,11 +1981,14 @@ class TestVaultSearchRecent:
         subprocess.run(["git", "add", "."], cwd=git_vault, capture_output=True, check=True)
         subprocess.run(
             ["git", "commit", "-m", "bulk add"],
-            cwd=git_vault, capture_output=True, check=True,
+            cwd=git_vault,
+            capture_output=True,
+            check=True,
         )
         mcp = create_server(vault_path=git_vault)
         result = await mcp.call_tool(
-            "vault_search", {"since_days": 1, "max_lines": 100},
+            "vault_search",
+            {"since_days": 1, "max_lines": 100},
         )
         assert "truncated" in _text(result).lower()
 
@@ -1965,7 +2002,8 @@ class TestVaultUsage:
         await vault_mcp.call_tool("vault_list", {})
         await vault_mcp.call_tool("vault_query", {"project": "testproject"})
         result = await vault_mcp.call_tool(
-            "vault_health", {"include_usage": True, "usage_days": 1},
+            "vault_health",
+            {"include_usage": True, "usage_days": 1},
         )
         text = _text(result)
         assert "vault_list" in text
@@ -1975,21 +2013,24 @@ class TestVaultUsage:
     async def test_tracks_project(self, vault_mcp: FastMCP) -> None:
         await vault_mcp.call_tool("vault_query", {"project": "testproject"})
         result = await vault_mcp.call_tool(
-            "vault_health", {"include_usage": True, "usage_days": 1},
+            "vault_health",
+            {"include_usage": True, "usage_days": 1},
         )
         assert "testproject" in _text(result)
 
     async def test_empty_usage(self, tmp_path: Path) -> None:
         mcp = create_server(vault_path=tmp_path)
         result = await mcp.call_tool(
-            "vault_health", {"include_usage": True, "usage_days": 1},
+            "vault_health",
+            {"include_usage": True, "usage_days": 1},
         )
         assert "no vault tool calls" in _text(result).lower()
 
     async def test_estimates_tokens(self, vault_mcp: FastMCP) -> None:
         await vault_mcp.call_tool("vault_query", {"project": "testproject"})
         result = await vault_mcp.call_tool(
-            "vault_health", {"include_usage": True, "usage_days": 1},
+            "vault_health",
+            {"include_usage": True, "usage_days": 1},
         )
         assert "tokens served" in _text(result).lower()
 
@@ -2020,9 +2061,7 @@ class TestDelegateTaskAutoRouting:
     """Auto routing: Ollama first, then OpenRouter free, then paid."""
 
     @pytest.mark.asyncio
-    async def test_ollama_first_when_available(
-        self, worker: FastMCP, ollama: OllamaClient
-    ) -> None:
+    async def test_ollama_first_when_available(self, worker: FastMCP, ollama: OllamaClient) -> None:
         ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
         ollama.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=ClientResponse(
@@ -2198,7 +2237,9 @@ class TestDelegateTaskExplicitModel:
 
     @pytest.mark.asyncio
     async def test_explicit_openrouter_paid(
-        self, worker: FastMCP, openrouter: OpenRouterClient,
+        self,
+        worker: FastMCP,
+        openrouter: OpenRouterClient,
     ) -> None:
         openrouter.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=ClientResponse(
@@ -2216,7 +2257,9 @@ class TestDelegateTaskExplicitModel:
 
     @pytest.mark.asyncio
     async def test_explicit_custom_model(
-        self, worker: FastMCP, openrouter: OpenRouterClient,
+        self,
+        worker: FastMCP,
+        openrouter: OpenRouterClient,
     ) -> None:
         openrouter.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=ClientResponse(
@@ -2229,7 +2272,8 @@ class TestDelegateTaskExplicitModel:
         )
         result = _text(
             await worker.call_tool(
-                "delegate_task", {"prompt": "test", "model": "deepseek/deepseek-v3"},
+                "delegate_task",
+                {"prompt": "test", "model": "deepseek/deepseek-v3"},
             )
         )
         assert "custom model output" in result
@@ -2347,23 +2391,32 @@ class TestMultiScopeListProjects:
 class TestMultiScopeQuery:
     async def test_auto_scan_finds_work_project(self, multi_scope_vault: Path) -> None:
         mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
-        result = _text(await mcp.call_tool(
-            "vault_query", {"project": "my-company", "section": "context"},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_query",
+                {"project": "my-company", "section": "context"},
+            )
+        )
         assert "My Company" in result
 
     async def test_explicit_scope(self, multi_scope_vault: Path) -> None:
         mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
-        result = _text(await mcp.call_tool(
-            "vault_query", {"project": "work:my-company", "section": "context"},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_query",
+                {"project": "work:my-company", "section": "context"},
+            )
+        )
         assert "My Company" in result
 
     async def test_explicit_wrong_scope(self, multi_scope_vault: Path) -> None:
         mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
-        result = _text(await mcp.call_tool(
-            "vault_query", {"project": "projects:my-company", "section": "context"},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_query",
+                {"project": "projects:my-company", "section": "context"},
+            )
+        )
         assert "not found" in result.lower()
 
     async def test_first_match_wins(self, multi_scope_vault: Path) -> None:
@@ -2371,21 +2424,26 @@ class TestMultiScopeQuery:
         dup = multi_scope_vault / "50_work" / "testproject"
         dup.mkdir(parents=True)
         (dup / "00-context.md").write_text(
-            "---\nid: testproject-work\ntype: project\nstatus: active\n---\n\n"
-            "# Work Copy\n"
+            "---\nid: testproject-work\ntype: project\nstatus: active\n---\n\n# Work Copy\n"
         )
         mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
-        result = _text(await mcp.call_tool(
-            "vault_query", {"project": "testproject", "section": "context"},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_query",
+                {"project": "testproject", "section": "context"},
+            )
+        )
         # projects scope comes first → should find the original, not "Work Copy"
         assert "Test Project" in result
 
     async def test_meta_still_works(self, multi_scope_vault: Path) -> None:
         mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
-        result = _text(await mcp.call_tool(
-            "vault_query", {"project": "_meta", "path": "patterns/pattern-tdd.md"},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_query",
+                {"project": "_meta", "path": "patterns/pattern-tdd.md"},
+            )
+        )
         assert "Test-Driven Development" in result
 
 
@@ -2400,31 +2458,40 @@ class TestMultiScopeHealth:
 class TestMultiScopeUpdate:
     async def test_update_work_project(self, git_multi_scope_vault: Path) -> None:
         mcp = create_server(
-            vault_path=git_multi_scope_vault, vault_scopes=MULTI_SCOPES,
+            vault_path=git_multi_scope_vault,
+            vault_scopes=MULTI_SCOPES,
         )
-        result = _text(await mcp.call_tool("vault_write", {
-            "project": "my-company",
-            "section": "lessons",
-            "operation": "append",
-            "content": "\n## New Lesson\nAlways test.\n",
-        }))
+        result = _text(
+            await mcp.call_tool(
+                "vault_write",
+                {
+                    "project": "my-company",
+                    "section": "lessons",
+                    "operation": "append",
+                    "content": "\n## New Lesson\nAlways test.\n",
+                },
+            )
+        )
         assert "Updated" in result
-        content = (
-            git_multi_scope_vault / "50_work" / "my-company" / "90-lessons.md"
-        ).read_text()
+        content = (git_multi_scope_vault / "50_work" / "my-company" / "90-lessons.md").read_text()
         assert "Always test" in content
 
 
 class TestMultiScopeSearchRecent:
     async def test_project_filter_in_work_scope(
-        self, git_multi_scope_vault: Path,
+        self,
+        git_multi_scope_vault: Path,
     ) -> None:
         mcp = create_server(
-            vault_path=git_multi_scope_vault, vault_scopes=MULTI_SCOPES,
+            vault_path=git_multi_scope_vault,
+            vault_scopes=MULTI_SCOPES,
         )
-        result = _text(await mcp.call_tool(
-            "vault_search", {"project": "my-company", "since_days": 30},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_search",
+                {"project": "my-company", "since_days": 30},
+            )
+        )
         # Should find files in 50_work/my-company, not return "No changes"
         assert "my-company" in result or "50_work" in result
 
@@ -2440,52 +2507,74 @@ class TestHierarchicalScopeWriteGuard:
             "---\nid: hydra3d\ntype: project\nstatus: active\n---\n\n# Hydra3D\n"
         )
         import subprocess
+
         subprocess.run(
-            ["git", "add", "."], cwd=git_multi_scope_vault,
-            capture_output=True, check=True,
+            ["git", "add", "."],
+            cwd=git_multi_scope_vault,
+            capture_output=True,
+            check=True,
         )
         subprocess.run(
-            ["git", "commit", "-m", "add hydra3d"], cwd=git_multi_scope_vault,
-            capture_output=True, check=True,
+            ["git", "commit", "-m", "add hydra3d"],
+            cwd=git_multi_scope_vault,
+            capture_output=True,
+            check=True,
         )
 
         mcp = create_server(vault_path=git_multi_scope_vault, vault_scopes=MULTI_SCOPES)
-        result = _text(await mcp.call_tool("vault_write", {
-            "project": "work:hydra3d",
-            "path": "notes.md",
-            "content": "# Notes\n",
-            "doc_type": "note",
-            "operation": "create",
-        }))
+        result = _text(
+            await mcp.call_tool(
+                "vault_write",
+                {
+                    "project": "work:hydra3d",
+                    "path": "notes.md",
+                    "content": "# Notes\n",
+                    "doc_type": "note",
+                    "operation": "create",
+                },
+            )
+        )
         assert "created" in result.lower()
 
     async def test_write_to_nonexistent_slug_without_path_fails(
-        self, git_multi_scope_vault: Path,
+        self,
+        git_multi_scope_vault: Path,
     ) -> None:
         """Creating a file in a non-existent slug without category path returns error."""
         mcp = create_server(vault_path=git_multi_scope_vault, vault_scopes=MULTI_SCOPES)
-        result = _text(await mcp.call_tool("vault_write", {
-            "project": "work:new-thing",
-            "path": "notes.md",
-            "content": "# Notes\n",
-            "doc_type": "note",
-            "operation": "create",
-        }))
+        result = _text(
+            await mcp.call_tool(
+                "vault_write",
+                {
+                    "project": "work:new-thing",
+                    "path": "notes.md",
+                    "content": "# Notes\n",
+                    "doc_type": "note",
+                    "operation": "create",
+                },
+            )
+        )
         assert "not found" in result.lower()
 
     async def test_write_with_explicit_category_path_works(
-        self, git_multi_scope_vault: Path,
+        self,
+        git_multi_scope_vault: Path,
     ) -> None:
         """Creating with explicit category/entity path works (vault_write resolves it)."""
         # my-company is a direct child of 50_work — use it as the target
         mcp = create_server(vault_path=git_multi_scope_vault, vault_scopes=MULTI_SCOPES)
-        result = _text(await mcp.call_tool("vault_write", {
-            "project": "work:my-company",
-            "path": "40-runbooks/deploy.md",
-            "content": "# Deploy Guide\n",
-            "doc_type": "runbook",
-            "operation": "create",
-        }))
+        result = _text(
+            await mcp.call_tool(
+                "vault_write",
+                {
+                    "project": "work:my-company",
+                    "path": "40-runbooks/deploy.md",
+                    "content": "# Deploy Guide\n",
+                    "doc_type": "runbook",
+                    "operation": "create",
+                },
+            )
+        )
         assert "created" in result.lower()
 
 
@@ -2504,7 +2593,8 @@ class TestDuplicateNameDetection:
         assert "agents" in result
 
     async def test_no_false_positive_without_duplicates(
-        self, multi_scope_vault: Path,
+        self,
+        multi_scope_vault: Path,
     ) -> None:
         """No duplicate warning when all names are unique."""
         mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
@@ -2518,58 +2608,88 @@ class TestVaultSearchScopeFilter:
     async def test_scope_filter_limits_to_work(self, multi_scope_vault: Path) -> None:
         """Search with scope='work' only finds files in 50_work."""
         mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
-        result = _text(await mcp.call_tool("vault_search", {
-            "query": "Project",
-            "scope": "work",
-        }))
+        result = _text(
+            await mcp.call_tool(
+                "vault_search",
+                {
+                    "query": "Project",
+                    "scope": "work",
+                },
+            )
+        )
         assert "50_work" in result or "my-company" in result
         assert "10_projects" not in result
 
     async def test_scope_filter_limits_to_projects(self, multi_scope_vault: Path) -> None:
         """Search with scope='projects' only finds files in 10_projects."""
         mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
-        result = _text(await mcp.call_tool("vault_search", {
-            "query": "Project",
-            "scope": "projects",
-        }))
+        result = _text(
+            await mcp.call_tool(
+                "vault_search",
+                {
+                    "query": "Project",
+                    "scope": "projects",
+                },
+            )
+        )
         assert "10_projects" in result or "testproject" in result
         assert "50_work" not in result
 
     async def test_scope_filter_invalid_scope(self, multi_scope_vault: Path) -> None:
         """Search with an invalid scope name returns error."""
         mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
-        result = _text(await mcp.call_tool("vault_search", {
-            "query": "anything",
-            "scope": "nonexistent",
-        }))
+        result = _text(
+            await mcp.call_tool(
+                "vault_search",
+                {
+                    "query": "anything",
+                    "scope": "nonexistent",
+                },
+            )
+        )
         assert "unknown scope" in result.lower()
 
     async def test_no_scope_searches_everything(self, multi_scope_vault: Path) -> None:
         """Without scope, searches the entire vault (backward compat)."""
         mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
-        result = _text(await mcp.call_tool("vault_search", {
-            "query": "Project",
-        }))
+        result = _text(
+            await mcp.call_tool(
+                "vault_search",
+                {
+                    "query": "Project",
+                },
+            )
+        )
         assert "testproject" in result.lower() or "10_projects" in result
         assert "my-company" in result.lower() or "50_work" in result
 
     async def test_scope_filter_ranked_mode(self, multi_scope_vault: Path) -> None:
         """Scope filter works in ranked mode too."""
         mcp = create_server(vault_path=multi_scope_vault, vault_scopes=MULTI_SCOPES)
-        result = _text(await mcp.call_tool("vault_search", {
-            "query": "Project",
-            "scope": "work",
-            "ranked": True,
-        }))
+        result = _text(
+            await mcp.call_tool(
+                "vault_search",
+                {
+                    "query": "Project",
+                    "scope": "work",
+                    "ranked": True,
+                },
+            )
+        )
         assert "10_projects" not in result
 
     async def test_scope_filter_recent_mode(self, git_multi_scope_vault: Path) -> None:
         """Scope filter works in recent mode too."""
         mcp = create_server(vault_path=git_multi_scope_vault, vault_scopes=MULTI_SCOPES)
-        result = _text(await mcp.call_tool("vault_search", {
-            "scope": "work",
-            "since_days": 30,
-        }))
+        result = _text(
+            await mcp.call_tool(
+                "vault_search",
+                {
+                    "scope": "work",
+                    "since_days": 30,
+                },
+            )
+        )
         assert "10_projects" not in result
 
 
@@ -2579,63 +2699,75 @@ class TestVaultSearchScopeFilter:
 class TestPathTraversal:
     async def test_query_path_escape_blocked(self, vault_mcp: FastMCP) -> None:
         # Needs enough ../.. to escape tmp_path (vault root)
-        result = _text(await vault_mcp.call_tool(
-            "vault_query",
-            {"project": "testproject", "path": "../../../../etc/passwd"},
-        ))
+        result = _text(
+            await vault_mcp.call_tool(
+                "vault_query",
+                {"project": "testproject", "path": "../../../../etc/passwd"},
+            )
+        )
         assert "escapes vault boundary" in result.lower()
 
     async def test_create_path_escape_blocked(self, git_vault: Path) -> None:
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_write",
-            {
-                "project": "testproject",
-                "path": "../../../../tmp/evil.md",
-                "content": "pwned",
-                "doc_type": "test",
-                "operation": "create",
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_write",
+                {
+                    "project": "testproject",
+                    "path": "../../../../tmp/evil.md",
+                    "content": "pwned",
+                    "doc_type": "test",
+                    "operation": "create",
+                },
+            )
+        )
         assert "escapes vault boundary" in result.lower()
 
     async def test_delegate_summarize_path_escape_blocked(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
-        result = _text(await vault_mcp.call_tool(
-            "delegate_task",
-            {"project": "testproject", "path": "../../../../etc/shadow"},
-        ))
+        result = _text(
+            await vault_mcp.call_tool(
+                "delegate_task",
+                {"project": "testproject", "path": "../../../../etc/shadow"},
+            )
+        )
         assert "escapes vault boundary" in result.lower()
 
     async def test_project_param_traversal_blocked(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         """H1: crafted project name must not escape vault boundary."""
-        result = _text(await vault_mcp.call_tool(
-            "vault_write",
-            {
-                "project": "projects:../../etc",
-                "section": "context",
-                "operation": "append",
-                "content": "pwned",
-            },
-        ))
+        result = _text(
+            await vault_mcp.call_tool(
+                "vault_write",
+                {
+                    "project": "projects:../../etc",
+                    "section": "context",
+                    "operation": "append",
+                    "content": "pwned",
+                },
+            )
+        )
         assert "not found" in result.lower()
 
     async def test_yaml_injection_sanitized(self, git_vault: Path) -> None:
         """H2: newlines in doc_type must not inject YAML fields."""
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_write",
-            {
-                "project": "testproject",
-                "path": "injected.md",
-                "content": "body",
-                "doc_type": "adr\nevil_field: true",
-                "operation": "create",
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_write",
+                {
+                    "project": "testproject",
+                    "path": "injected.md",
+                    "content": "body",
+                    "doc_type": "adr\nevil_field: true",
+                    "operation": "create",
+                },
+            )
+        )
         assert "created" in result.lower()
         content = (git_vault / "10_projects" / "testproject" / "injected.md").read_text()
         # Newline was stripped — no separate YAML key injected
@@ -2645,26 +2777,30 @@ class TestPathTraversal:
 
     async def test_patch_path_escape_blocked(self, git_vault: Path) -> None:
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "../../../../etc/passwd",
-                "find": "root",
-                "replace": "pwned",
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "../../../../etc/passwd",
+                    "find": "root",
+                    "replace": "pwned",
+                },
+            )
+        )
         assert "escapes vault boundary" in result.lower()
 
     async def test_list_files_path_escape_blocked(self, git_vault: Path) -> None:
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_list",
-            {
-                "project": "testproject",
-                "path": "../../../../etc",
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_list",
+                {
+                    "project": "testproject",
+                    "path": "../../../../etc",
+                },
+            )
+        )
         assert "escapes vault boundary" in result.lower()
 
     async def test_list_files_glob_capped(self, mock_vault: Path) -> None:
@@ -2674,10 +2810,12 @@ class TestPathTraversal:
         for i in range(510):
             (project / f"file_{i:04d}.md").write_text(f"# File {i}\n")
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
-            "vault_list",
-            {"project": "testproject", "path": "bulk", "pattern": "*.md"},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_list",
+                {"project": "testproject", "path": "bulk", "pattern": "*.md"},
+            )
+        )
         # Should contain at most 500 file entries
         file_lines = [ln for ln in result.splitlines() if ln.startswith("- ")]
         assert len(file_lines) <= 500
@@ -2685,14 +2823,16 @@ class TestPathTraversal:
     async def test_patch_invalid_keys_returns_error(self, git_vault: Path) -> None:
         """Patches with wrong dict keys return error, not KeyError crash."""
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-                "patches": [{"old": "wrong", "new": "keys"}],
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "patches": [{"old": "wrong", "new": "keys"}],
+                },
+            )
+        )
         assert "find" in result.lower() and "replace" in result.lower()
 
 
@@ -2705,15 +2845,17 @@ class TestVaultPatch:
     async def test_single_patch(self, git_vault: Path) -> None:
         """Single find/replace works."""
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-                "find": "- [ ] Task one",
-                "replace": "- [x] Task one",
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "find": "- [ ] Task one",
+                    "replace": "- [x] Task one",
+                },
+            )
+        )
         assert "1 patch" in result.lower()
         content = (git_vault / "10_projects" / "testproject" / "11-tasks.md").read_text()
         assert "- [x] Task one" in content
@@ -2721,17 +2863,19 @@ class TestVaultPatch:
     async def test_multi_patch_applies_all(self, git_vault: Path) -> None:
         """Multiple patches applied in sequence to the same file."""
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-                "patches": [
-                    {"find": "- [ ] Task one", "replace": "- [x] Task one"},
-                    {"find": "- [x] Task two", "replace": "- [ ] Task two reopened"},
-                ],
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "patches": [
+                        {"find": "- [ ] Task one", "replace": "- [x] Task one"},
+                        {"find": "- [x] Task two", "replace": "- [ ] Task two reopened"},
+                    ],
+                },
+            )
+        )
         assert "2 patches" in result.lower()
         content = (git_vault / "10_projects" / "testproject" / "11-tasks.md").read_text()
         assert "- [x] Task one" in content
@@ -2740,33 +2884,37 @@ class TestVaultPatch:
     async def test_multi_patch_single_item(self, git_vault: Path) -> None:
         """A patches list with one item works fine."""
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-                "patches": [
-                    {"find": "- [ ] Task one", "replace": "- [x] Task one"},
-                ],
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "patches": [
+                        {"find": "- [ ] Task one", "replace": "- [x] Task one"},
+                    ],
+                },
+            )
+        )
         assert "1 patch" in result.lower()
 
     async def test_multi_patch_rejects_mixed_params(self, git_vault: Path) -> None:
         """Providing both patches AND find/replace is an error."""
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-                "find": "- [ ] Task one",
-                "replace": "- [x] Task one",
-                "patches": [
-                    {"find": "- [x] Task two", "replace": "- [ ] Task two"},
-                ],
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "find": "- [ ] Task one",
+                    "replace": "- [x] Task one",
+                    "patches": [
+                        {"find": "- [x] Task two", "replace": "- [ ] Task two"},
+                    ],
+                },
+            )
+        )
         assert "error" in result.lower() or "cannot" in result.lower() or "mix" in result.lower()
         # File must remain unchanged
         content = (git_vault / "10_projects" / "testproject" / "11-tasks.md").read_text()
@@ -2775,30 +2923,34 @@ class TestVaultPatch:
     async def test_multi_patch_empty_list(self, git_vault: Path) -> None:
         """An empty patches list is an error."""
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-                "patches": [],
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "patches": [],
+                },
+            )
+        )
         assert "provide" in result.lower() or "error" in result.lower()
 
     async def test_multi_patch_ambiguous_aborts_all(self, git_vault: Path) -> None:
         """If any patch in the list is ambiguous, no patches are applied."""
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-                "patches": [
-                    {"find": "- [ ] Task one", "replace": "- [x] Task one"},
-                    {"find": "Task", "replace": "Item"},  # ambiguous
-                ],
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "patches": [
+                        {"find": "- [ ] Task one", "replace": "- [x] Task one"},
+                        {"find": "Task", "replace": "Item"},  # ambiguous
+                    ],
+                },
+            )
+        )
         assert "ambiguous" in result.lower()
         # File must remain unchanged — first patch NOT applied
         content = (git_vault / "10_projects" / "testproject" / "11-tasks.md").read_text()
@@ -2807,17 +2959,19 @@ class TestVaultPatch:
     async def test_multi_patch_not_found_aborts_all(self, git_vault: Path) -> None:
         """If any patch find text is not found, no patches are applied."""
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-                "patches": [
-                    {"find": "- [ ] Task one", "replace": "- [x] Task one"},
-                    {"find": "nonexistent text", "replace": "something"},
-                ],
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "patches": [
+                        {"find": "- [ ] Task one", "replace": "- [x] Task one"},
+                        {"find": "nonexistent text", "replace": "something"},
+                    ],
+                },
+            )
+        )
         assert "not found" in result.lower()
         # File must remain unchanged
         content = (git_vault / "10_projects" / "testproject" / "11-tasks.md").read_text()
@@ -2827,17 +2981,19 @@ class TestVaultPatch:
         """Later patches see the result of earlier patches."""
         mcp = create_server(vault_path=git_vault)
         # First patch changes text, second patch modifies the result of the first
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-                "patches": [
-                    {"find": "- [ ] Task one", "replace": "- [x] Task alpha"},
-                    {"find": "- [x] Task alpha", "replace": "- [x] Task alpha (done)"},
-                ],
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "patches": [
+                        {"find": "- [ ] Task one", "replace": "- [x] Task alpha"},
+                        {"find": "- [x] Task alpha", "replace": "- [x] Task alpha (done)"},
+                    ],
+                },
+            )
+        )
         assert "2 patches" in result.lower()
         content = (git_vault / "10_projects" / "testproject" / "11-tasks.md").read_text()
         assert "- [x] Task alpha (done)" in content
@@ -2845,69 +3001,79 @@ class TestVaultPatch:
     async def test_single_patch_project_not_found(self, git_vault: Path) -> None:
         """Single patch with unknown project returns error."""
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "nonexistent",
-                "path": "11-tasks.md",
-                "find": "foo",
-                "replace": "bar",
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "nonexistent",
+                    "path": "11-tasks.md",
+                    "find": "foo",
+                    "replace": "bar",
+                },
+            )
+        )
         assert "not found" in result.lower()
 
     async def test_single_patch_file_not_found(self, git_vault: Path) -> None:
         """Single patch with unknown file returns error."""
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "nonexistent.md",
-                "find": "foo",
-                "replace": "bar",
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "nonexistent.md",
+                    "find": "foo",
+                    "replace": "bar",
+                },
+            )
+        )
         assert "not found" in result.lower()
 
     async def test_single_patch_ambiguous(self, git_vault: Path) -> None:
         """Single patch with ambiguous match returns error."""
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-                "find": "Task",
-                "replace": "Item",
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "find": "Task",
+                    "replace": "Item",
+                },
+            )
+        )
         assert "ambiguous" in result.lower()
 
     async def test_single_patch_not_found_in_file(self, git_vault: Path) -> None:
         """Single patch with text not in file returns error."""
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-                "find": "nonexistent text here",
-                "replace": "replacement",
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "find": "nonexistent text here",
+                    "replace": "replacement",
+                },
+            )
+        )
         assert "not found" in result.lower()
 
     async def test_no_params_error(self, git_vault: Path) -> None:
         """Neither find/replace nor patches provided is an error."""
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                },
+            )
+        )
         assert "error" in result.lower() or "provide" in result.lower()
 
     async def test_multi_patch_single_git_commit(self, git_vault: Path) -> None:
@@ -2918,7 +3084,10 @@ class TestVaultPatch:
         # Count commits before
         before = subprocess.run(
             ["git", "rev-list", "--count", "HEAD"],
-            cwd=git_vault, capture_output=True, text=True, check=True,
+            cwd=git_vault,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         count_before = int(before.stdout.strip())
 
@@ -2936,7 +3105,10 @@ class TestVaultPatch:
 
         after = subprocess.run(
             ["git", "rev-list", "--count", "HEAD"],
-            cwd=git_vault, capture_output=True, text=True, check=True,
+            cwd=git_vault,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         count_after = int(after.stdout.strip())
         assert count_after == count_before + 1
@@ -2946,7 +3118,8 @@ class TestVaultPatchTolerantMatching:
     """Tests for tolerant matching in vault_patch (Issue #52)."""
 
     async def test_patch_tolerates_trailing_whitespace(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         """Multi-line find text with trailing whitespace differences."""
         tasks = git_vault / "10_projects" / "testproject" / "11-tasks.md"
@@ -2958,66 +3131,82 @@ class TestVaultPatchTolerantMatching:
         )
         tasks.write_text(raw)
         import subprocess
+
         subprocess.run(
-            ["git", "add", "."], cwd=git_vault, capture_output=True,
+            ["git", "add", "."],
+            cwd=git_vault,
+            capture_output=True,
         )
         subprocess.run(
-            ["git", "commit", "-m", "ws"], cwd=git_vault, capture_output=True,
+            ["git", "commit", "-m", "ws"],
+            cwd=git_vault,
+            capture_output=True,
         )
 
         mcp = create_server(vault_path=git_vault)
         # LLM stripped trailing spaces from multi-line text
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-                "find": "| A | B |\n|---|---|\n| 1 | 2 |",
-                "replace": "| A | B | C |\n|---|---|---|\n| 1 | 2 | 3 |",
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "find": "| A | B |\n|---|---|\n| 1 | 2 |",
+                    "replace": "| A | B | C |\n|---|---|---|\n| 1 | 2 | 3 |",
+                },
+            )
+        )
         assert "1 patch" in result.lower()
 
     async def test_patch_not_found_shows_similarity(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         """Close miss includes similarity % in error."""
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-                "find": "- [ ] Task ones",
-                "replace": "- [x] Task one",
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "find": "- [ ] Task ones",
+                    "replace": "- [x] Task one",
+                },
+            )
+        )
         assert "not found" in result.lower()
         assert "%" in result
 
     async def test_patch_roundtrip_query_then_patch(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         """Real workflow: vault_query output used as vault_patch find text."""
         mcp = create_server(vault_path=git_vault)
-        query_result = _text(await mcp.call_tool(
-            "vault_query",
-            {"project": "testproject", "section": "tasks"},
-        ))
+        query_result = _text(
+            await mcp.call_tool(
+                "vault_query",
+                {"project": "testproject", "section": "tasks"},
+            )
+        )
         assert "- [ ] Task one" in query_result
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-                "find": "- [ ] Task one",
-                "replace": "- [x] Task one (completed)",
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "find": "- [ ] Task one",
+                    "replace": "- [x] Task one (completed)",
+                },
+            )
+        )
         assert "1 patch" in result.lower()
 
     async def test_patch_body_only_match_when_frontmatter_overlaps(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         """find text matches body uniquely even if ambiguous in full file."""
         tasks = git_vault / "10_projects" / "testproject" / "11-tasks.md"
@@ -3026,23 +3215,30 @@ class TestVaultPatchTolerantMatching:
         raw = raw.replace("- [ ] Task one", "- [ ] active task")
         tasks.write_text(raw)
         import subprocess
+
         subprocess.run(
-            ["git", "add", "."], cwd=git_vault, capture_output=True,
+            ["git", "add", "."],
+            cwd=git_vault,
+            capture_output=True,
         )
         subprocess.run(
-            ["git", "commit", "-m", "ov"], cwd=git_vault, capture_output=True,
+            ["git", "commit", "-m", "ov"],
+            cwd=git_vault,
+            capture_output=True,
         )
 
         mcp = create_server(vault_path=git_vault)
-        result = _text(await mcp.call_tool(
-            "vault_patch",
-            {
-                "project": "testproject",
-                "path": "11-tasks.md",
-                "find": "- [ ] active task",
-                "replace": "- [x] active task (done)",
-            },
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_patch",
+                {
+                    "project": "testproject",
+                    "path": "11-tasks.md",
+                    "find": "- [ ] active task",
+                    "replace": "- [x] active task (done)",
+                },
+            )
+        )
         assert "1 patch" in result.lower()
         content = tasks.read_text()
         assert content.startswith("---")
@@ -3059,15 +3255,17 @@ class TestGitCommitResilience:
         mcp = create_server(vault_path=git_vault)
 
         with patch("hive._helpers.subprocess.run", side_effect=OSError("git not found")):
-            result = _text(await mcp.call_tool(
-                "vault_patch",
-                {
-                    "project": "testproject",
-                    "path": "11-tasks.md",
-                    "find": "- [ ] Task one",
-                    "replace": "- [x] Task one done",
-                },
-            ))
+            result = _text(
+                await mcp.call_tool(
+                    "vault_patch",
+                    {
+                        "project": "testproject",
+                        "path": "11-tasks.md",
+                        "find": "- [ ] Task one",
+                        "replace": "- [x] Task one done",
+                    },
+                )
+            )
 
         assert "applied" in result.lower()
         # Data was written to disk despite git failure
@@ -3081,15 +3279,17 @@ class TestGitCommitResilience:
         mcp = create_server(vault_path=git_vault)
 
         with patch("hive._helpers.subprocess.run", side_effect=RuntimeError("unexpected")):
-            result = _text(await mcp.call_tool(
-                "vault_write",
-                {
-                    "project": "testproject",
-                    "section": "tasks",
-                    "operation": "append",
-                    "content": "\n- [ ] New task from test\n",
-                },
-            ))
+            result = _text(
+                await mcp.call_tool(
+                    "vault_write",
+                    {
+                        "project": "testproject",
+                        "section": "tasks",
+                        "operation": "append",
+                        "content": "\n- [ ] New task from test\n",
+                    },
+                )
+            )
 
         assert "updated" in result.lower()
 
@@ -3112,9 +3312,12 @@ class TestGitCommitResilience:
             )
 
         # Second call: read-only, must succeed (no mock — real subprocess)
-        result = _text(await mcp.call_tool(
-            "vault_query", {"project": "testproject", "section": "tasks"},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_query",
+                {"project": "testproject", "section": "tasks"},
+            )
+        )
         assert "task one done" in result.lower()
 
 
@@ -3128,9 +3331,12 @@ class TestGitReadResilience:
         mcp = create_server(vault_path=git_vault)
 
         with patch("hive._helpers.subprocess.run", side_effect=OSError("git not found")):
-            result = _text(await mcp.call_tool(
-                "session_briefing", {"project": "testproject"},
-            ))
+            result = _text(
+                await mcp.call_tool(
+                    "session_briefing",
+                    {"project": "testproject"},
+                )
+            )
 
         assert "session briefing" in result.lower()
 
@@ -3141,9 +3347,12 @@ class TestGitReadResilience:
         mcp = create_server(vault_path=git_vault)
 
         with patch("hive._helpers.subprocess.run", side_effect=OSError("git not found")):
-            result = _text(await mcp.call_tool(
-                "vault_search", {"since_days": 7},
-            ))
+            result = _text(
+                await mcp.call_tool(
+                    "vault_search",
+                    {"since_days": 7},
+                )
+            )
 
         # Should return gracefully (no changes or empty result)
         assert result  # non-empty response
@@ -3162,15 +3371,17 @@ class TestFileIOResilience:
         tasks = git_vault / "10_projects" / "testproject" / "11-tasks.md"
         tasks.chmod(0o000)
         try:
-            result = _text(await mcp.call_tool(
-                "vault_patch",
-                {
-                    "project": "testproject",
-                    "path": "11-tasks.md",
-                    "find": "foo",
-                    "replace": "bar",
-                },
-            ))
+            result = _text(
+                await mcp.call_tool(
+                    "vault_patch",
+                    {
+                        "project": "testproject",
+                        "path": "11-tasks.md",
+                        "find": "foo",
+                        "replace": "bar",
+                    },
+                )
+            )
             # format_io_error wording: "Cannot read 'X': permission denied. ..."
             lower = result.lower()
             assert "permission" in lower or "error" in lower
@@ -3183,15 +3394,17 @@ class TestFileIOResilience:
         tasks = git_vault / "10_projects" / "testproject" / "11-tasks.md"
         tasks.chmod(0o444)
         try:
-            result = _text(await mcp.call_tool(
-                "vault_write",
-                {
-                    "project": "testproject",
-                    "section": "tasks",
-                    "operation": "append",
-                    "content": "\n- [ ] New task\n",
-                },
-            ))
+            result = _text(
+                await mcp.call_tool(
+                    "vault_write",
+                    {
+                        "project": "testproject",
+                        "section": "tasks",
+                        "operation": "append",
+                        "content": "\n- [ ] New task\n",
+                    },
+                )
+            )
             lower = result.lower()
             assert "permission" in lower or "error" in lower
         finally:
@@ -3203,20 +3416,25 @@ class TestSectionFallback:
         # Create a bare context.md alongside the legacy 00-context.md
         project = mock_vault / "10_projects" / "testproject"
         (project / "context.md").write_text(
-            "---\nid: bare-context\ntype: project\nstatus: active\n---\n\n"
-            "# Bare Context\n"
+            "---\nid: bare-context\ntype: project\nstatus: active\n---\n\n# Bare Context\n"
         )
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
-            "vault_query", {"project": "testproject", "section": "context"},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_query",
+                {"project": "testproject", "section": "context"},
+            )
+        )
         assert "Bare Context" in result
 
     async def test_legacy_fallback(self, mock_vault: Path) -> None:
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
-            "vault_query", {"project": "testproject", "section": "context"},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_query",
+                {"project": "testproject", "section": "context"},
+            )
+        )
         assert "Test Project" in result
 
 
@@ -3241,28 +3459,34 @@ def worker_vault(
 
 def _worker_response(text: str) -> ClientResponse:
     return ClientResponse(
-        text=text, model="qwen2.5-coder:7b", tokens=100, cost_usd=0.0, latency_ms=500,
+        text=text,
+        model="qwen2.5-coder:7b",
+        tokens=100,
+        cost_usd=0.0,
+        latency_ms=500,
     )
 
 
-_VALID_LESSONS_JSON = json.dumps([
-    {
-        "title": "Always check return values",
-        "context": "Debugging a crash in the parser",
-        "problem": "Function returned None, caller didn't check",
-        "solution": "Added explicit None guard before use",
-        "tags": ["python", "debugging"],
-        "confidence": 0.9,
-    },
-    {
-        "title": "Use parameterized queries",
-        "context": "Writing database layer",
-        "problem": "String interpolation in SQL is injection risk",
-        "solution": "Switched to ? placeholders",
-        "tags": ["sql", "security"],
-        "confidence": 0.8,
-    },
-])
+_VALID_LESSONS_JSON = json.dumps(
+    [
+        {
+            "title": "Always check return values",
+            "context": "Debugging a crash in the parser",
+            "problem": "Function returned None, caller didn't check",
+            "solution": "Added explicit None guard before use",
+            "tags": ["python", "debugging"],
+            "confidence": 0.9,
+        },
+        {
+            "title": "Use parameterized queries",
+            "context": "Writing database layer",
+            "problem": "String interpolation in SQL is injection risk",
+            "solution": "Switched to ? placeholders",
+            "tags": ["sql", "security"],
+            "confidence": 0.8,
+        },
+    ]
+)
 
 
 class TestExtractLessons:
@@ -3270,16 +3494,21 @@ class TestExtractLessons:
 
     @pytest.mark.asyncio
     async def test_extracts_and_writes_lessons(
-        self, git_vault: Path, worker_vault: FastMCP, ollama: OllamaClient,
+        self,
+        git_vault: Path,
+        worker_vault: FastMCP,
+        ollama: OllamaClient,
     ) -> None:
         ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
         ollama.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response(_VALID_LESSONS_JSON),
         )
-        result = _text(await worker_vault.call_tool(
-            "capture_lesson",
-            {"project": "testproject", "text": "We found a crash..."},
-        ))
+        result = _text(
+            await worker_vault.call_tool(
+                "capture_lesson",
+                {"project": "testproject", "text": "We found a crash..."},
+            )
+        )
         assert "2" in result  # 2 lessons extracted
         assert "Always check return values" in result
 
@@ -3289,7 +3518,10 @@ class TestExtractLessons:
 
     @pytest.mark.asyncio
     async def test_deduplicates_existing(
-        self, git_vault: Path, worker_vault: FastMCP, ollama: OllamaClient,
+        self,
+        git_vault: Path,
+        worker_vault: FastMCP,
+        ollama: OllamaClient,
     ) -> None:
         # Pre-write a lesson with same title
         lessons_file = git_vault / "10_projects" / "testproject" / "90-lessons.md"
@@ -3301,106 +3533,157 @@ class TestExtractLessons:
         ollama.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response(_VALID_LESSONS_JSON),
         )
-        result = _text(await worker_vault.call_tool(
-            "capture_lesson",
-            {"project": "testproject", "text": "session text"},
-        ))
+        result = _text(
+            await worker_vault.call_tool(
+                "capture_lesson",
+                {"project": "testproject", "text": "session text"},
+            )
+        )
         # First lesson skipped (duplicate), second written
         assert "skipped" in result.lower() or "duplicate" in result.lower()
         assert "Use parameterized queries" in result
 
     @pytest.mark.asyncio
     async def test_filters_low_confidence(
-        self, worker_vault: FastMCP, ollama: OllamaClient,
+        self,
+        worker_vault: FastMCP,
+        ollama: OllamaClient,
     ) -> None:
-        low_conf = json.dumps([
-            {
-                "title": "Maybe this matters",
-                "context": "ctx", "problem": "prob", "solution": "sol",
-                "tags": [], "confidence": 0.3,
-            },
-        ])
+        low_conf = json.dumps(
+            [
+                {
+                    "title": "Maybe this matters",
+                    "context": "ctx",
+                    "problem": "prob",
+                    "solution": "sol",
+                    "tags": [],
+                    "confidence": 0.3,
+                },
+            ]
+        )
         ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
         ollama.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response(low_conf),
         )
-        result = _text(await worker_vault.call_tool(
-            "capture_lesson",
-            {"project": "testproject", "text": "some text", "min_confidence": 0.7},
-        ))
+        result = _text(
+            await worker_vault.call_tool(
+                "capture_lesson",
+                {"project": "testproject", "text": "some text", "min_confidence": 0.7},
+            )
+        )
         assert "0" in result or "no lessons" in result.lower()
 
     @pytest.mark.asyncio
     async def test_worker_unavailable(
-        self, worker_vault: FastMCP, ollama: OllamaClient, openrouter: OpenRouterClient,
+        self,
+        worker_vault: FastMCP,
+        ollama: OllamaClient,
+        openrouter: OpenRouterClient,
     ) -> None:
         ollama.is_available = AsyncMock(return_value=False)  # type: ignore[method-assign]
         openrouter.generate = AsyncMock(  # type: ignore[method-assign]
             side_effect=ConnectionError("no workers"),
         )
-        result = _text(await worker_vault.call_tool(
-            "capture_lesson",
-            {"project": "testproject", "text": "some text"},
-        ))
+        result = _text(
+            await worker_vault.call_tool(
+                "capture_lesson",
+                {"project": "testproject", "text": "some text"},
+            )
+        )
         assert "unavailable" in result.lower() or "worker" in result.lower()
 
     @pytest.mark.asyncio
     async def test_worker_invalid_json(
-        self, worker_vault: FastMCP, ollama: OllamaClient,
+        self,
+        worker_vault: FastMCP,
+        ollama: OllamaClient,
     ) -> None:
         ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
         ollama.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response("This is not JSON at all, just text."),
         )
-        result = _text(await worker_vault.call_tool(
-            "capture_lesson",
-            {"project": "testproject", "text": "some text"},
-        ))
+        result = _text(
+            await worker_vault.call_tool(
+                "capture_lesson",
+                {"project": "testproject", "text": "some text"},
+            )
+        )
         assert "parse" in result.lower() or "invalid" in result.lower()
 
     @pytest.mark.asyncio
     async def test_worker_empty_array(
-        self, worker_vault: FastMCP, ollama: OllamaClient,
+        self,
+        worker_vault: FastMCP,
+        ollama: OllamaClient,
     ) -> None:
         ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
         ollama.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response("[]"),
         )
-        result = _text(await worker_vault.call_tool(
-            "capture_lesson",
-            {"project": "testproject", "text": "nothing interesting"},
-        ))
+        result = _text(
+            await worker_vault.call_tool(
+                "capture_lesson",
+                {"project": "testproject", "text": "nothing interesting"},
+            )
+        )
         assert "no lessons" in result.lower()
 
     @pytest.mark.asyncio
     async def test_markdown_wrapped_json(
-        self, git_vault: Path, worker_vault: FastMCP, ollama: OllamaClient,
+        self,
+        git_vault: Path,
+        worker_vault: FastMCP,
+        ollama: OllamaClient,
     ) -> None:
         """Worker wraps JSON in markdown fences — still parsed correctly."""
-        wrapped = '```json\n' + json.dumps([{
-            "title": "Fence test",
-            "context": "ctx", "problem": "prob", "solution": "sol",
-            "tags": [], "confidence": 0.9,
-        }]) + '\n```'
+        wrapped = (
+            "```json\n"
+            + json.dumps(
+                [
+                    {
+                        "title": "Fence test",
+                        "context": "ctx",
+                        "problem": "prob",
+                        "solution": "sol",
+                        "tags": [],
+                        "confidence": 0.9,
+                    }
+                ]
+            )
+            + "\n```"
+        )
         ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
         ollama.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response(wrapped),
         )
-        result = _text(await worker_vault.call_tool(
-            "capture_lesson",
-            {"project": "testproject", "text": "session notes"},
-        ))
+        result = _text(
+            await worker_vault.call_tool(
+                "capture_lesson",
+                {"project": "testproject", "text": "session notes"},
+            )
+        )
         assert "Fence test" in result
 
     @pytest.mark.asyncio
     async def test_respects_max_lessons(
-        self, git_vault: Path, worker_vault: FastMCP, ollama: OllamaClient,
+        self,
+        git_vault: Path,
+        worker_vault: FastMCP,
+        ollama: OllamaClient,
     ) -> None:
-        many = json.dumps([
-            {"title": f"Lesson {i}", "context": "c", "problem": "p",
-             "solution": "s", "tags": [], "confidence": 0.9}
-            for i in range(10)
-        ])
+        many = json.dumps(
+            [
+                {
+                    "title": f"Lesson {i}",
+                    "context": "c",
+                    "problem": "p",
+                    "solution": "s",
+                    "tags": [],
+                    "confidence": 0.9,
+                }
+                for i in range(10)
+            ]
+        )
         ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
         ollama.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response(many),
@@ -3416,25 +3699,34 @@ class TestExtractLessons:
 
     @pytest.mark.asyncio
     async def test_sanitizes_newlines_in_worker_output(
-        self, git_vault: Path, worker_vault: FastMCP, ollama: OllamaClient,
+        self,
+        git_vault: Path,
+        worker_vault: FastMCP,
+        ollama: OllamaClient,
     ) -> None:
         """Worker output with newlines in fields is sanitized."""
-        injected = json.dumps([{
-            "title": "Good title\nevil_field: true",
-            "context": "ctx\ninjection",
-            "problem": "prob",
-            "solution": "sol",
-            "tags": [],
-            "confidence": 0.9,
-        }])
+        injected = json.dumps(
+            [
+                {
+                    "title": "Good title\nevil_field: true",
+                    "context": "ctx\ninjection",
+                    "problem": "prob",
+                    "solution": "sol",
+                    "tags": [],
+                    "confidence": 0.9,
+                }
+            ]
+        )
         ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
         ollama.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response(injected),
         )
-        result = _text(await worker_vault.call_tool(
-            "capture_lesson",
-            {"project": "testproject", "text": "session"},
-        ))
+        result = _text(
+            await worker_vault.call_tool(
+                "capture_lesson",
+                {"project": "testproject", "text": "session"},
+            )
+        )
         assert "Good title" in result
         lessons = (git_vault / "10_projects" / "testproject" / "90-lessons.md").read_text()
         # Newlines stripped — no injection
@@ -3443,7 +3735,10 @@ class TestExtractLessons:
 
     @pytest.mark.asyncio
     async def test_write_error_surfaces_in_summary(
-        self, git_vault: Path, worker_vault: FastMCP, ollama: OllamaClient,
+        self,
+        git_vault: Path,
+        worker_vault: FastMCP,
+        ollama: OllamaClient,
     ) -> None:
         """Filesystem errors during lesson write are reported, not silently dropped."""
         lessons_file = git_vault / "10_projects" / "testproject" / "90-lessons.md"
@@ -3454,22 +3749,23 @@ class TestExtractLessons:
             ollama.generate = AsyncMock(  # type: ignore[method-assign]
                 return_value=_worker_response(_VALID_LESSONS_JSON),
             )
-            result = _text(await worker_vault.call_tool(
-                "capture_lesson",
-                {"project": "testproject", "text": "session notes"},
-            ))
-            lower = result.lower()
-            assert (
-                "permission" in lower
-                or "write error" in lower
-                or "error" in lower
+            result = _text(
+                await worker_vault.call_tool(
+                    "capture_lesson",
+                    {"project": "testproject", "text": "session notes"},
+                )
             )
+            lower = result.lower()
+            assert "permission" in lower or "write error" in lower or "error" in lower
         finally:
             lessons_file.chmod(0o644)
 
     @pytest.mark.asyncio
     async def test_curly_braces_in_user_text(
-        self, git_vault: Path, worker_vault: FastMCP, ollama: OllamaClient,
+        self,
+        git_vault: Path,
+        worker_vault: FastMCP,
+        ollama: OllamaClient,
     ) -> None:
         """User text with curly braces (code, JSON) doesn't crash str.format()."""
         ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
@@ -3477,31 +3773,44 @@ class TestExtractLessons:
             return_value=_worker_response(_VALID_LESSONS_JSON),
         )
         # Text containing curly braces — would crash without escaping
-        result = _text(await worker_vault.call_tool(
-            "capture_lesson",
-            {"project": "testproject", "text": 'def foo(): return {"key": value}'},
-        ))
+        result = _text(
+            await worker_vault.call_tool(
+                "capture_lesson",
+                {"project": "testproject", "text": 'def foo(): return {"key": value}'},
+            )
+        )
         assert "Always check return values" in result
 
     @pytest.mark.asyncio
     async def test_sanitizes_newlines_in_tags(
-        self, git_vault: Path, worker_vault: FastMCP, ollama: OllamaClient,
+        self,
+        git_vault: Path,
+        worker_vault: FastMCP,
+        ollama: OllamaClient,
     ) -> None:
         """Tags with newlines are sanitized to prevent markdown injection."""
-        injected_tags = json.dumps([{
-            "title": "Tag injection test",
-            "context": "ctx", "problem": "prob", "solution": "sol",
-            "tags": ["python\n### Fake Lesson"],
-            "confidence": 0.9,
-        }])
+        injected_tags = json.dumps(
+            [
+                {
+                    "title": "Tag injection test",
+                    "context": "ctx",
+                    "problem": "prob",
+                    "solution": "sol",
+                    "tags": ["python\n### Fake Lesson"],
+                    "confidence": 0.9,
+                }
+            ]
+        )
         ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
         ollama.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response(injected_tags),
         )
-        result = _text(await worker_vault.call_tool(
-            "capture_lesson",
-            {"project": "testproject", "text": "session"},
-        ))
+        result = _text(
+            await worker_vault.call_tool(
+                "capture_lesson",
+                {"project": "testproject", "text": "session"},
+            )
+        )
         assert "Tag injection test" in result
         lessons = (git_vault / "10_projects" / "testproject" / "90-lessons.md").read_text()
         # Newline sanitized: "### Fake Lesson" must NOT appear as a standalone heading
@@ -3518,9 +3827,12 @@ class TestVaultValidate:
     async def test_unknown_check_names_rejected(self, mock_vault: Path) -> None:
         """Typo in check name returns error instead of false positive."""
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
-            "vault_health", {"checks": ["frontmater"]},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_health",
+                {"checks": ["frontmater"]},
+            )
+        )
         assert "Unknown check" in result
         assert "frontmatter" in result
 
@@ -3529,18 +3841,23 @@ class TestVaultValidate:
         scope = tmp_path / "10_projects"
         scope.mkdir()
         mcp = create_server(vault_path=tmp_path)
-        result = _text(await mcp.call_tool(
-            "vault_health", {"checks": ["frontmatter"]},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_health",
+                {"checks": ["frontmatter"]},
+            )
+        )
         assert "no projects" in result.lower() or "0 issues" in result.lower()
 
     async def test_healthy_vault_no_errors(self, mock_vault: Path) -> None:
         """Well-formed vault produces no error-level issues."""
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
+        result = _text(
+            await mcp.call_tool(
                 "vault_health",
                 {"checks": ["frontmatter", "stale", "links"]},
-            ))
+            )
+        )
         # Anchor on the `[error]` issue marker (and the "Vault clean"
         # all-green message) rather than the bare substring — the
         # identity block now exposes ``vault_path`` which may contain
@@ -3552,10 +3869,12 @@ class TestVaultValidate:
         bad = mock_vault / "10_projects" / "testproject" / "no-frontmatter.md"
         bad.write_text("# Just a heading\n\nNo frontmatter here.\n")
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
+        result = _text(
+            await mcp.call_tool(
                 "vault_health",
                 {"checks": ["frontmatter", "stale", "links"]},
-            ))
+            )
+        )
         assert "no-frontmatter.md" in result
         assert "frontmatter" in result.lower()
 
@@ -3564,10 +3883,12 @@ class TestVaultValidate:
         bad = mock_vault / "10_projects" / "testproject" / "incomplete.md"
         bad.write_text("---\nid: incomplete\n---\n\n# Missing type and status\n")
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
+        result = _text(
+            await mcp.call_tool(
                 "vault_health",
                 {"checks": ["frontmatter", "stale", "links"]},
-            ))
+            )
+        )
         assert "incomplete.md" in result
         assert "type" in result.lower() or "status" in result.lower()
 
@@ -3579,10 +3900,12 @@ class TestVaultValidate:
             "---\n\n# Bad date\n"
         )
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
+        result = _text(
+            await mcp.call_tool(
                 "vault_health",
                 {"checks": ["frontmatter", "stale", "links"]},
-            ))
+            )
+        )
         assert "bad-date.md" in result
         assert "date" in result.lower()
 
@@ -3594,10 +3917,12 @@ class TestVaultValidate:
             "---\n\n# Very old file\n"
         )
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
+        result = _text(
+            await mcp.call_tool(
                 "vault_health",
                 {"checks": ["frontmatter", "stale", "links"]},
-            ))
+            )
+        )
         assert "ancient.md" in result
         assert "stale" in result.lower()
 
@@ -3609,10 +3934,12 @@ class TestVaultValidate:
             "---\n\n# Old but done\n"
         )
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
+        result = _text(
+            await mcp.call_tool(
                 "vault_health",
                 {"checks": ["frontmatter", "stale", "links"]},
-            ))
+            )
+        )
         assert "old-done.md" not in result
 
     async def test_broken_wikilink_detected(self, mock_vault: Path) -> None:
@@ -3623,10 +3950,12 @@ class TestVaultValidate:
             "See [[nonexistent-doc]] for details.\n"
         )
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
+        result = _text(
+            await mcp.call_tool(
                 "vault_health",
                 {"checks": ["frontmatter", "stale", "links"]},
-            ))
+            )
+        )
         assert "nonexistent-doc" in result
         assert "link" in result.lower() or "broken" in result.lower()
 
@@ -3638,10 +3967,12 @@ class TestVaultValidate:
             "See [[adr-001-test]] for details.\n"
         )
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
+        result = _text(
+            await mcp.call_tool(
                 "vault_health",
                 {"checks": ["frontmatter", "stale", "links"]},
-            ))
+            )
+        )
         assert "adr-001-test" not in result
 
     async def test_project_filter(self, mock_vault: Path) -> None:
@@ -3651,9 +3982,12 @@ class TestVaultValidate:
         other.mkdir(parents=True)
         (other / "broken.md").write_text("No frontmatter here.\n")
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
-            "vault_health", {"project": "testproject"},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_health",
+                {"project": "testproject"},
+            )
+        )
         assert "broken.md" not in result
 
     async def test_checks_filter(self, mock_vault: Path) -> None:
@@ -3667,9 +4001,12 @@ class TestVaultValidate:
         bad.write_text("No frontmatter.\n")
         mcp = create_server(vault_path=mock_vault)
         # Only run frontmatter check — stale should not appear
-        result = _text(await mcp.call_tool(
-            "vault_health", {"checks": ["frontmatter"]},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_health",
+                {"checks": ["frontmatter"]},
+            )
+        )
         assert "no-fm.md" in result
         assert "ancient2.md" not in result
 
@@ -3679,23 +4016,28 @@ class TestVaultValidate:
         for i in range(20):
             (project / f"bad-{i}.md").write_text("No frontmatter.\n")
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
-            "vault_health",
-            {"checks": ["frontmatter"], "max_issues": 5},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_health",
+                {"checks": ["frontmatter"], "max_issues": 5},
+            )
+        )
         assert "truncated" in result.lower() or "more" in result.lower()
 
     async def test_project_not_found(self, mock_vault: Path) -> None:
         """Unknown project returns error."""
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
-            "vault_health",
-            {"project": "nonexistent", "checks": ["frontmatter"]},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_health",
+                {"project": "nonexistent", "checks": ["frontmatter"]},
+            )
+        )
         assert "not found" in result.lower()
 
     async def test_wikilink_inside_fenced_code_block_not_flagged(
-        self, mock_vault: Path,
+        self,
+        mock_vault: Path,
     ) -> None:
         """Bash regex classes (e.g. [[:space:]], [[ -z "$1" ]]) inside fenced
         code blocks must NOT be parsed as wikilinks. Currently false-positives.
@@ -3714,17 +4056,20 @@ class TestVaultValidate:
             "~~~\n",
         )
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
-            "vault_health",
-            {"project": "testproject", "checks": ["links"]},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_health",
+                {"project": "testproject", "checks": ["links"]},
+            )
+        )
         assert "shell-snippets.md" not in result, (
             f"Bash regex inside fenced blocks should not produce broken-link "
             f"warnings; got: {result}"
         )
 
     async def test_escaped_pipe_in_wikilink_resolves_target(
-        self, mock_vault: Path,
+        self,
+        mock_vault: Path,
     ) -> None:
         """`[[target\\|alias]]` is Obsidian's escape for pipes inside table cells.
         The parser must treat `\\|` as an alias separator, not part of the target.
@@ -3737,19 +4082,21 @@ class TestVaultValidate:
             "| ADR | [[adr-001-test\\|the ADR]] |\n",
         )
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
-            "vault_health",
-            {"project": "testproject", "checks": ["links"]},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_health",
+                {"project": "testproject", "checks": ["links"]},
+            )
+        )
         # The target adr-001-test exists; the escaped pipe must be parsed as
         # an alias separator, so no broken-link warning should appear.
         assert "with-escaped-pipe.md" not in result, (
-            f"Escaped-pipe wikilink should resolve to existing target; "
-            f"got: {result}"
+            f"Escaped-pipe wikilink should resolve to existing target; got: {result}"
         )
 
     async def test_subdir_path_wikilink_to_existing_file_not_flagged(
-        self, mock_vault: Path,
+        self,
+        mock_vault: Path,
     ) -> None:
         """`[[30-architecture/adr-001-test|alias]]` should resolve to the
         existing file `30-architecture/adr-001-test.md`, not be flagged broken.
@@ -3760,17 +4107,19 @@ class TestVaultValidate:
             "See [[30-architecture/adr-001-test|the ADR]] for the rationale.\n",
         )
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
-            "vault_health",
-            {"project": "testproject", "checks": ["links"]},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_health",
+                {"project": "testproject", "checks": ["links"]},
+            )
+        )
         assert "with-subdir-link.md" not in result, (
-            f"Subdir-path wikilink to existing file should not be flagged; "
-            f"got: {result}"
+            f"Subdir-path wikilink to existing file should not be flagged; got: {result}"
         )
 
     async def test_memory_file_skipped_by_frontmatter_check(
-        self, mock_vault: Path,
+        self,
+        mock_vault: Path,
     ) -> None:
         """Files under */memory/ use Claude auto-memory schema
         (`name`/`description`/`metadata.type`), not the standard vault schema.
@@ -3789,19 +4138,20 @@ class TestVaultValidate:
             "# Project Memory\n\nIndex content with no frontmatter.\n",
         )
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
-            "vault_health",
-            {"project": "testproject", "checks": ["frontmatter"]},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_health",
+                {"project": "testproject", "checks": ["frontmatter"]},
+            )
+        )
         assert "memory/feedback_example.md" not in result, (
             f"Auto-memory schema must be accepted; got: {result}"
         )
-        assert "memory/MEMORY.md" not in result, (
-            f"MEMORY.md must be skipped; got: {result}"
-        )
+        assert "memory/MEMORY.md" not in result, f"MEMORY.md must be skipped; got: {result}"
 
     async def test_meta_scope_wikilink_resolves(
-        self, mock_vault: Path,
+        self,
+        mock_vault: Path,
     ) -> None:
         """`[[pattern-X]]` targeting `00_meta/patterns/pattern-X.md` must
         resolve. The meta scope is the canonical home for cross-project
@@ -3816,17 +4166,19 @@ class TestVaultValidate:
             "Also [[_meta/patterns/pattern-tdd]] (scope-rooted form).\n",
         )
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
-            "vault_health",
-            {"project": "testproject", "checks": ["links"]},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_health",
+                {"project": "testproject", "checks": ["links"]},
+            )
+        )
         assert "with-meta-link.md" not in result, (
-            f"Wikilink to existing meta-scope target must resolve; "
-            f"got: {result}"
+            f"Wikilink to existing meta-scope target must resolve; got: {result}"
         )
 
     async def test_cross_project_vault_rooted_wikilink_resolves(
-        self, mock_vault: Path,
+        self,
+        mock_vault: Path,
     ) -> None:
         """`[[other-project/30-architecture/adr-X]]` must resolve to the
         existing file under another project in the same scope. This is the
@@ -3837,14 +4189,12 @@ class TestVaultValidate:
         kubelab = mock_vault / "10_projects" / "kubelab"
         kubelab.mkdir()
         (kubelab / "00-context.md").write_text(
-            "---\nid: kubelab\ntype: project\nstatus: active\n---\n\n"
-            "# Kubelab\n",
+            "---\nid: kubelab\ntype: project\nstatus: active\n---\n\n# Kubelab\n",
         )
         adrs = kubelab / "30-architecture" / "adrs"
         adrs.mkdir(parents=True)
         (adrs / "adr-038-orchestrator-architecture.md").write_text(
-            "---\nid: adr-038\ntype: adr\nstatus: accepted\n---\n\n"
-            "# ADR-038\n",
+            "---\nid: adr-038\ntype: adr\nstatus: accepted\n---\n\n# ADR-038\n",
         )
 
         doc = mock_vault / "10_projects" / "testproject" / "with-xproj-link.md"
@@ -3855,15 +4205,19 @@ class TestVaultValidate:
             "|ADR-038]].\n",
         )
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
-            "vault_health", {"checks": ["links"]},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_health",
+                {"checks": ["links"]},
+            )
+        )
         assert "with-xproj-link.md" not in result, (
             f"Cross-project vault-rooted wikilink must resolve; got: {result}"
         )
 
     async def test_posix_class_in_heading_not_flagged(
-        self, mock_vault: Path,
+        self,
+        mock_vault: Path,
     ) -> None:
         """POSIX character classes (`[[:space:]]`, `[[:digit:]]`, etc.) that
         appear in markdown headings or prose (outside fenced/inline code) must
@@ -3884,13 +4238,14 @@ class TestVaultValidate:
             encoding="utf-8",
         )
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
-            "vault_health",
-            {"project": "testproject", "checks": ["links"]},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_health",
+                {"project": "testproject", "checks": ["links"]},
+            )
+        )
         assert "posix-heading.md" not in result, (
-            f"POSIX character classes outside code must not be flagged; "
-            f"got: {result}"
+            f"POSIX character classes outside code must not be flagged; got: {result}"
         )
 
 
@@ -3899,7 +4254,9 @@ class TestVaultValidate:
 
 class TestSetupFileLogging:
     def test_creates_log_file_and_handler(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         import logging
         import os
@@ -3916,7 +4273,8 @@ class TestSetupFileLogging:
 
         logger = logging.getLogger("hive")
         file_handlers = [
-            h for h in logger.handlers
+            h
+            for h in logger.handlers
             if isinstance(h, logging.handlers.RotatingFileHandler)
             and str(expected) in str(getattr(h, "baseFilename", ""))
         ]
@@ -3944,6 +4302,7 @@ class TestToolTimeouts:
         ollama: OllamaClient,
     ) -> None:
         """delegate_task returns timeout message when worker hangs."""
+
         async def slow_generate(*a: object, **kw: object) -> ClientResponse:
             await asyncio.sleep(999)
             raise AssertionError("unreachable")
@@ -3964,6 +4323,7 @@ class TestToolTimeouts:
         ollama: OllamaClient,
     ) -> None:
         """worker_status returns timeout message when connectivity check hangs."""
+
         async def slow_check() -> bool:
             await asyncio.sleep(999)
             return True
@@ -4002,10 +4362,12 @@ class TestToolTimeouts:
         ctx = mcp._hive_ctx  # type: ignore[attr-defined]
         ctx.tool_timeout = 0.1
 
-        result = _text(await mcp.call_tool(
-            "capture_lesson",
-            {"project": "testproject", "text": "some text to extract"},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "capture_lesson",
+                {"project": "testproject", "text": "some text to extract"},
+            )
+        )
         assert "timed out" in result.lower()
         _close_server(mcp)
 
@@ -4015,7 +4377,8 @@ class TestWriteLockTimeout:
 
     @pytest.mark.asyncio
     async def test_write_lock_timeout_returns_error(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         """vault_write returns friendly error when write lock cannot be acquired."""
         from unittest.mock import patch
@@ -4024,21 +4387,24 @@ class TestWriteLockTimeout:
 
         with patch("hive._helpers._WRITE_LOCK") as mock_lock:
             mock_lock.acquire.return_value = False
-            result = _text(await mcp.call_tool(
-                "vault_write",
-                {
-                    "project": "testproject",
-                    "section": "lessons",
-                    "operation": "append",
-                    "content": "\nNew content\n",
-                },
-            ))
+            result = _text(
+                await mcp.call_tool(
+                    "vault_write",
+                    {
+                        "project": "testproject",
+                        "section": "lessons",
+                        "operation": "append",
+                        "content": "\nNew content\n",
+                    },
+                )
+            )
         assert "busy" in result.lower() or "timeout" in result.lower()
         _close_server(mcp)
 
     @pytest.mark.asyncio
     async def test_patch_lock_timeout_returns_error(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         """vault_patch returns friendly error when write lock cannot be acquired."""
         from unittest.mock import patch
@@ -4047,21 +4413,24 @@ class TestWriteLockTimeout:
 
         with patch("hive._helpers._WRITE_LOCK") as mock_lock:
             mock_lock.acquire.return_value = False
-            result = _text(await mcp.call_tool(
-                "vault_patch",
-                {
-                    "project": "testproject",
-                    "path": "11-tasks.md",
-                    "find": "- [ ] Task one",
-                    "replace": "- [x] Task one done",
-                },
-            ))
+            result = _text(
+                await mcp.call_tool(
+                    "vault_patch",
+                    {
+                        "project": "testproject",
+                        "path": "11-tasks.md",
+                        "find": "- [ ] Task one",
+                        "replace": "- [x] Task one done",
+                    },
+                )
+            )
         assert "busy" in result.lower() or "timeout" in result.lower()
         _close_server(mcp)
 
     @pytest.mark.asyncio
     async def test_create_lock_timeout_returns_error(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         """vault_write create mode returns error when write lock cannot be acquired."""
         from unittest.mock import patch
@@ -4070,16 +4439,18 @@ class TestWriteLockTimeout:
 
         with patch("hive._helpers._WRITE_LOCK") as mock_lock:
             mock_lock.acquire.return_value = False
-            result = _text(await mcp.call_tool(
-                "vault_write",
-                {
-                    "project": "testproject",
-                    "operation": "create",
-                    "path": "new-doc.md",
-                    "doc_type": "note",
-                    "content": "# New Doc\n",
-                },
-            ))
+            result = _text(
+                await mcp.call_tool(
+                    "vault_write",
+                    {
+                        "project": "testproject",
+                        "operation": "create",
+                        "path": "new-doc.md",
+                        "doc_type": "note",
+                        "content": "# New Doc\n",
+                    },
+                )
+            )
         assert "busy" in result.lower() or "timeout" in result.lower()
         _close_server(mcp)
 
@@ -4114,18 +4485,24 @@ class TestAgentsScope:
     async def test_query_explicit_agents_scope(self, mock_vault: Path) -> None:
         _seed_agent(mock_vault)
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
-            "vault_query", {"project": "agents:Hermes-NaN", "section": "context"},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_query",
+                {"project": "agents:Hermes-NaN", "section": "context"},
+            )
+        )
         assert "Remote ops agent" in result
         _close_server(mcp)
 
     async def test_query_auto_scan_agents(self, mock_vault: Path) -> None:
         _seed_agent(mock_vault)
         mcp = create_server(vault_path=mock_vault)
-        result = _text(await mcp.call_tool(
-            "vault_query", {"project": "Hermes-NaN", "section": "context"},
-        ))
+        result = _text(
+            await mcp.call_tool(
+                "vault_query",
+                {"project": "Hermes-NaN", "section": "context"},
+            )
+        )
         assert "Remote ops agent" in result
         _close_server(mcp)
 
@@ -4141,20 +4518,29 @@ class TestAgentsScope:
 
         agent = _seed_agent(git_multi_scope_vault)
         subprocess.run(
-            ["git", "add", "."], cwd=git_multi_scope_vault,
-            capture_output=True, check=True,
+            ["git", "add", "."],
+            cwd=git_multi_scope_vault,
+            capture_output=True,
+            check=True,
         )
         subprocess.run(
-            ["git", "commit", "-m", "add agent"], cwd=git_multi_scope_vault,
-            capture_output=True, check=True,
+            ["git", "commit", "-m", "add agent"],
+            cwd=git_multi_scope_vault,
+            capture_output=True,
+            check=True,
         )
         mcp = create_server(vault_path=git_multi_scope_vault)
-        result = _text(await mcp.call_tool("vault_write", {
-            "project": "agents:Hermes-NaN",
-            "section": "tasks",
-            "operation": "append",
-            "content": "\n## Inbox\nFirst task for the agent.\n",
-        }))
+        result = _text(
+            await mcp.call_tool(
+                "vault_write",
+                {
+                    "project": "agents:Hermes-NaN",
+                    "section": "tasks",
+                    "operation": "append",
+                    "content": "\n## Inbox\nFirst task for the agent.\n",
+                },
+            )
+        )
         assert "Updated" in result
         assert "First task for the agent" in (agent / "11-tasks.md").read_text()
         _close_server(mcp)

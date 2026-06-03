@@ -52,8 +52,7 @@ SUSPECT_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"</invoke>"),
 )
 _CORRUPTION_COMMENT = (
-    "<!-- POSSIBLE_CORRUPTION: detected XML-tag leak in input; "
-    "review and clean manually -->\n"
+    "<!-- POSSIBLE_CORRUPTION: detected XML-tag leak in input; review and clean manually -->\n"
 )
 
 
@@ -125,11 +124,13 @@ def _write_lesson(
     entry_lines = [f"\n### [{date.today().isoformat()}] {title}\n"]
     if corruption_detected:
         entry_lines.append(_CORRUPTION_COMMENT)
-    entry_lines.extend([
-        f"**Context:** {context}\n",
-        f"**Problem:** {problem}\n",
-        f"**Solution:** {solution}\n",
-    ])
+    entry_lines.extend(
+        [
+            f"**Context:** {context}\n",
+            f"**Problem:** {problem}\n",
+            f"**Solution:** {solution}\n",
+        ]
+    )
     if tag_str:
         entry_lines.append(f"**Tags:** {tag_str}\n")
     entry = "".join(entry_lines)
@@ -138,7 +139,8 @@ def _write_lesson(
         if not lessons_file.exists():
             frontmatter = _make_frontmatter(f"{project}-lessons", "lesson")
             lessons_file.write_text(
-                frontmatter + "# Lessons Learned\n" + entry, encoding="utf-8",
+                frontmatter + "# Lessons Learned\n" + entry,
+                encoding="utf-8",
             )
         else:
             with lessons_file.open("a", encoding="utf-8") as f:
@@ -163,9 +165,7 @@ def _parse_lessons_json(raw: str) -> list[dict[str, object]]:
     text = raw.strip()
     if text.startswith("```"):
         lines = text.splitlines()
-        inner = "\n".join(
-            ln for ln in lines[1:] if not ln.strip().startswith("```")
-        )
+        inner = "\n".join(ln for ln in lines[1:] if not ln.strip().startswith("```"))
         text = inner.strip()
     if not text.startswith("["):
         match = re.search(r"\[.*\]", text, re.DOTALL)
@@ -191,37 +191,40 @@ def _capture_lesson_lookup(
     """
     if rank_by not in {"reinforcements", "confidence", "hybrid"}:
         return track(
-            ctx, "capture_lesson",
-            f"Unknown rank_by={rank_by!r}. Expected one of: "
-            f"reinforcements, confidence, hybrid.",
+            ctx,
+            "capture_lesson",
+            f"Unknown rank_by={rank_by!r}. Expected one of: reinforcements, confidence, hybrid.",
             project,
         )
 
     lessons_file = project_dir / "90-lessons.md"
     if not lessons_file.exists():
         return track(
-            ctx, "capture_lesson",
+            ctx,
+            "capture_lesson",
             f"No 90-lessons.md found for project '{project}'.",
-            project, "lessons",
+            project,
+            "lessons",
         )
     content = _safe_read(lessons_file)
     if content is None:
         return track(
-            ctx, "capture_lesson",
+            ctx,
+            "capture_lesson",
             f"Could not read 90-lessons.md for project '{project}'.",
-            project, "lessons",
+            project,
+            "lessons",
         )
 
     find_lower = find.lower()
-    matched = [
-        h for h in extract_lesson_headings(content)
-        if find_lower in h.lower()
-    ]
+    matched = [h for h in extract_lesson_headings(content) if find_lower in h.lower()]
     if not matched:
         return track(
-            ctx, "capture_lesson",
+            ctx,
+            "capture_lesson",
             f"No lessons matching '{find}' in project '{project}'.",
-            project, "lessons",
+            project,
+            "lessons",
         )
 
     # Per-call dedup + increment (one read per surfaced lesson).
@@ -231,7 +234,9 @@ def _capture_lesson_lookup(
 
     bm25_scores = {h: 1.0 for h in matched_set}
     ranked = ctx.lessons.top(
-        project, by=rank_by, limit=max_lessons,
+        project,
+        by=rank_by,
+        limit=max_lessons,
         bm25_scores=bm25_scores,
     )
     ordered = [h for h in ranked if h in matched_set][:max_lessons]
@@ -243,7 +248,11 @@ def _capture_lesson_lookup(
     for heading in ordered:
         rendered.append(f"- {heading}")
     return track(
-        ctx, "capture_lesson", "\n".join(rendered), project, "lessons",
+        ctx,
+        "capture_lesson",
+        "\n".join(rendered),
+        project,
+        "lessons",
     )
 
 
@@ -274,17 +283,24 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
         try:
             if provider == "ollama":
                 resp = await ctx.ollama.generate(
-                    prompt, context=context, max_tokens=max_tokens,
+                    prompt,
+                    context=context,
+                    max_tokens=max_tokens,
                 )
             elif ctx.openrouter is None:
                 return None, "OpenRouter not configured"
             elif model:
                 resp = await ctx.openrouter.generate(
-                    prompt, context=context, model=model, max_tokens=max_tokens,
+                    prompt,
+                    context=context,
+                    model=model,
+                    max_tokens=max_tokens,
                 )
             else:
                 resp = await ctx.openrouter.generate(
-                    prompt, context=context, max_tokens=max_tokens,
+                    prompt,
+                    context=context,
+                    max_tokens=max_tokens,
                 )
             _record(resp)
             return resp, ""
@@ -294,7 +310,9 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
         except Exception as exc:
             label = f"OpenRouter ({model})" if model else provider.capitalize()
             _log.warning(
-                "_try_worker unexpected error for %s: %r", label, exc,
+                "_try_worker unexpected error for %s: %r",
+                label,
+                exc,
             )
             return None, f"{label}: unexpected error ({type(exc).__name__})"
 
@@ -345,7 +363,8 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                 resolved = _resolve_project_dir(ctx.vault, project, ctx.scopes)
                 if resolved is None:
                     return track(
-                        ctx, "capture_lesson",
+                        ctx,
+                        "capture_lesson",
                         project_not_found(project),
                         project,
                     )
@@ -354,8 +373,12 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                 # ── Lookup mode (HIVE-97 find=) ──
                 if find:
                     return _capture_lesson_lookup(
-                        ctx, project_dir, project, find,
-                        rank_by, max_lessons,
+                        ctx,
+                        project_dir,
+                        project,
+                        find,
+                        rank_by,
+                        max_lessons,
                     )
 
                 # ── Batch mode (worker extraction) ──
@@ -380,19 +403,18 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
 
                     if resp is None:
                         resp, err = await _try_worker(
-                            prompt, 2000, "openrouter",
+                            prompt,
+                            2000,
+                            "openrouter",
                         )
                         if resp is None:
                             errors.append(err)
 
                     if resp is None:
-                        reasons = (
-                            "; ".join(errors)
-                            if errors
-                            else "no workers configured"
-                        )
+                        reasons = "; ".join(errors) if errors else "no workers configured"
                         return track(
-                            ctx, "capture_lesson",
+                            ctx,
+                            "capture_lesson",
                             f"All workers unavailable [{reasons}]. "
                             "Cannot extract lessons without a worker model.",
                             project,
@@ -403,22 +425,24 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                     except (json.JSONDecodeError, ValueError):
                         snippet = resp.text[:200]
                         return track(
-                            ctx, "capture_lesson",
-                            f"Could not parse worker response as JSON: "
-                            f"{snippet}",
+                            ctx,
+                            "capture_lesson",
+                            f"Could not parse worker response as JSON: {snippet}",
                             project,
                         )
 
                     if not isinstance(lessons_raw, list):
                         return track(
-                            ctx, "capture_lesson",
+                            ctx,
+                            "capture_lesson",
                             "Worker returned non-array JSON.",
                             project,
                         )
 
                     if not lessons_raw:
                         return track(
-                            ctx, "capture_lesson",
+                            ctx,
+                            "capture_lesson",
                             "No lessons found in text.",
                             project,
                         )
@@ -451,14 +475,20 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                         l_sol = str(lesson.get("solution", ""))
                         l_sol = l_sol.replace("\n", " ").replace("\r", " ")
                         raw_tags = lesson.get("tags", [])
-                        l_tags = [
-                            str(t).replace("\n", " ").replace("\r", " ")
-                            for t in raw_tags
-                        ] if isinstance(raw_tags, list) else []
+                        l_tags = (
+                            [str(t).replace("\n", " ").replace("\r", " ") for t in raw_tags]
+                            if isinstance(raw_tags, list)
+                            else []
+                        )
 
                         status, msg = _write_lesson(
-                            project_dir, project,
-                            l_title, l_ctx, l_prob, l_sol, l_tags,
+                            project_dir,
+                            project,
+                            l_title,
+                            l_ctx,
+                            l_prob,
+                            l_sol,
+                            l_tags,
                         )
                         if status == "written":
                             written.append(l_title)
@@ -472,18 +502,17 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                         elif status == "error":
                             _log.warning(
                                 "capture_lesson: failed to write '%s': %s",
-                                l_title, msg,
+                                l_title,
+                                msg,
                             )
                             skipped.append(f"{l_title} (write error: {msg})")
 
                     if written:
-                        rel = (
-                            project_dir / "90-lessons.md"
-                        ).relative_to(ctx.vault)
+                        rel = (project_dir / "90-lessons.md").relative_to(ctx.vault)
                         _git_commit(
-                            ctx.vault, [rel],
-                            f"vault: capture_lesson {project} "
-                            f"— {len(written)} lessons",
+                            ctx.vault,
+                            [rel],
+                            f"vault: capture_lesson {project} — {len(written)} lessons",
                         )
 
                     parts: list[str] = []
@@ -500,21 +529,30 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
 
                     summary = ". ".join(parts) + "."
                     return track(
-                        ctx, "capture_lesson", summary, project, "lessons",
+                        ctx,
+                        "capture_lesson",
+                        summary,
+                        project,
+                        "lessons",
                     )
 
                 # ── Inline mode ──
                 if not title:
                     return track(
-                        ctx, "capture_lesson",
-                        "Title is required for inline mode. "
-                        "Provide text for batch extraction.",
+                        ctx,
+                        "capture_lesson",
+                        "Title is required for inline mode. Provide text for batch extraction.",
                         project,
                     )
 
                 status, msg = _write_lesson(
-                    project_dir, project,
-                    title, context, problem, solution, tags,
+                    project_dir,
+                    project,
+                    title,
+                    context,
+                    problem,
+                    solution,
+                    tags,
                 )
                 if status == "error":
                     return track(ctx, "capture_lesson", msg, project)
@@ -522,19 +560,22 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                     return track(ctx, "capture_lesson", msg, project, "lessons")
 
                 ctx.lessons.ensure(
-                    project, f"[{date.today().isoformat()}] {title}",
+                    project,
+                    f"[{date.today().isoformat()}] {title}",
                 )
 
                 rel = (project_dir / "90-lessons.md").relative_to(ctx.vault)
                 _git_commit(
-                    ctx.vault, [rel],
+                    ctx.vault,
+                    [rel],
                     f"vault: capture_lesson {project} — {title}",
                 )
 
                 return track(ctx, "capture_lesson", msg, project, "lessons")
         except TimeoutError:
             return track(
-                ctx, "capture_lesson",
+                ctx,
+                "capture_lesson",
                 f"Tool timed out after {ctx.tool_timeout:.0f}s. "
                 "Worker may be slow or unresponsive.",
                 project,
@@ -574,7 +615,11 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                 # ── Vault summarize mode ──
                 if project:
                     result = _resolve_file(
-                        ctx.vault, project, section, path, ctx.scopes,
+                        ctx.vault,
+                        project,
+                        section,
+                        path,
+                        ctx.scopes,
                     )
                     if isinstance(result, str):
                         return track(ctx, "delegate_task", result, project)
@@ -584,7 +629,10 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                         file_content = filepath.read_text(encoding="utf-8")
                     except (OSError, UnicodeDecodeError) as exc:
                         return track(
-                            ctx, "delegate_task", f"File I/O error: {exc}", project,
+                            ctx,
+                            "delegate_task",
+                            f"File I/O error: {exc}",
+                            project,
                         )
                     fm = parse_frontmatter(file_content)
                     body = extract_body(file_content)
@@ -594,7 +642,10 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
 
                     if line_count <= _SUMMARIZE_THRESHOLD:
                         return track(
-                            ctx, "delegate_task", f"{header}{file_content}", project,
+                            ctx,
+                            "delegate_task",
+                            f"{header}{file_content}",
+                            project,
                         )
 
                     # Large file: try auto-delegation (free tiers only)
@@ -608,7 +659,10 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                     summary_errors: list[str] = []
                     if await ctx.ollama.is_available():
                         summary_resp, err = await _try_worker(
-                            summary_prompt, max_tokens, "ollama", summary_ctx,
+                            summary_prompt,
+                            max_tokens,
+                            "ollama",
+                            summary_ctx,
                         )
                         if err:
                             summary_errors.append(err)
@@ -616,31 +670,37 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                         summary_errors.append("Ollama: offline")
                     if summary_resp is None:
                         summary_resp, err = await _try_worker(
-                            summary_prompt, max_tokens, "openrouter", summary_ctx,
+                            summary_prompt,
+                            max_tokens,
+                            "openrouter",
+                            summary_ctx,
                         )
                         if err:
                             summary_errors.append(err)
                     if summary_resp is not None:
                         return track(
-                            ctx, "delegate_task",
+                            ctx,
+                            "delegate_task",
                             f"{header}{_format_response(summary_resp)}",
                             project,
                         )
                     # Workers unavailable — return raw content with notice
                     reasons = (
-                        "; ".join(summary_errors) if summary_errors
-                        else "no workers configured"
+                        "; ".join(summary_errors) if summary_errors else "no workers configured"
                     )
                     _log.warning(
                         "delegate_task summarize fallback for %s: %s",
-                        project, reasons,
+                        project,
+                        reasons,
                     )
                     fallback_notice = (
-                        f"**Note:** Summarization failed ({reasons}). "
-                        "Returning raw content.\n\n"
+                        f"**Note:** Summarization failed ({reasons}). Returning raw content.\n\n"
                     )
                     return track(
-                        ctx, "delegate_task", f"{header}{fallback_notice}{file_content}", project,
+                        ctx,
+                        "delegate_task",
+                        f"{header}{fallback_notice}{file_content}",
+                        project,
                     )
 
                 if not prompt:
@@ -664,7 +724,10 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                     if not ctx.budget.can_spend(ctx.openrouter_budget, max_cost_per_request):
                         return track(ctx, _tn, f"Monthly budget exhausted. {_REJECT_MSG}")
                     resp, err = await _try_worker(
-                        prompt, max_tokens, "openrouter", context,
+                        prompt,
+                        max_tokens,
+                        "openrouter",
+                        context,
                         model=ctx.openrouter_paid_model,
                     )
                     if resp:
@@ -672,7 +735,11 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                     return track(ctx, _tn, f"{err}. {_REJECT_MSG}")
                 if model != "auto":
                     resp, err = await _try_worker(
-                        prompt, max_tokens, "openrouter", context, model=model,
+                        prompt,
+                        max_tokens,
+                        "openrouter",
+                        context,
+                        model=model,
                     )
                     if resp:
                         return track(ctx, _tn, _format_response(resp))
@@ -703,7 +770,10 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                     and ctx.budget.can_spend(ctx.openrouter_budget, max_cost_per_request)
                 ):
                     resp, err = await _try_worker(
-                        prompt, max_tokens, "openrouter", context,
+                        prompt,
+                        max_tokens,
+                        "openrouter",
+                        context,
                         model=ctx.openrouter_paid_model,
                     )
                     if resp is not None:
@@ -715,7 +785,8 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                 return track(ctx, _tn, f"All workers unavailable. [{reasons}]. {_REJECT_MSG}")
         except TimeoutError:
             return track(
-                ctx, "delegate_task",
+                ctx,
+                "delegate_task",
                 f"Tool timed out after {ctx.tool_timeout:.0f}s. "
                 "Worker may be slow or unresponsive.",
             )
@@ -772,12 +843,10 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                             models = await ctx.openrouter.list_models()
                             for m in models:
                                 cost = (
-                                    "free" if m.is_free
-                                    else f"${m.cost_per_million_input:.2f}/M in"
+                                    "free" if m.is_free else f"${m.cost_per_million_input:.2f}/M in"
                                 )
                                 lines.append(
-                                    f"- **{m.id}** — {m.name}, "
-                                    f"ctx: {m.context_length}, {cost}",
+                                    f"- **{m.id}** — {m.name}, ctx: {m.context_length}, {cost}",
                                 )
                         except (ConnectionError, RuntimeError, TimeoutError) as exc:
                             lines.append(f"- Error fetching models: {exc}")

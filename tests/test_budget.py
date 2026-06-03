@@ -158,8 +158,11 @@ class TestThreadSafety:
             try:
                 for i in range(n_ops):
                     tracker.record_request(
-                        f"model-{i}", cost_usd=0.01, tokens=10,
-                        latency_ms=10, task_type="test",
+                        f"model-{i}",
+                        cost_usd=0.01,
+                        tokens=10,
+                        latency_ms=10,
+                        task_type="test",
                     )
             except Exception as exc:
                 errors.append(exc)
@@ -184,8 +187,11 @@ class TestThreadSafety:
             try:
                 for _ in range(50):
                     tracker.record_request(
-                        "m", cost_usd=0.01, tokens=10,
-                        latency_ms=10, task_type="test",
+                        "m",
+                        cost_usd=0.01,
+                        tokens=10,
+                        latency_ms=10,
+                        task_type="test",
                     )
             except Exception as exc:
                 errors.append(exc)

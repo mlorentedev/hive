@@ -26,7 +26,9 @@ class _ExampleTracker(_SqliteTracker):
 
 
 def _wait_for_count(
-    tracker: _SqliteTracker, minimum: int, deadline_s: float = 2.0,
+    tracker: _SqliteTracker,
+    minimum: int,
+    deadline_s: float = 2.0,
 ) -> int:
     """Poll ``tracker._checkpoint_count`` until it reaches ``minimum`` or
     ``deadline_s`` elapses. Returns the count seen at exit.
@@ -64,10 +66,7 @@ def test_passive_checkpoint_runs_on_interval(tmp_path: Path) -> None:
     try:
         _seed_wal(tracker)
         count = _wait_for_count(tracker, minimum=3, deadline_s=2.0)
-        assert count >= 3, (
-            f"expected ≥3 checkpoint ticks within 2s at 0.1s interval, "
-            f"got {count}"
-        )
+        assert count >= 3, f"expected ≥3 checkpoint ticks within 2s at 0.1s interval, got {count}"
     finally:
         tracker.close()
 
@@ -128,9 +127,7 @@ def test_close_runs_truncate_checkpoint(tmp_path: Path) -> None:
     tracker.close()
 
     post_size = wal_path.stat().st_size if wal_path.exists() else 0
-    assert post_size <= pre_size, (
-        f"WAL not drained on close: pre={pre_size}, post={post_size}"
-    )
+    assert post_size <= pre_size, f"WAL not drained on close: pre={pre_size}, post={post_size}"
 
 
 def test_close_completes_within_guard_under_sibling_reader(tmp_path: Path) -> None:
@@ -202,9 +199,7 @@ def test_checkpoint_loop_survives_sqlite_errors(tmp_path: Path) -> None:
     try:
         _seed_wal(tracker)
         early_count = _wait_for_count(tracker, minimum=2, deadline_s=2.0)
-        assert early_count >= 2, (
-            f"expected ≥2 checkpoint ticks within 2s, got {early_count}"
-        )
+        assert early_count >= 2, f"expected ≥2 checkpoint ticks within 2s, got {early_count}"
 
         # Forcefully simulate a transient error by closing & reopening the
         # connection out from under the loop. The next tick should encounter
@@ -242,6 +237,7 @@ def test_default_interval_from_settings(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     # Reload settings to pick up the env override.
     from hive import config as hive_config
+
     monkeypatch.setattr(hive_config, "settings", hive_config.HiveSettings())
 
     db_path = str(tmp_path / "test.db")

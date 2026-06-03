@@ -57,9 +57,9 @@ class LockEvictionTracker(_SqliteTracker):
 
     def count_last_30d(self) -> int:
         """Number of eviction events in the trailing 30 days."""
-        cutoff = (
-            _dt.datetime.now(_dt.UTC) - _dt.timedelta(days=30)
-        ).isoformat(timespec="microseconds")
+        cutoff = (_dt.datetime.now(_dt.UTC) - _dt.timedelta(days=30)).isoformat(
+            timespec="microseconds"
+        )
         with self._lock:
             cur = self._conn.execute(
                 "SELECT COUNT(*) FROM lock_evictions WHERE iso_ts >= ?",
@@ -72,8 +72,7 @@ class LockEvictionTracker(_SqliteTracker):
         """ISO-8601 timestamp of the most recent eviction, or None."""
         with self._lock:
             cur = self._conn.execute(
-                "SELECT iso_ts FROM lock_evictions "
-                "ORDER BY iso_ts DESC LIMIT 1",
+                "SELECT iso_ts FROM lock_evictions ORDER BY iso_ts DESC LIMIT 1",
             )
             row = cur.fetchone()
         return str(row[0]) if row else None

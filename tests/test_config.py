@@ -47,7 +47,8 @@ class TestEnvOverride:
         assert HiveSettings().lock_timeout_s == 30
 
     def test_hive_lock_timeout_s_validation_low(
-        self, monkeypatch: pytest.MonkeyPatch,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Reject HIVE_LOCK_TIMEOUT_S=0 (must be ≥1)."""
         monkeypatch.setenv("HIVE_LOCK_TIMEOUT_S", "0")
@@ -55,7 +56,8 @@ class TestEnvOverride:
             HiveSettings()
 
     def test_hive_lock_timeout_s_validation_high(
-        self, monkeypatch: pytest.MonkeyPatch,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Reject HIVE_LOCK_TIMEOUT_S>600 (foot-gun protection)."""
         monkeypatch.setenv("HIVE_LOCK_TIMEOUT_S", "601")
@@ -63,21 +65,24 @@ class TestEnvOverride:
             HiveSettings()
 
     def test_hive_wal_checkpoint_interval_s_env(
-        self, monkeypatch: pytest.MonkeyPatch,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """HIVE_WAL_CHECKPOINT_INTERVAL_S env honored (HIVE-115 / ADR-009)."""
         monkeypatch.setenv("HIVE_WAL_CHECKPOINT_INTERVAL_S", "15.5")
         assert HiveSettings().wal_checkpoint_interval_s == 15.5
 
     def test_hive_post_kill_drain_s_env(
-        self, monkeypatch: pytest.MonkeyPatch,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """HIVE_POST_KILL_DRAIN_S env honored (HIVE-116 / ADR-012)."""
         monkeypatch.setenv("HIVE_POST_KILL_DRAIN_S", "7.5")
         assert HiveSettings().post_kill_drain_s == 7.5
 
     def test_hive_post_kill_drain_s_default(
-        self, monkeypatch: pytest.MonkeyPatch,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Default is 5.0s (HIVE_OUTBOX_TICK_S symmetry, user-locked 2026-05-27)."""
         monkeypatch.delenv("HIVE_POST_KILL_DRAIN_S", raising=False)
@@ -85,7 +90,9 @@ class TestEnvOverride:
 
     @pytest.mark.parametrize("value", ["0.1", "0", "31", "60"])
     def test_hive_post_kill_drain_s_validation_rejects(
-        self, monkeypatch: pytest.MonkeyPatch, value: str,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        value: str,
     ) -> None:
         """Out-of-range values raise ValidationError ([0.5, 30.0])."""
         monkeypatch.setenv("HIVE_POST_KILL_DRAIN_S", value)
@@ -94,7 +101,9 @@ class TestEnvOverride:
 
     @pytest.mark.parametrize("value", ["0.5", "5.0", "30.0"])
     def test_hive_post_kill_drain_s_validation_accepts(
-        self, monkeypatch: pytest.MonkeyPatch, value: str,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        value: str,
     ) -> None:
         """Boundary + default accepted."""
         monkeypatch.setenv("HIVE_POST_KILL_DRAIN_S", value)
@@ -182,7 +191,8 @@ class TestVaultScopesValidation:
     """
 
     def test_accepts_valid_custom_mapping(
-        self, monkeypatch: pytest.MonkeyPatch,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv(
             "HIVE_VAULT_SCOPES",
@@ -199,7 +209,8 @@ class TestVaultScopesValidation:
         assert HiveSettings().vault_scopes == {}
 
     def test_rejects_duplicate_directories(
-        self, monkeypatch: pytest.MonkeyPatch,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Two scope keys pointing at one directory shadows the second."""
         monkeypatch.setenv(
@@ -214,7 +225,9 @@ class TestVaultScopesValidation:
         ["../escape", "10_projects/../../etc", "sub/../../out"],
     )
     def test_rejects_parent_traversal(
-        self, monkeypatch: pytest.MonkeyPatch, bad_dir: str,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        bad_dir: str,
     ) -> None:
         monkeypatch.setenv("HIVE_VAULT_SCOPES", f'{{"x": "{bad_dir}"}}')
         with pytest.raises(ValidationError, match="relative path inside"):
@@ -222,7 +235,9 @@ class TestVaultScopesValidation:
 
     @pytest.mark.parametrize("bad_dir", ["/etc", "\\\\windows", "C:/data"])
     def test_rejects_absolute_directories(
-        self, monkeypatch: pytest.MonkeyPatch, bad_dir: str,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        bad_dir: str,
     ) -> None:
         monkeypatch.setenv("HIVE_VAULT_SCOPES", f'{{"x": "{bad_dir}"}}')
         with pytest.raises(ValidationError, match="relative path inside"):
@@ -230,7 +245,9 @@ class TestVaultScopesValidation:
 
     @pytest.mark.parametrize("bad_dir", ["", "   "])
     def test_rejects_blank_directories(
-        self, monkeypatch: pytest.MonkeyPatch, bad_dir: str,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        bad_dir: str,
     ) -> None:
         monkeypatch.setenv("HIVE_VAULT_SCOPES", f'{{"x": "{bad_dir}"}}')
         with pytest.raises(ValidationError, match="relative path inside"):

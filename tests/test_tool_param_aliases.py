@@ -36,12 +36,14 @@ class TestRealAliases:
         mcp = create_server(vault_path=mock_vault)
         canonical = _text(
             await mcp.call_tool(
-                "vault_list", {"project": "testproject", "path": "30-architecture"},
+                "vault_list",
+                {"project": "testproject", "path": "30-architecture"},
             )
         )
         alias = _text(
             await mcp.call_tool(
-                "vault_list", {"project": "testproject", "subpath": "30-architecture"},
+                "vault_list",
+                {"project": "testproject", "subpath": "30-architecture"},
             )
         )
         assert "adr-001-test.md" in alias
@@ -55,7 +57,8 @@ class TestRealAliases:
         )
         alias = _text(
             await mcp.call_tool(
-                "vault_query", {"project": "testproject", "identifier": target},
+                "vault_query",
+                {"project": "testproject", "identifier": target},
             )
         )
         assert "Test Decision" in alias
@@ -65,12 +68,8 @@ class TestRealAliases:
         mcp = create_server(vault_path=mock_vault)
         # A pattern that only matches as a regex, never as a literal substring.
         query = r"Task\s+one"
-        canonical = _text(
-            await mcp.call_tool("vault_search", {"query": query, "use_regex": True})
-        )
-        alias = _text(
-            await mcp.call_tool("vault_search", {"query": query, "regex": True})
-        )
+        canonical = _text(await mcp.call_tool("vault_search", {"query": query, "use_regex": True}))
+        alias = _text(await mcp.call_tool("vault_search", {"query": query, "regex": True}))
         assert alias == canonical
 
     async def test_vault_patch_old_new_string_alias(self, git_vault: Path) -> None:
@@ -89,7 +88,8 @@ class TestRealAliases:
         assert "error" not in resp.lower()
         readback = _text(
             await mcp.call_tool(
-                "vault_query", {"project": "testproject", "path": "11-tasks.md"},
+                "vault_query",
+                {"project": "testproject", "path": "11-tasks.md"},
             )
         )
         assert "- [x] Task one DONE" in readback

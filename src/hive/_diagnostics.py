@@ -50,7 +50,10 @@ class LifecycleMiddleware(Middleware):
             _record(tool, elapsed_ms, ok=False)
             _log.info(
                 "mcp cancelled method=%s tool=%s id=%s elapsed_ms=%.0f",
-                method, tool, request_id, elapsed_ms,
+                method,
+                tool,
+                request_id,
+                elapsed_ms,
             )
             raise
         except Exception as exc:
@@ -58,7 +61,11 @@ class LifecycleMiddleware(Middleware):
             _record(tool, elapsed_ms, ok=False)
             _log.warning(
                 "mcp error method=%s tool=%s id=%s elapsed_ms=%.0f exc=%r",
-                method, tool, request_id, elapsed_ms, exc,
+                method,
+                tool,
+                request_id,
+                elapsed_ms,
+                exc,
             )
             raise
         else:
@@ -68,7 +75,10 @@ class LifecycleMiddleware(Middleware):
                 METRICS.record_session_start()
             _log.info(
                 "mcp ok method=%s tool=%s id=%s elapsed_ms=%.0f",
-                method, tool, request_id, elapsed_ms,
+                method,
+                tool,
+                request_id,
+                elapsed_ms,
             )
             return result
 

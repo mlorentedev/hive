@@ -130,7 +130,10 @@ class TestExploration:
         t.record_access("hive", "tasks")
         recent_sections = ["lessons", "roadmap"]
         result = t.top_sections_with_exploration(
-            "hive", n=3, recent_sections=recent_sections, epsilon=1.0,
+            "hive",
+            n=3,
+            recent_sections=recent_sections,
+            epsilon=1.0,
         )
         assert any(s in result for s in recent_sections)
 
@@ -139,7 +142,10 @@ class TestExploration:
         t.record_access("hive", "tasks")
         recent_sections = ["lessons", "roadmap"]
         result = t.top_sections_with_exploration(
-            "hive", n=1, recent_sections=recent_sections, epsilon=0.0,
+            "hive",
+            n=1,
+            recent_sections=recent_sections,
+            epsilon=0.0,
         )
         assert result == ["tasks"]
 
@@ -148,7 +154,10 @@ class TestExploration:
         t.record_access("hive", "tasks")
         # "tasks" is already in top — should not be added again as exploration
         result = t.top_sections_with_exploration(
-            "hive", n=3, recent_sections=["tasks"], epsilon=1.0,
+            "hive",
+            n=3,
+            recent_sections=["tasks"],
+            epsilon=1.0,
         )
         assert result.count("tasks") == 1
 
@@ -206,10 +215,7 @@ class TestThreadSafety:
             except Exception as exc:
                 errors.append(exc)
 
-        threads = [
-            threading.Thread(target=worker, args=(i,))
-            for i in range(n_threads)
-        ]
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(n_threads)]
         for th in threads:
             th.start()
         for th in threads:

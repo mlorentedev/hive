@@ -59,7 +59,8 @@ def test_render_windows_task_xml_has_logon_trigger_and_restart_on_failure() -> N
 
 
 def test_install_writes_systemd_unit_and_enables(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     import hive._service as svc
 
@@ -80,7 +81,8 @@ def test_install_writes_systemd_unit_and_enables(
 
 
 def test_install_no_enable_writes_unit_but_skips_systemctl(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     import hive._service as svc
 
@@ -133,7 +135,8 @@ def test_install_macos_is_a_clear_stub(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_uninstall_linux_removes_unit_and_disables(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     import hive._service as svc
 

@@ -51,7 +51,11 @@ CREATE TABLE IF NOT EXISTS relevance_meta (
         self._access_buffer: list[tuple[str, str, float]] = []
 
     def record_access(
-        self, project: str, section: str, *, is_write: bool = False,
+        self,
+        project: str,
+        section: str,
+        *,
+        is_write: bool = False,
     ) -> None:
         """Record a section access, updating EMA score.
 
@@ -140,8 +144,7 @@ CREATE TABLE IF NOT EXISTS relevance_meta (
     def _top_sections(self, project: str, n: int = 5) -> list[str]:
         """Internal — caller MUST hold self._lock and have flushed buffer."""
         rows = self._conn.execute(
-            "SELECT section FROM section_scores "
-            "WHERE project = ? ORDER BY score DESC LIMIT ?",
+            "SELECT section FROM section_scores WHERE project = ? ORDER BY score DESC LIMIT ?",
             (project, n),
         ).fetchall()
         return [row[0] for row in rows]
@@ -181,8 +184,7 @@ CREATE TABLE IF NOT EXISTS relevance_meta (
         with self._lock:
             self._flush_access_locked()
             rows = self._conn.execute(
-                "SELECT section, score FROM section_scores "
-                "WHERE project = ? ORDER BY score DESC",
+                "SELECT section, score FROM section_scores WHERE project = ? ORDER BY score DESC",
                 (project,),
             ).fetchall()
         return {section: score for section, score in rows}

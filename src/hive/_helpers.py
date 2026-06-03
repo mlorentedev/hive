@@ -58,10 +58,7 @@ def synthesize_external_termination_stderr(original_stderr: bytes) -> str:
     ts = datetime.now(UTC).isoformat(timespec="seconds")
     n = len(original_stderr)
     detail = "empty" if n == 0 else f"{n} bytes"
-    return (
-        f"[external_termination] killed by supervisor at {ts} ; "
-        f"original stderr: {detail}"
-    )
+    return f"[external_termination] killed by supervisor at {ts} ; original stderr: {detail}"
 
 
 # HIVE-116 AC-5/AC-6: contextvar threading partial-state signals from the
@@ -75,8 +72,8 @@ def synthesize_external_termination_stderr(original_stderr: bytes) -> str:
 #     the partial-state response instead of the generic "timed out" string.
 # The CV value is the *same dict reference* in the awaiting coroutine and
 # the to_thread worker (CPython propagates the context).
-_PARTIAL_STATE_CV: contextvars.ContextVar[dict[str, bool] | None] = (
-    contextvars.ContextVar("_PARTIAL_STATE", default=None)
+_PARTIAL_STATE_CV: contextvars.ContextVar[dict[str, bool] | None] = contextvars.ContextVar(
+    "_PARTIAL_STATE", default=None
 )
 
 # HIVE-116 AC-1: contextvar propagating the vault path that ``tool_span``
@@ -85,8 +82,8 @@ _PARTIAL_STATE_CV: contextvars.ContextVar[dict[str, bool] | None] = (
 # read by ``tool_span``'s except branch to call ``evict_filelock``. Kept
 # as a CV instead of a positional arg so the wide call surface of
 # ``tool_span`` does not need to change.
-_VAULT_FOR_EVICTION_CV: contextvars.ContextVar[Path | None] = (
-    contextvars.ContextVar("_VAULT_FOR_EVICTION", default=None)
+_VAULT_FOR_EVICTION_CV: contextvars.ContextVar[Path | None] = contextvars.ContextVar(
+    "_VAULT_FOR_EVICTION", default=None
 )
 
 # Tools that opt in to partial-state response formatting. Read-path tools
@@ -130,6 +127,7 @@ def project_not_found(project: str) -> str:
     """Standard error string for unresolvable project slugs."""
     return f"Project '{project}' not found in vault."
 
+
 _READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
 _WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False)
 
@@ -159,6 +157,7 @@ def _default_scopes() -> dict[str, str]:
     from hive.config import settings
 
     return settings.vault_scopes
+
 
 _FENCED_CODE_RE = re.compile(
     r"(?ms)^(?P<fence>`{3,}|~{3,})[^\n]*\n.*?^(?P=fence)[^\n]*$",
@@ -252,6 +251,7 @@ def find_lesson_heading(content: str, line_no: int) -> str | None:
             return m.group(1)
     return None
 
+
 _VAULT_NOT_FOUND_MSG = (
     "Vault not found at {path}.\n\n"
     "Set the vault path when registering the MCP server:\n\n"
@@ -296,7 +296,9 @@ def _parse_project_ref(project: str) -> tuple[str | None, str]:
 
 
 def _resolve_project_dir(
-    vault: Path, project: str, scopes: dict[str, str],
+    vault: Path,
+    project: str,
+    scopes: dict[str, str],
 ) -> tuple[Path, str] | None:
     """Resolve a project slug to (directory, scope_name).
 
@@ -348,7 +350,10 @@ def _resolve_project_dir(
 
 
 def _search_scope(
-    scope_dir: Path, slug: str, scope_name: str, vault: Path,
+    scope_dir: Path,
+    slug: str,
+    scope_name: str,
+    vault: Path,
 ) -> tuple[Path, str] | None:
     """Search for a slug within a scope directory.
 
@@ -616,14 +621,9 @@ def format_io_error(exc: BaseException, path: object, action: str) -> str:
             "Check the path is correct and the parent directory exists."
         )
     if isinstance(exc, IsADirectoryError):
-        return (
-            f"Cannot {action} '{path}': target is a directory, expected a file."
-        )
+        return f"Cannot {action} '{path}': target is a directory, expected a file."
     if isinstance(exc, UnicodeDecodeError):
-        return (
-            f"Cannot read '{path}': file is not valid UTF-8 "
-            "(hive only supports UTF-8 markdown)."
-        )
+        return f"Cannot read '{path}': file is not valid UTF-8 (hive only supports UTF-8 markdown)."
     if isinstance(exc, OSError):
         errno = exc.errno or "?"
         strerror = exc.strerror or str(exc)
@@ -647,7 +647,11 @@ def _safe_read(f: Path) -> str | None:
 
 
 def track(
-    ctx: ServerContext, tool: str, result: str, project: str = "", section: str = "",
+    ctx: ServerContext,
+    tool: str,
+    result: str,
+    project: str = "",
+    section: str = "",
 ) -> str:
     """Log a tool call and return the result unchanged."""
     ctx.tracker.log_call(tool, project, len(result.splitlines()))
@@ -670,9 +674,9 @@ _WRITE_LOCK = threading.Lock()
 # thread sees the same list the async supervisor will iterate).
 # Default ``None`` = legacy unsupervised call (e.g. ``_git_log`` /
 # ``_git_recent`` read paths that retain ``subprocess.run`` per m1).
-_GIT_REGISTRY_CV: contextvars.ContextVar[
-    list[subprocess.Popen[bytes]] | None
-] = contextvars.ContextVar("_GIT_REGISTRY", default=None)
+_GIT_REGISTRY_CV: contextvars.ContextVar[list[subprocess.Popen[bytes]] | None] = (
+    contextvars.ContextVar("_GIT_REGISTRY", default=None)
+)
 
 
 _GIT_LOCK_WAIT_HISTORY: deque[int] = deque(maxlen=100)
@@ -967,7 +971,8 @@ def evict_filelock(vault_path: Path) -> bool:
 
 @asynccontextmanager
 async def tool_span(
-    tool_name: str, timeout_seconds: float,
+    tool_name: str,
+    timeout_seconds: float,
 ) -> AsyncIterator[None]:
     """Enforce a hard deadline AND register a Popen kill-set for the body.
 
@@ -1022,13 +1027,19 @@ async def tool_span(
                 "%s timed out after %.1fs (deadline %.0fs); killed %d "
                 "subprocess(es) "
                 "[mcp.tool_span.deadline_exceeded killed_pids=%s]",
-                tool_name, elapsed, timeout_seconds, len(killed), killed,
+                tool_name,
+                elapsed,
+                timeout_seconds,
+                len(killed),
+                killed,
             )
             # HIVE-116 AC-1: cooperative filelock eviction
             vault_for_eviction = _VAULT_FOR_EVICTION_CV.get()
             if vault_for_eviction is not None and killed:
                 await _drain_and_evict(
-                    vault_for_eviction, killed, tool_name,
+                    vault_for_eviction,
+                    killed,
+                    tool_name,
                 )
             raise
         else:
@@ -1063,21 +1074,27 @@ async def _drain_and_evict(
             _log.info(
                 "mcp.lock_eviction lock=_git_filelock vault=%s "
                 "killed_pids=%s drain_s=%.1f tool=%s cancelled=true",
-                vault_path, killed_pids, drain_s, tool_name,
+                vault_path,
+                killed_pids,
+                drain_s,
+                tool_name,
             )
         raise
     evicted = evict_filelock(vault_path)
     if evicted:
         _log.info(
-            "mcp.lock_eviction lock=_git_filelock vault=%s "
-            "killed_pids=%s drain_s=%.1f tool=%s",
-            vault_path, killed_pids, drain_s, tool_name,
+            "mcp.lock_eviction lock=_git_filelock vault=%s killed_pids=%s drain_s=%.1f tool=%s",
+            vault_path,
+            killed_pids,
+            drain_s,
+            tool_name,
         )
         _record_lock_eviction(vault_path, killed_pids)
 
 
 def _record_lock_eviction(
-    vault_path: Path, killed_pids: list[int],
+    vault_path: Path,
+    killed_pids: list[int],
 ) -> None:
     """Persist the eviction event for vault_health telemetry (T-2.5).
 
@@ -1168,10 +1185,12 @@ async def run_sync_tool(
             and state.get("disk_write_done")
         ):
             return _PARTIAL_STATE_TIMEOUT_FMT.format(
-                tool=tool_name, timeout=timeout_seconds,
+                tool=tool_name,
+                timeout=timeout_seconds,
             )
         return _GENERIC_TIMEOUT_FMT.format(
-            tool=tool_name, timeout=timeout_seconds,
+            tool=tool_name,
+            timeout=timeout_seconds,
         )
     finally:
         if state_token is not None:
@@ -1179,7 +1198,8 @@ async def run_sync_tool(
 
 
 def wrap_sync_tool(
-    ctx: ServerContext, tool_name: str,
+    ctx: ServerContext,
+    tool_name: str,
 ) -> Callable[[Callable[..., str]], Callable[..., object]]:
     """Decorator: convert a sync MCP tool handler into async-with-timeout.
 
@@ -1210,14 +1230,15 @@ def wrap_sync_tool(
         @functools.wraps(fn)
         async def wrapper(*args: object, **kwargs: object) -> str:
             vault_token: contextvars.Token[Path | None] | None = None
-            if (
-                tool_name in _PARTIAL_STATE_TOOLS
-                and ctx.vault.is_dir()
-            ):
+            if tool_name in _PARTIAL_STATE_TOOLS and ctx.vault.is_dir():
                 vault_token = _VAULT_FOR_EVICTION_CV.set(ctx.vault)
             try:
                 return await run_sync_tool(
-                    tool_name, ctx.tool_timeout, fn, *args, **kwargs,
+                    tool_name,
+                    ctx.tool_timeout,
+                    fn,
+                    *args,
+                    **kwargs,
                 )
             finally:
                 if vault_token is not None:
@@ -1290,11 +1311,7 @@ def _run_git(
                 # Best-effort drain of whatever the kernel buffered before
                 # the kill. Failures here are unrecoverable.
                 stdout_b, stderr_b = proc.communicate()
-        rc = (
-            proc.returncode
-            if proc.returncode is not None
-            else RC_EXTERNAL_TERMINATION
-        )
+        rc = proc.returncode if proc.returncode is not None else RC_EXTERNAL_TERMINATION
         # HIVE-116 AC-3: an external-termination rc must be remapped from
         # whatever the OS reported (Linux SIGTERM = -15, Windows = 1) to
         # our named sentinel so callers can predicate on the constant. The
@@ -1316,7 +1333,9 @@ def _run_git(
 
 
 def _git_commit(
-    vault_path: Path, rel_paths: list[Path], message: str,
+    vault_path: Path,
+    rel_paths: list[Path],
+    message: str,
 ) -> None:
     """Stage one or more files and commit them in a single git invocation.
 
@@ -1354,7 +1373,8 @@ def _git_commit(
     if not _acquire_with_telemetry(_GIT_LOCK, "_GIT_LOCK"):
         _log.warning(
             "git commit skipped for %s: thread lock timeout (%ds)",
-            path_strs, _lock_timeout(),
+            path_strs,
+            _lock_timeout(),
         )
         return
     try:
@@ -1362,42 +1382,44 @@ def _git_commit(
             with _filelock_with_telemetry(_git_filelock(vault_path), "_git_filelock"):
                 rc, _, err = _run_git(["add", *path_strs], vault_path)
                 if rc != 0:
-                    cause = (
-                        "external_termination"
-                        if rc == RC_EXTERNAL_TERMINATION
-                        else "git_error"
-                    )
+                    cause = "external_termination" if rc == RC_EXTERNAL_TERMINATION else "git_error"
                     _log.warning(
                         "git add failed for %s rc=%s cause=%s err=%s",
-                        path_strs, rc, cause, err.strip(),
+                        path_strs,
+                        rc,
+                        cause,
+                        err.strip(),
                     )
                     return
                 rc, _, err = _run_git(["commit", "-m", safe_msg], vault_path)
                 if rc != 0:
-                    cause = (
-                        "external_termination"
-                        if rc == RC_EXTERNAL_TERMINATION
-                        else "git_error"
-                    )
+                    cause = "external_termination" if rc == RC_EXTERNAL_TERMINATION else "git_error"
                     _log.warning(
                         "git commit failed for %s rc=%s cause=%s err=%s",
-                        path_strs, rc, cause, err.strip(),
+                        path_strs,
+                        rc,
+                        cause,
+                        err.strip(),
                     )
         except filelock.Timeout:
             _log.warning(
                 "git commit skipped for %s: inter-process lock timeout (%ds)",
-                path_strs, _lock_timeout(),
+                path_strs,
+                _lock_timeout(),
             )
         except Exception as exc:
             _log.warning(
-                "git commit unexpected error for %s: %s", path_strs, exc,
+                "git commit unexpected error for %s: %s",
+                path_strs,
+                exc,
             )
     finally:
         _GIT_LOCK.release()
 
 
 def _git_commit_all(
-    vault_path: Path, message: str,
+    vault_path: Path,
+    message: str,
 ) -> tuple[str, str]:
     """Stage every change in the vault and create one commit.
 
@@ -1416,12 +1438,11 @@ def _git_commit_all(
         try:
             with _filelock_with_telemetry(_git_filelock(vault_path), "_git_filelock"):
                 rc, porcelain_out, porcelain_err = _run_git(
-                    ["status", "--porcelain"], vault_path,
+                    ["status", "--porcelain"],
+                    vault_path,
                 )
                 if rc != 0:
-                    return "error", (
-                        f"git status rc={rc}: {porcelain_err.strip() or '<empty>'}"
-                    )
+                    return "error", (f"git status rc={rc}: {porcelain_err.strip() or '<empty>'}")
                 if not porcelain_out.strip():
                     return "clean", ""
                 rc, _, err = _run_git(["add", "-A"], vault_path)
@@ -1476,7 +1497,8 @@ def _is_external_committer_healthy(
     except Exception as exc:  # noqa: BLE001
         _log.debug(
             "mcp.detect_and_defer.git_log_failed vault=%s exc=%s",
-            vault_path, exc,
+            vault_path,
+            exc,
         )
         return False
     try:
@@ -1498,7 +1520,8 @@ def _is_external_committer_healthy(
     except Exception as exc:  # noqa: BLE001
         _log.debug(
             "mcp.detect_and_defer.git_status_failed vault=%s exc=%s",
-            vault_path, exc,
+            vault_path,
+            exc,
         )
         return False
     return porcelain.returncode == 0 and porcelain.stdout.strip() == ""
@@ -1538,9 +1561,7 @@ def _vault_write_deferral_suffix(
 
     if not _should_defer_to_external_committer(vault_path):
         return ""
-    return (
-        " (deferred to obsidian-git; will be picked up on its next tick)"
-    )
+    return " (deferred to obsidian-git; will be picked up on its next tick)"
 
 
 def detect_obsidian_git(vault_path: Path) -> dict[str, int] | None:
@@ -1596,9 +1617,13 @@ def _current_head_sha(vault_path: Path) -> str:
     if head_text.startswith("ref:"):
         ref = head_text.split(":", 1)[1].strip()
         try:
-            return (vault_path / ".git" / ref).read_text(
-                encoding="utf-8",
-            ).strip()
+            return (
+                (vault_path / ".git" / ref)
+                .read_text(
+                    encoding="utf-8",
+                )
+                .strip()
+            )
         except OSError:
             return ""
     return head_text  # already a detached SHA
@@ -1618,10 +1643,7 @@ def _git_log(vault_path: Path, n: int) -> str:
             entry = _git_log_cache.get(key)
             if entry is not None:
                 cached_at, cached_sha, value = entry
-                if (
-                    cached_sha == sha
-                    and time.monotonic() - cached_at < _GIT_CACHE_TTL_S
-                ):
+                if cached_sha == sha and time.monotonic() - cached_at < _GIT_CACHE_TTL_S:
                     return value
     try:
         result = subprocess.run(
@@ -1654,15 +1676,11 @@ def _git_recent(vault_path: Path, since_days: int) -> list[str]:
             entry = _git_recent_cache.get(key)
             if entry is not None:
                 cached_at, cached_sha, value = entry
-                if (
-                    cached_sha == sha
-                    and time.monotonic() - cached_at < _GIT_CACHE_TTL_S
-                ):
+                if cached_sha == sha and time.monotonic() - cached_at < _GIT_CACHE_TTL_S:
                     return list(value)
     try:
         result = subprocess.run(
-            ["git", "log", f"--since={since_days} days ago",
-             "--name-only", "--pretty=format:"],
+            ["git", "log", f"--since={since_days} days ago", "--name-only", "--pretty=format:"],
             cwd=vault_path,
             capture_output=True,
             text=True,
@@ -1672,10 +1690,9 @@ def _git_recent(vault_path: Path, since_days: int) -> list[str]:
         return []
     if result.returncode != 0:
         return []
-    value = sorted({
-        line.strip() for line in result.stdout.splitlines()
-        if line.strip().endswith(".md")
-    })
+    value = sorted(
+        {line.strip() for line in result.stdout.splitlines() if line.strip().endswith(".md")}
+    )
     if sha:
         with _GIT_CACHE_LOCK:
             _git_recent_cache[key] = (time.monotonic(), sha, value)
@@ -1735,7 +1752,8 @@ def count_stale_from(
 
 
 def count_stale(
-    project_dir: Path, threshold: date,
+    project_dir: Path,
+    threshold: date,
 ) -> list[str]:
     """Return list of stale file paths in a project directory.
 

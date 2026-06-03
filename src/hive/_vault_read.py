@@ -83,13 +83,12 @@ def _vault_search_by_rank(
         if per_heading_hits:
             # Normalise raw hit counts to [0, 1] per project for hybrid blend.
             max_h = max(per_heading_hits.values())
-            bm25_per_project[project_slug] = {
-                h: cnt / max_h for h, cnt in per_heading_hits.items()
-            }
+            bm25_per_project[project_slug] = {h: cnt / max_h for h, cnt in per_heading_hits.items()}
 
     if not hits:
         return track(
-            ctx, "vault_search",
+            ctx,
+            "vault_search",
             f"No lessons found for '{query}'.",
         )
 
@@ -103,7 +102,9 @@ def _vault_search_by_rank(
         relevant_headings = {h for p, h in hits if p == project_slug}
         bm25_scores = bm25_per_project.get(project_slug, {})
         ranked = ctx.lessons.top(
-            project_slug, by=rank_by, limit=len(relevant_headings),
+            project_slug,
+            by=rank_by,
+            limit=len(relevant_headings),
             bm25_scores=bm25_scores,
         )
         ordered = [h for h in ranked if h in relevant_headings]
@@ -135,8 +136,7 @@ def list_projects_text(ctx: ServerContext) -> str:
         for project_dir in projects:
             found_any = True
             sections = [
-                s for s, filename in SECTION_SHORTCUTS.items()
-                if (project_dir / filename).exists()
+                s for s, filename in SECTION_SHORTCUTS.items() if (project_dir / filename).exists()
             ]
             try:
                 md_count = len(list(project_dir.rglob("*.md")))
@@ -185,8 +185,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
 
         resolved = _resolve_project_dir(ctx.vault, project, ctx.scopes)
         if resolved is None:
-            return track(ctx, "vault_list",
-                         project_not_found(project), project)
+            return track(ctx, "vault_list", project_not_found(project), project)
         project_dir, _ = resolved
 
         from hive._helpers import _check_path_boundary
@@ -196,9 +195,9 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         if boundary_error:
             return track(ctx, "vault_list", boundary_error, project)
         if not target.is_dir():
-            return track(ctx, "vault_list",
-                         f"Path '{path}' not found in project '{project}'.",
-                         project)
+            return track(
+                ctx, "vault_list", f"Path '{path}' not found in project '{project}'.", project
+            )
 
         lines: list[str] = [
             f"# Files: {project}/{path}" if path else f"# Files: {project}",
@@ -209,25 +208,28 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         if pattern:
             if ".." in pattern:
                 return track(
-                    ctx, "vault_list",
+                    ctx,
+                    "vault_list",
                     "Pattern must not contain '..'.",
                     project,
                 )
             try:
                 files = sorted(
-                    f for f in target.rglob(pattern)
-                    if f.is_file()
-                    and _check_path_boundary(f, ctx.vault) is None
+                    f
+                    for f in target.rglob(pattern)
+                    if f.is_file() and _check_path_boundary(f, ctx.vault) is None
                 )
             except OSError:
                 return track(
-                    ctx, "vault_list",
+                    ctx,
+                    "vault_list",
                     f"Error reading directory for pattern '{pattern}'.",
                     project,
                 )
             if not files:
                 return track(
-                    ctx, "vault_list",
+                    ctx,
+                    "vault_list",
                     f"No files matching '{pattern}' in {project}/{path}.",
                     project,
                 )
@@ -239,7 +241,8 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
                 entries = sorted(target.iterdir())
             except OSError:
                 return track(
-                    ctx, "vault_list",
+                    ctx,
+                    "vault_list",
                     f"Error reading directory '{path or project}'.",
                     project,
                 )
@@ -289,9 +292,11 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             content = filepath.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             return track(
-                ctx, "vault_query",
+                ctx,
+                "vault_query",
                 format_io_error(exc, resolved_section, "read"),
-                project, resolved_section,
+                project,
+                resolved_section,
             )
 
         if include_metadata:
@@ -306,8 +311,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             for heading in dict.fromkeys(extract_lesson_headings(truncated)):
                 ctx.lessons.increment(project, heading)
 
-        return track(ctx, "vault_query", truncated,
-                     project, resolved_section)
+        return track(ctx, "vault_query", truncated, project, resolved_section)
 
     @mcp.tool(annotations=_READ_ONLY)
     @wrap_sync_tool(ctx, "vault_search")
@@ -359,10 +363,13 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             return track(ctx, "vault_search", guard)
 
         if rank_by != "bm25" and rank_by not in {
-            "reinforcements", "confidence", "hybrid",
+            "reinforcements",
+            "confidence",
+            "hybrid",
         }:
             return track(
-                ctx, "vault_search",
+                ctx,
+                "vault_search",
                 f"Unknown rank_by={rank_by!r}. Expected one of: "
                 f"bm25, reinforcements, confidence, hybrid.",
             )
@@ -374,19 +381,23 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             if scope_dir_name is None:
                 available = ", ".join(sorted(ctx.scopes.keys()))
                 return track(
-                    ctx, "vault_search",
+                    ctx,
+                    "vault_search",
                     f"Unknown scope '{scope}'. Available: {available}",
                 )
             search_root = ctx.vault / scope_dir_name
             if not search_root.is_dir():
                 return track(
-                    ctx, "vault_search",
+                    ctx,
+                    "vault_search",
                     f"Scope directory '{scope_dir_name}' not found in vault.",
                 )
 
         if since_days < 0:
             return track(
-                ctx, "vault_search", "since_days must be a positive number.",
+                ctx,
+                "vault_search",
+                "since_days must be a positive number.",
             )
 
         # ── Recent mode ──
@@ -411,28 +422,27 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
 
             if project:
                 resolved = _resolve_project_dir(
-                    ctx.vault, project, ctx.scopes,
+                    ctx.vault,
+                    project,
+                    ctx.scopes,
                 )
                 if resolved is not None:
-                    prefix = (
-                        resolved[0].relative_to(ctx.vault).as_posix()
-                        + "/"
-                    )
-                    git_paths = {
-                        p for p in git_paths if p.startswith(prefix)
-                    }
+                    prefix = resolved[0].relative_to(ctx.vault).as_posix() + "/"
+                    git_paths = {p for p in git_paths if p.startswith(prefix)}
                 else:
                     git_paths = set()
 
             if not git_paths:
                 return track(
-                    ctx, "vault_search",
+                    ctx,
+                    "vault_search",
                     f"No changes found in the last {since_days} days.",
                     project,
                 )
 
             rlines: list[str] = [
-                f"# Recent Changes (last {since_days} days)", "",
+                f"# Recent Changes (last {since_days} days)",
+                "",
             ]
             for rel_path in sorted(git_paths):
                 full = ctx.vault / rel_path
@@ -453,14 +463,19 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
 
             output = "\n".join(rlines)
             return track(
-                ctx, "vault_search", _truncate(output, max_lines), project,
+                ctx,
+                "vault_search",
+                _truncate(output, max_lines),
+                project,
             )
 
         # ── Ranked mode ──
         if ranked:
             if not query:
                 return track(
-                    ctx, "vault_search", "Query is required for ranked search.",
+                    ctx,
+                    "vault_search",
+                    "Query is required for ranked search.",
                 )
             query_lower = query.lower()
             today = date.today()
@@ -471,11 +486,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
                 if content is None:
                     continue
                 body = extract_body(content)
-                matching = [
-                    ln.strip()
-                    for ln in body.splitlines()
-                    if query_lower in ln.lower()
-                ]
+                matching = [ln.strip() for ln in body.splitlines() if query_lower in ln.lower()]
                 if not matching:
                     continue
                 fm = parse_frontmatter(content)
@@ -486,7 +497,8 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
 
             if not scored:
                 return track(
-                    ctx, "vault_search",
+                    ctx,
+                    "vault_search",
                     f"No matches found for '{query}'.",
                 )
 
@@ -494,7 +506,8 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             scored = scored[:max_results]
 
             results: list[str] = [
-                f"# Ranked Search: '{query}'", "",
+                f"# Ranked Search: '{query}'",
+                "",
             ]
             for score, rel, meta, matching in scored:
                 meta_part = f" [{meta}]" if meta else ""
@@ -506,37 +519,48 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
 
             output = "\n".join(results)
             return track(
-                ctx, "vault_search", _truncate(output, max_lines),
+                ctx,
+                "vault_search",
+                _truncate(output, max_lines),
             )
 
         # ── rank_by mode (HIVE-97) — lessons-only ranked by usage signal ──
         if rank_by != "bm25":
             if not query:
                 return track(
-                    ctx, "vault_search",
+                    ctx,
+                    "vault_search",
                     f"Query is required for rank_by={rank_by!r} search.",
                 )
             return _vault_search_by_rank(
-                ctx, search_root, query, rank_by, max_lines,
+                ctx,
+                search_root,
+                query,
+                rank_by,
+                max_lines,
             )
 
         # ── Standard search ──
         if not query:
             return track(
-                ctx, "vault_search", "Query is required for search.",
+                ctx,
+                "vault_search",
+                "Query is required for search.",
             )
 
         if use_regex:
             if len(query) > 200:
                 return track(
-                    ctx, "vault_search",
+                    ctx,
+                    "vault_search",
                     "Regex pattern too long (max 200 chars).",
                 )
             try:
                 rx_pattern = re.compile(query, re.IGNORECASE)
             except re.error as exc:
                 return track(
-                    ctx, "vault_search",
+                    ctx,
+                    "vault_search",
                     f"Invalid regex '{query}': {exc}",
                 )
 
@@ -564,15 +588,11 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             body = extract_body(content)
             if use_regex:
                 matching_lines = [
-                    line.strip()
-                    for line in body.splitlines()
-                    if rx_pattern.search(line)
+                    line.strip() for line in body.splitlines() if rx_pattern.search(line)
                 ]
             else:
                 matching_lines = [
-                    line.strip()
-                    for line in body.splitlines()
-                    if query_lower in line.lower()
+                    line.strip() for line in body.splitlines() if query_lower in line.lower()
                 ]
             if matching_lines:
                 file_rel = md_file.relative_to(ctx.vault)
@@ -584,7 +604,9 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
 
         if not flat_results:
             return track(
-                ctx, "vault_search", f"No matches found for '{query}'.",
+                ctx,
+                "vault_search",
+                f"No matches found for '{query}'.",
             )
 
         output = f"# Search: '{query}'\n\n" + "\n".join(flat_results)
@@ -620,8 +642,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
 
         resolved = _resolve_project_dir(ctx.vault, project, ctx.scopes)
         if resolved is None:
-            return track(ctx, "session_briefing",
-                         project_not_found(project), project)
+            return track(ctx, "session_briefing", project_not_found(project), project)
         project_dir, _ = resolved
 
         # Decay stale relevance scores at session start
@@ -641,7 +662,11 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
 
         # Lessons
         lessons_result = _resolve_file(
-            ctx.vault, project, "lessons", "", ctx.scopes,
+            ctx.vault,
+            project,
+            "lessons",
+            "",
+            ctx.scopes,
         )
         if not isinstance(lessons_result, str):
             lessons_content = _safe_read(lessons_result)
@@ -658,9 +683,14 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         # Health (always shown, not ranked) — single project scan reused.
         md_files, _, frontmatters = scan_project(project_dir)
         stale_threshold = date.today() - timedelta(days=ctx.stale_days)
-        stale_count = len(count_stale_from(
-            project_dir, md_files, frontmatters, stale_threshold,
-        ))
+        stale_count = len(
+            count_stale_from(
+                project_dir,
+                md_files,
+                frontmatters,
+                stale_threshold,
+            )
+        )
         health_lines = [f"- Files: {len(md_files)}"]
         if stale_count:
             health_lines.append(f"- Stale: {stale_count}")
@@ -671,7 +701,9 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         scores = ctx.relevance.get_scores(project)
         if scores:
             ranked_sections = sorted(
-                sections.keys(), key=lambda s: scores.get(s, 0.0), reverse=True,
+                sections.keys(),
+                key=lambda s: scores.get(s, 0.0),
+                reverse=True,
             )
         else:
             ranked_sections = [s for s in default_order if s in sections]
