@@ -598,6 +598,31 @@ def _run_client(argv: list[str]) -> None:
     run_client(host=opts.host)
 
 
+def _run_service(argv: list[str]) -> int:
+    """``hive service {install,uninstall,status}`` — manage the per-user daemon
+    service (systemd ``--user`` on Linux, Task Scheduler on Windows). Returns a
+    process exit code for the caller (e.g. a dotfiles installer)."""
+    import argparse
+
+    from hive._service import install_service, service_status, uninstall_service
+
+    parser = argparse.ArgumentParser(prog="hive service")
+    sub = parser.add_subparsers(dest="action", required=True)
+    install = sub.add_parser("install", help="install + enable the service")
+    install.add_argument(
+        "--no-enable", action="store_true",
+        help="write the unit/task only; do not start it",
+    )
+    sub.add_parser("uninstall", help="stop + remove the service")
+    sub.add_parser("status", help="show the supervisor's view of the daemon")
+    opts = parser.parse_args(argv)
+    if opts.action == "install":
+        return install_service(enable=not opts.no_enable)
+    if opts.action == "uninstall":
+        return uninstall_service()
+    return service_status()
+
+
 def main() -> None:
     """Entry point for the hive CLI command.
 
@@ -605,8 +630,9 @@ def main() -> None:
     ``hive serve`` runs the Phase C single-owner daemon over loopback HTTP +
     bearer token (ADR-011). ``hive client`` runs the thin stdio shim that
     proxies to that daemon (falling back to the in-process server when none is
-    reachable). ``create_server()`` is called here rather than at module import
-    so importing ``hive.server`` is side-effect free.
+    reachable). ``hive service {install,uninstall,status}`` manages the daemon
+    as a per-user OS service. ``create_server()`` is called here rather than at
+    module import so importing ``hive.server`` is side-effect free.
     """
     _setup_file_logging()
     _log = logging.getLogger("hive")
@@ -614,6 +640,8 @@ def main() -> None:
     try:
         if argv and argv[0] == "serve":
             raise SystemExit(_run_serve(argv[1:]))
+        if argv and argv[0] == "service":
+            raise SystemExit(_run_service(argv[1:]))
         if argv and argv[0] == "client":
             _run_client(argv[1:])
         else:
