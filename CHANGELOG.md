@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.32.2](https://github.com/mlorentedev/hive/compare/v1.32.1...v1.32.2) (2026-06-03)
+
+
+### Bug Fixes
+
+* surface obsidian-git commit race in vault_health + ADR-014 ([#174](https://github.com/mlorentedev/hive/issues/174)) ([#197](https://github.com/mlorentedev/hive/issues/197)) ([6ff4b8a](https://github.com/mlorentedev/hive/commit/6ff4b8a6c4eaeb76a249d2e6bf94672236ed39c4))
+
 ## [1.32.1](https://github.com/mlorentedev/hive/compare/v1.32.0...v1.32.1) (2026-06-03)
 
 
