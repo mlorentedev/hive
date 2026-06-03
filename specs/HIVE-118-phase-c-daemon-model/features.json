@@ -88,6 +88,14 @@
       "evidence": "Implemented on feat/restart-on-upgrade (2026-06-02). run_serve now owns the uvicorn.Server via the public mcp.http_app() instead of mcp.run(transport='http'); new _daemon.py fns _current_version/_upgrade_detected/_watch_for_upgrade/_serve_until_drift_or_signal/_serve_owned; consts EXIT_RESTART_ON_UPGRADE=75 + GRACEFUL_SHUTDOWN_S=2; new HIVE_UPGRADE_POLL_S (default 30s). Clean-stop only: the in-flight drain is unreachable (streamable-http cancels the active handler), so cut-call safety rests on idempotency (slice 2) + auto-reconnect (slice 3). 8 unit tests green (predicate incl. rollback=drift and <not-found>=not-drift, watcher drift/external-stop, exit-code map); spike/upgrade_spike.py 2/2 is the e2e evidence. make check green (676 passed, 2 skipped; mypy --strict + ruff clean). Awaiting harness pass-state."
     },
     {
+      "id": "service-units",
+      "ac": "Per-user service install/lifecycle: daemon supervised + auto-started cross-OS (ADR-011 §1)",
+      "behavior": "`hive service install` registers `hive serve` as a per-user service that auto-starts at login and restarts on failure (exit non-zero) but not on a clean stop (exit 0). Linux uses a `systemd --user` unit (`Restart=on-failure`, `WantedBy=default.target`); Windows uses a Task Scheduler task (`LogonTrigger` + `RestartOnFailure`). `hive service uninstall`/`status` manage and inspect it. macOS prints a documented manual launchd step (non-zero stub).",
+      "verification": "uv run pytest tests/test_service.py",
+      "state": "planned",
+      "evidence": "Implemented on feat/service-units (2026-06-02). New src/hive/_service.py with pure renderers render_systemd_unit/render_windows_task_xml (host-OS independent, unit-tested anywhere) + platform-dispatching install_service/uninstall_service/service_status; new `hive service {install,uninstall,status}` CLI in server.py (--no-enable writes the unit/task without starting it). SSOT = the package (dotfiles activation calls `hive service install`). Cross-OS: Linux systemd + Windows Scheduled Task BOTH real (hive ships on PyPI independent of dotfiles); macOS/launchd a clear non-zero stub (follow-up). Both supervisors consume the slice 1.3 exit-75 contract. 9 unit tests green (renderers assert the restart contract + exec + logon-trigger; install/uninstall/status mocked; CLI dispatch); real systemctl/schtasks validated by the ubuntu+windows CI matrix. make check green (mypy --strict + ruff clean). Awaiting harness pass-state."
+    },
+    {
       "id": "supervised-recovery",
       "ac": "Supervised recovery",
       "behavior": "Killing the daemon (SIGKILL) triggers supervisor auto-restart; durable state (SQLite + git) is intact, and in-flight clients reconnect or fall back.",
