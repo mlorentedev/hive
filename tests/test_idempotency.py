@@ -30,7 +30,8 @@ def _text(result: ToolResult) -> str:
 
 def _server(vault: Path) -> FastMCP:
     return create_server(
-        vault_path=vault, idempotency_store=IdempotencyStore(":memory:"),
+        vault_path=vault,
+        idempotency_store=IdempotencyStore(":memory:"),
     )
 
 
@@ -39,8 +40,10 @@ async def _append(mcp: FastMCP, key: str, content: str) -> str:
         await mcp.call_tool(
             "vault_write",
             {
-                "project": "testproject", "section": "context",
-                "operation": "append", "content": content,
+                "project": "testproject",
+                "section": "context",
+                "operation": "append",
+                "content": content,
                 "idempotency_key": key,
             },
         ),
@@ -50,7 +53,8 @@ async def _append(mcp: FastMCP, key: str, content: str) -> str:
 async def _context_body(mcp: FastMCP) -> str:
     return _text(
         await mcp.call_tool(
-            "vault_query", {"project": "testproject", "section": "context"},
+            "vault_query",
+            {"project": "testproject", "section": "context"},
         ),
     )
 
@@ -94,14 +98,18 @@ async def test_patch_repeated_key_is_noop(git_vault: Path) -> None:
     await mcp.call_tool(
         "vault_write",
         {
-            "project": "testproject", "path": "90-notes.md",
-            "content": "# Notes\n\nstatus: draft\n", "doc_type": "note",
+            "project": "testproject",
+            "path": "90-notes.md",
+            "content": "# Notes\n\nstatus: draft\n",
+            "doc_type": "note",
             "operation": "create",
         },
     )
     args = {
-        "project": "testproject", "path": "90-notes.md",
-        "find": "status: draft", "replace": "status: final",
+        "project": "testproject",
+        "path": "90-notes.md",
+        "find": "status: draft",
+        "replace": "status: final",
         "idempotency_key": "patch-k1",
     }
     first = _text(await mcp.call_tool("vault_patch", args))
@@ -111,7 +119,8 @@ async def test_patch_repeated_key_is_noop(git_vault: Path) -> None:
     assert "already applied" in second.lower(), f"retry was not a no-op: {second!r}"
     body = _text(
         await mcp.call_tool(
-            "vault_query", {"project": "testproject", "path": "90-notes.md"},
+            "vault_query",
+            {"project": "testproject", "path": "90-notes.md"},
         ),
     )
     assert "status: draft" not in body

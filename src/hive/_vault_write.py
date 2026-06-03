@@ -53,9 +53,7 @@ def _env_truthy(value: str | None) -> bool:
     return value.strip().lower() in {"true", "yes", "1", "on"}
 
 
-_DEFERRED_SUFFIX = (
-    " (deferred to obsidian-git; will be picked up on its next tick)"
-)
+_DEFERRED_SUFFIX = " (deferred to obsidian-git; will be picked up on its next tick)"
 _UNCOMMITTED_SUFFIX = " (uncommitted — call vault_commit to flush)"
 
 # HIVE-116 AC-5: public contract for the partial-state response. Locked
@@ -137,9 +135,7 @@ def _should_defer_to_external_committer(vault_path: Path) -> bool:
     return _is_external_committer_healthy(vault_path, interval)
 
 
-_IDEMPOTENT_NOOP = (
-    "Idempotent no-op — idempotency_key already applied; no change written."
-)
+_IDEMPOTENT_NOOP = "Idempotent no-op — idempotency_key already applied; no change written."
 
 
 def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
@@ -187,15 +183,18 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             return track(ctx, "vault_write", guard, project)
 
         if operation not in _WRITE_OPERATIONS:
-            return track(ctx, "vault_write", (
-                f"Invalid operation '{operation}'. "
-                f"Valid: {', '.join(sorted(_WRITE_OPERATIONS))}"
-            ), project)
+            return track(
+                ctx,
+                "vault_write",
+                (f"Invalid operation '{operation}'. Valid: {', '.join(sorted(_WRITE_OPERATIONS))}"),
+                project,
+            )
 
         resolved = _resolve_project_dir(ctx.vault, project, ctx.scopes)
         if resolved is None:
             return track(
-                ctx, "vault_write",
+                ctx,
+                "vault_write",
                 project_not_found(project),
                 project,
             )
@@ -205,13 +204,15 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         if operation == "create":
             if not path:
                 return track(
-                    ctx, "vault_write",
+                    ctx,
+                    "vault_write",
                     "Path is required for create operation.",
                     project,
                 )
             if not doc_type:
                 return track(
-                    ctx, "vault_write",
+                    ctx,
+                    "vault_write",
                     "doc_type is required for create operation.",
                     project,
                 )
@@ -229,11 +230,15 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                         idempotency_key,
                     ):
                         return track(
-                            ctx, "vault_write", _IDEMPOTENT_NOOP, project,
+                            ctx,
+                            "vault_write",
+                            _IDEMPOTENT_NOOP,
+                            project,
                         )
                     if filepath.exists():
                         return track(
-                            ctx, "vault_write",
+                            ctx,
+                            "vault_write",
                             f"File already exists: {path}. "
                             "Use vault_write(operation='replace') to modify.",
                             project,
@@ -242,11 +247,13 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     try:
                         filepath.parent.mkdir(parents=True, exist_ok=True)
                         filepath.write_text(
-                            frontmatter + content, encoding="utf-8",
+                            frontmatter + content,
+                            encoding="utf-8",
                         )
                     except OSError as exc:
                         return track(
-                            ctx, "vault_write",
+                            ctx,
+                            "vault_write",
                             format_io_error(exc, path, "create"),
                             project,
                         )
@@ -256,35 +263,39 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
                     rel = filepath.relative_to(ctx.vault)
                     display = "00_meta" if project == "_meta" else project
-                    should_defer = (
-                        commit
-                        and _should_defer_to_external_committer(ctx.vault)
-                    )
+                    should_defer = commit and _should_defer_to_external_committer(ctx.vault)
                     if commit and not should_defer:
                         _git_commit(
-                            ctx.vault, [rel],
+                            ctx.vault,
+                            [rel],
                             f"vault: create {display}/{path}",
                         )
             except WriteLockTimeout as exc:
                 return track(
-                    ctx, "vault_write",
+                    ctx,
+                    "vault_write",
                     f"Server busy — {exc.reason}. Retry shortly.",
                     project,
                 )
 
             suffix = _commit_status_suffix(
-                commit, should_defer, deadline_killed=_was_deadline_killed(),
+                commit,
+                should_defer,
+                deadline_killed=_was_deadline_killed(),
             )
             return track(
-                ctx, "vault_write",
+                ctx,
+                "vault_write",
                 f"Created {project}/{path} (type: {doc_type}).{suffix}",
-                project, path,
+                project,
+                path,
             )
 
         # ── Append / Replace mode ──
         if not section:
             return track(
-                ctx, "vault_write",
+                ctx,
+                "vault_write",
                 "Section is required for append/replace operations.",
                 project,
             )
@@ -293,7 +304,8 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         if filename is None:
             available = ", ".join(SECTION_SHORTCUTS)
             return track(
-                ctx, "vault_write",
+                ctx,
+                "vault_write",
                 f"Section '{section}' not found. Available: {available}",
                 project,
             )
@@ -304,7 +316,8 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             error = validate_frontmatter(content)
             if error:
                 return track(
-                    ctx, "vault_write",
+                    ctx,
+                    "vault_write",
                     f"Frontmatter validation failed: {error}",
                     project,
                 )
@@ -315,23 +328,24 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     idempotency_key,
                 ):
                     return track(
-                        ctx, "vault_write", _IDEMPOTENT_NOOP, project,
+                        ctx,
+                        "vault_write",
+                        _IDEMPOTENT_NOOP,
+                        project,
                     )
                 try:
                     if operation == "append":
-                        existing = (
-                            filepath.read_text(encoding="utf-8")
-                            if filepath.exists()
-                            else ""
-                        )
+                        existing = filepath.read_text(encoding="utf-8") if filepath.exists() else ""
                         filepath.write_text(
-                            existing + content, encoding="utf-8",
+                            existing + content,
+                            encoding="utf-8",
                         )
                     else:
                         filepath.write_text(content, encoding="utf-8")
                 except (OSError, UnicodeDecodeError) as exc:
                     return track(
-                        ctx, "vault_write",
+                        ctx,
+                        "vault_write",
                         format_io_error(exc, f"{project}/{section}", operation),
                         project,
                     )
@@ -340,29 +354,32 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     ctx.idempotency.claim(idempotency_key)
 
                 rel = filepath.relative_to(ctx.vault)
-                should_defer = (
-                    commit
-                    and _should_defer_to_external_committer(ctx.vault)
-                )
+                should_defer = commit and _should_defer_to_external_committer(ctx.vault)
                 if commit and not should_defer:
                     _git_commit(
-                        ctx.vault, [rel],
+                        ctx.vault,
+                        [rel],
                         f"vault: update {project}/{section}",
                     )
         except WriteLockTimeout as exc:
             return track(
-                ctx, "vault_write",
+                ctx,
+                "vault_write",
                 f"Server busy — {exc.reason}. Retry shortly.",
                 project,
             )
 
         suffix = _commit_status_suffix(
-            commit, should_defer, deadline_killed=_was_deadline_killed(),
+            commit,
+            should_defer,
+            deadline_killed=_was_deadline_killed(),
         )
         return track(
-            ctx, "vault_write",
+            ctx,
+            "vault_write",
             f"Updated {project}/{section} ({operation}).{suffix}",
-            project, section,
+            project,
+            section,
         )
 
     @mcp.tool(annotations=_WRITE)
@@ -420,16 +437,17 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
         if has_single and has_multi:
             return track(
-                ctx, "vault_patch",
-                "Cannot mix find/replace with patches. "
-                "Use one mode or the other.",
+                ctx,
+                "vault_patch",
+                "Cannot mix find/replace with patches. Use one mode or the other.",
                 project,
             )
 
         if has_single:
             if not find or not replace:
                 return track(
-                    ctx, "vault_patch",
+                    ctx,
+                    "vault_patch",
                     "Provide both find and replace for single replacement.",
                     project,
                 )
@@ -440,15 +458,15 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             patch_list = patches
         else:
             return track(
-                ctx, "vault_patch",
+                ctx,
+                "vault_patch",
                 "Provide find/replace or a patches list.",
                 project,
             )
 
         resolved = _resolve_project_dir(ctx.vault, project, ctx.scopes)
         if resolved is None:
-            return track(ctx, "vault_patch",
-                         project_not_found(project), project)
+            return track(ctx, "vault_patch", project_not_found(project), project)
         project_dir, _ = resolved
 
         filepath = project_dir / path
@@ -456,9 +474,9 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         if boundary_error:
             return track(ctx, "vault_patch", boundary_error, project)
         if not filepath.exists():
-            return track(ctx, "vault_patch",
-                         f"File '{path}' not found in project '{project}'.",
-                         project)
+            return track(
+                ctx, "vault_patch", f"File '{path}' not found in project '{project}'.", project
+            )
 
         n = 0
         try:
@@ -467,13 +485,17 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     idempotency_key,
                 ):
                     return track(
-                        ctx, "vault_patch", _IDEMPOTENT_NOOP, project,
+                        ctx,
+                        "vault_patch",
+                        _IDEMPOTENT_NOOP,
+                        project,
                     )
                 try:
                     content = filepath.read_text(encoding="utf-8")
                 except (OSError, UnicodeDecodeError) as exc:
                     return track(
-                        ctx, "vault_patch",
+                        ctx,
+                        "vault_patch",
                         format_io_error(exc, path, "read"),
                         project,
                     )
@@ -484,19 +506,23 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     if "find" not in patch or "replace" not in patch:
                         label = f"patch {i}: " if len(patch_list) > 1 else ""
                         return track(
-                            ctx, "vault_patch",
-                            f"{label}Each patch must have 'find' and "
-                            f"'replace' keys.",
+                            ctx,
+                            "vault_patch",
+                            f"{label}Each patch must have 'find' and 'replace' keys.",
                             project,
                         )
                     ok, result = _match_and_replace(
-                        working, patch["find"], patch["replace"],
+                        working,
+                        patch["find"],
+                        patch["replace"],
                     )
                     if not ok:
                         label = f"patch {i}: " if len(patch_list) > 1 else ""
                         return track(
-                            ctx, "vault_patch",
-                            f"{label}{result}", project,
+                            ctx,
+                            "vault_patch",
+                            f"{label}{result}",
+                            project,
                         )
                     working = result
 
@@ -504,7 +530,8 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     filepath.write_text(working, encoding="utf-8")
                 except OSError as exc:
                     return track(
-                        ctx, "vault_patch",
+                        ctx,
+                        "vault_patch",
                         format_io_error(exc, path, "write"),
                         project,
                     )
@@ -514,29 +541,30 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
                 rel = filepath.relative_to(ctx.vault)
                 n = len(patch_list)
-                should_defer = (
-                    commit
-                    and _should_defer_to_external_committer(ctx.vault)
-                )
+                should_defer = commit and _should_defer_to_external_committer(ctx.vault)
                 if commit and not should_defer:
                     _git_commit(
-                        ctx.vault, [rel],
+                        ctx.vault,
+                        [rel],
                         f"vault: patch {project}/{path}",
                     )
         except WriteLockTimeout as exc:
             return track(
-                ctx, "vault_patch",
+                ctx,
+                "vault_patch",
                 f"Server busy — {exc.reason}. Retry shortly.",
                 project,
             )
 
         noun = "patch" if n == 1 else "patches"
         suffix = _commit_status_suffix(
-            commit, should_defer, deadline_killed=_was_deadline_killed(),
+            commit,
+            should_defer,
+            deadline_killed=_was_deadline_killed(),
         )
-        return track(ctx, "vault_patch",
-                     f"Applied {n} {noun} to {project}/{path}.{suffix}",
-                     project, path)
+        return track(
+            ctx, "vault_patch", f"Applied {n} {noun} to {project}/{path}.{suffix}", project, path
+        )
 
     @mcp.tool(annotations=_WRITE)
     @wrap_sync_tool(ctx, "vault_commit")
@@ -565,7 +593,8 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 status, detail = _git_commit_all(ctx.vault, message)
         except WriteLockTimeout as exc:
             return track(
-                ctx, "vault_commit",
+                ctx,
+                "vault_commit",
                 f"Server busy — {exc.reason}. Retry shortly.",
             )
 
@@ -573,7 +602,8 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             return track(ctx, "vault_commit", f"Committed {detail}.")
         if status == "clean":
             return track(
-                ctx, "vault_commit",
+                ctx,
+                "vault_commit",
                 "Working tree clean — nothing to commit.",
             )
         return track(ctx, "vault_commit", f"Commit failed: {detail}")

@@ -57,8 +57,7 @@ class IdempotencyStore(_SqliteTracker):
         iso = _dt.datetime.now(_dt.UTC).isoformat(timespec="microseconds")
         with self._lock:
             cur = self._conn.execute(
-                "INSERT OR IGNORE INTO applied_keys (idem_key, applied_iso) "
-                "VALUES (?, ?)",
+                "INSERT OR IGNORE INTO applied_keys (idem_key, applied_iso) VALUES (?, ?)",
                 (key, iso),
             )
             self._conn.commit()
@@ -74,6 +73,7 @@ class IdempotencyStore(_SqliteTracker):
         """
         with self._lock:
             self._conn.execute(
-                "DELETE FROM applied_keys WHERE idem_key = ?", (key,),
+                "DELETE FROM applied_keys WHERE idem_key = ?",
+                (key,),
             )
             self._conn.commit()

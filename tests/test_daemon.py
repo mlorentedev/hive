@@ -47,7 +47,8 @@ async def _list_tools(url: str, token: str) -> list[str]:
     from fastmcp.client.transports import StreamableHttpTransport
 
     transport = StreamableHttpTransport(
-        url, headers={"Authorization": f"Bearer {token}"},
+        url,
+        headers={"Authorization": f"Bearer {token}"},
     )
     async with Client(transport) as client:
         return [t.name for t in await client.list_tools()]
@@ -67,7 +68,9 @@ def _seed_demo_project(vault: Path) -> dict[str, str]:
 
 
 async def _drive_shim(
-    env: dict[str, str], tool: str, args: dict[str, str],
+    env: dict[str, str],
+    tool: str,
+    args: dict[str, str],
 ) -> dict[str, object]:
     """Spawn the `hive client` stdio shim and drive it with a fastmcp client.
 
@@ -79,7 +82,9 @@ async def _drive_shim(
     from fastmcp.client.transports import StdioTransport
 
     transport = StdioTransport(
-        command=sys.executable, args=["-m", "hive.server", "client"], env=env,
+        command=sys.executable,
+        args=["-m", "hive.server", "client"],
+        env=env,
     )
     async with Client(transport) as client:
         tools = [t.name for t in await client.list_tools()]
@@ -132,7 +137,9 @@ async def _client_appends(env: dict[str, str], markers: list[str]) -> int:
     from fastmcp.client.transports import StdioTransport
 
     transport = StdioTransport(
-        command=sys.executable, args=["-m", "hive.server", "client"], env=env,
+        command=sys.executable,
+        args=["-m", "hive.server", "client"],
+        env=env,
     )
     done = 0
     async with Client(transport) as client:
@@ -151,7 +158,9 @@ async def _client_appends(env: dict[str, str], markers: list[str]) -> int:
 
 
 async def _two_clients_append(
-    env: dict[str, str], markers_a: list[str], markers_b: list[str],
+    env: dict[str, str],
+    markers_a: list[str],
+    markers_b: list[str],
 ) -> list[int]:
     """Two shim sessions append concurrently against the same daemon."""
     return list(
@@ -184,7 +193,10 @@ def _wait_published(state_dir: Path, port: int, deadline_s: float = 20.0) -> boo
 
 
 async def _reconnect_then_retry(
-    env: dict[str, str], key: str, content: str, restart: Callable[[], None],
+    env: dict[str, str],
+    key: str,
+    content: str,
+    restart: Callable[[], None],
 ) -> None:
     """One shim session straddling a daemon restart.
 
@@ -197,20 +209,27 @@ async def _reconnect_then_retry(
     from fastmcp.client.transports import StdioTransport
 
     args = {
-        "project": "demo", "section": "context", "operation": "append",
-        "content": content, "idempotency_key": key,
+        "project": "demo",
+        "section": "context",
+        "operation": "append",
+        "content": content,
+        "idempotency_key": key,
     }
     transport = StdioTransport(
-        command=sys.executable, args=["-m", "hive.server", "client"], env=env,
+        command=sys.executable,
+        args=["-m", "hive.server", "client"],
+        env=env,
     )
     async with Client(transport) as client:
         await client.call_tool("vault_write", args)  # lands on daemon A
-        await asyncio.to_thread(restart)              # A dies, B takes over
-        await client.call_tool("vault_write", args)   # must follow to daemon B
+        await asyncio.to_thread(restart)  # A dies, B takes over
+        await client.call_tool("vault_write", args)  # must follow to daemon B
 
 
 async def _query_across_kill(
-    env: dict[str, str], args: dict[str, str], kill: Callable[[], None],
+    env: dict[str, str],
+    args: dict[str, str],
+    kill: Callable[[], None],
 ) -> tuple[str, str]:
     """One shim session: vault_query, kill the daemon, vault_query again.
 
@@ -222,7 +241,9 @@ async def _query_across_kill(
     from fastmcp.client.transports import StdioTransport
 
     transport = StdioTransport(
-        command=sys.executable, args=["-m", "hive.server", "client"], env=env,
+        command=sys.executable,
+        args=["-m", "hive.server", "client"],
+        env=env,
     )
     async with Client(transport) as client:
         first = await client.call_tool("vault_query", args)
@@ -237,14 +258,14 @@ async def _query_across_kill(
 # ── observability (slice 4) helpers ───────────────────────────────────────
 
 
-async def _session_calls(url: str, token: str, tool: str, args: dict[str, str],
-                         times: int) -> None:
+async def _session_calls(url: str, token: str, tool: str, args: dict[str, str], times: int) -> None:
     """Open one MCP session, call *tool* *times*, then disconnect."""
     from fastmcp import Client
     from fastmcp.client.transports import StreamableHttpTransport
 
     transport = StreamableHttpTransport(
-        url, headers={"Authorization": f"Bearer {token}"},
+        url,
+        headers={"Authorization": f"Bearer {token}"},
     )
     async with Client(transport) as client:
         for _ in range(times):
@@ -348,9 +369,7 @@ def test_client_forwards_to_daemon(daemon_env: tuple[dict[str, str], Path]) -> N
         assert mode.startswith("daemon"), f"shim did not report daemon mode: {mode!r}"
 
         # The bearer token must never reach disk in any hive log (L4).
-        logs = "".join(
-            f.read_text(errors="replace") for f in state_dir.glob("hive-*.log")
-        )
+        logs = "".join(f.read_text(errors="replace") for f in state_dir.glob("hive-*.log"))
         assert token and token not in logs, "bearer token leaked into a hive log"
     finally:
         daemon.terminate()
@@ -390,15 +409,14 @@ def test_client_falls_back_on_stale_state(
     dead.bind((HOST, 0))
     try:
         (state_dir / "daemon.port").write_text(
-            str(dead.getsockname()[1]), encoding="utf-8",
+            str(dead.getsockname()[1]),
+            encoding="utf-8",
         )
         (state_dir / "daemon.token").write_text("stale-token", encoding="utf-8")
 
         surface = asyncio.run(_drive_shim(env, "vault_query", args))
         assert "vault_query" in surface["tools"]
-        assert _DEMO_MARKER in surface["text"], (
-            f"in-process query failed: {surface['text']!r}"
-        )
+        assert _DEMO_MARKER in surface["text"], f"in-process query failed: {surface['text']!r}"
 
         mode = _client_mode(state_dir)
         assert mode.startswith("fallback"), f"expected fallback mode, got {mode!r}"
@@ -442,12 +460,14 @@ def test_two_clients_share_one_daemon(
         # or coalesced/lost writes — i.e. broken single-owner serialization.
         log = subprocess.run(
             ["git", "log", "--oneline"],
-            cwd=vault, capture_output=True, text=True, check=True,
+            cwd=vault,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout
         commit_count = len(log.splitlines())
         assert commit_count == 1 + 2 * n_each, (
-            f"expected {1 + 2 * n_each} commits (init + per-append), got "
-            f"{commit_count}: {log!r}"
+            f"expected {1 + 2 * n_each} commits (init + per-append), got {commit_count}: {log!r}"
         )
     finally:
         daemon.terminate()
@@ -556,9 +576,7 @@ def test_client_degrades_in_process_when_daemon_dies_mid_session(
         first, second = asyncio.run(_query_across_kill(env, args, kill))
 
         assert _DEMO_MARKER in first, f"daemon-mode query failed: {first!r}"
-        assert _DEMO_MARKER in second, (
-            f"in-process degrade query failed: {second!r}"
-        )
+        assert _DEMO_MARKER in second, f"in-process degrade query failed: {second!r}"
 
         modes = _client_modes(state_dir)
         assert any(m.startswith("daemon") for m in modes), (
@@ -598,9 +616,7 @@ def test_health_probe_is_unauthenticated_and_reports_ready(
 
         # No Authorization header: a supervisor must probe liveness tokenless.
         resp = httpx.get(f"http://{HOST}:{port}/health")
-        assert resp.status_code == 200, (
-            f"/health not served unauthenticated: {resp.status_code}"
-        )
+        assert resp.status_code == 200, f"/health not served unauthenticated: {resp.status_code}"
         payload = resp.json()
         assert payload["status"] == "ok", f"unexpected health status: {payload!r}"
         assert payload["ready"] is True, f"daemon reported not ready: {payload!r}"
@@ -645,15 +661,16 @@ def test_daemon_self_heals_stale_index_lock(
         done = asyncio.run(_client_appends(env, ["HEAL-MARKER"]))
         assert done == 1, "vault_write did not complete"
 
-        assert not stale_lock.exists(), (
-            "startup self-heal did not clear the stale .git/index.lock"
-        )
+        assert not stale_lock.exists(), "startup self-heal did not clear the stale .git/index.lock"
         # The write committed: git log grew past `init`. If the stale lock had
         # survived, the daemon's best-effort commit would have failed silently
         # and the log would still be a single `init` commit.
         log = subprocess.run(
             ["git", "log", "--oneline"],
-            cwd=vault, capture_output=True, text=True, check=True,
+            cwd=vault,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout
         assert len(log.splitlines()) >= 2, f"write did not commit: {log!r}"
         content = (vault / "10_projects" / "demo" / "00-context.md").read_text(
@@ -766,9 +783,9 @@ def test_status_aggregates_across_sessions(
 @pytest.mark.parametrize(
     ("boot", "current", "expected"),
     [
-        ("1.30.0", "1.30.0", False),       # steady state — no restart
-        ("1.30.0", "1.31.0", True),        # in-place upgrade — restart
-        ("1.30.0", "1.29.0", True),        # rollback ships new code too — restart
+        ("1.30.0", "1.30.0", False),  # steady state — no restart
+        ("1.30.0", "1.31.0", True),  # in-place upgrade — restart
+        ("1.30.0", "1.29.0", True),  # rollback ships new code too — restart
         ("1.30.0", "<not-found>", False),  # transient swap window — must NOT bounce
         ("<not-found>", "1.30.0", False),  # never resolved at boot — don't churn
     ],
@@ -825,7 +842,8 @@ def test_watch_for_upgrade_returns_false_on_external_stop() -> None:
 
 
 def test_run_serve_maps_drift_to_restart_exit_code(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """run_serve maps a drift-caused stop to the dedicated restart exit code so a
     ``Restart=on-failure`` supervisor relaunches into the new code, while a clean

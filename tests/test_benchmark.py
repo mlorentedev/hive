@@ -74,6 +74,7 @@ def _completeness(truncated: str, full: str) -> float:
 
 # ── Synthetic vault ───────────────────────────────────────────────
 
+
 def _generate_realistic_content(line_count: int, prefix: str = "content") -> str:
     """Generate markdown content that matches real vault patterns."""
     lines = []
@@ -189,13 +190,9 @@ class TestContextBenchmark:
         static_tokens = _count_file_tokens(bench_vault / "static_baseline.md")
         total_ondemand = 0
 
-        r1 = await mcp.call_tool(
-            "vault_query", {"project": "medium-project", "section": "context"}
-        )
+        r1 = await mcp.call_tool("vault_query", {"project": "medium-project", "section": "context"})
         total_ondemand += _tokens(_text(r1))
-        r2 = await mcp.call_tool(
-            "vault_query", {"project": "medium-project", "section": "tasks"}
-        )
+        r2 = await mcp.call_tool("vault_query", {"project": "medium-project", "section": "tasks"})
         total_ondemand += _tokens(_text(r2))
         r3 = await mcp.call_tool("vault_search", {"query": "deploy", "max_lines": 50})
         total_ondemand += _tokens(_text(r3))
@@ -232,22 +229,23 @@ class TestMaxLinesSweep:
         print(f"\n{'=' * 72}")
         print("MAX_LINES SWEEP: vault_search(query='paragraph')")
         print(f"{'=' * 72}")
-        print(f"{'max_lines':>10s}  {'tokens':>8s}  {'% of full':>10s}  "
-              f"{'completeness':>13s}  {'signal/noise':>13s}")
+        print(
+            f"{'max_lines':>10s}  {'tokens':>8s}  {'% of full':>10s}  "
+            f"{'completeness':>13s}  {'signal/noise':>13s}"
+        )
         print(f"{'-' * 72}")
 
         for ml in MAX_LINES_SWEEP:
-            result = await mcp.call_tool(
-                "vault_search", {"query": "paragraph", "max_lines": ml}
-            )
+            result = await mcp.call_tool("vault_search", {"query": "paragraph", "max_lines": ml})
             text = _text(result)
             tokens = _tokens(text)
             pct_of_full = (tokens / baseline_tokens * 100) if baseline_tokens else 0
             compl = _completeness(text, baseline_text) * 100
             snr = _signal_ratio(text) * 100
             label = "unlimited" if ml == 0 else str(ml)
-            print(f"{label:>10s}  {tokens:>8d}  {pct_of_full:>9.1f}%  "
-                  f"{compl:>12.1f}%  {snr:>12.1f}%")
+            print(
+                f"{label:>10s}  {tokens:>8d}  {pct_of_full:>9.1f}%  {compl:>12.1f}%  {snr:>12.1f}%"
+            )
 
         # Verify sweep ordering: more lines = more tokens
         assert baseline_tokens > 0
@@ -265,8 +263,10 @@ class TestMaxLinesSweep:
         print(f"\n{'=' * 72}")
         print("MAX_LINES SWEEP: vault_query(project='large-project', section='lessons')")
         print(f"{'=' * 72}")
-        print(f"{'max_lines':>10s}  {'tokens':>8s}  {'% of full':>10s}  "
-              f"{'completeness':>13s}  {'signal/noise':>13s}")
+        print(
+            f"{'max_lines':>10s}  {'tokens':>8s}  {'% of full':>10s}  "
+            f"{'completeness':>13s}  {'signal/noise':>13s}"
+        )
         print(f"{'-' * 72}")
 
         for ml in MAX_LINES_SWEEP:
@@ -280,8 +280,9 @@ class TestMaxLinesSweep:
             compl = _completeness(text, baseline_text) * 100
             snr = _signal_ratio(text) * 100
             label = "unlimited" if ml == 0 else str(ml)
-            print(f"{label:>10s}  {tokens:>8d}  {pct_of_full:>9.1f}%  "
-                  f"{compl:>12.1f}%  {snr:>12.1f}%")
+            print(
+                f"{label:>10s}  {tokens:>8d}  {pct_of_full:>9.1f}%  {compl:>12.1f}%  {snr:>12.1f}%"
+            )
 
         assert baseline_tokens > 0
 
@@ -317,27 +318,38 @@ class TestSignalToNoise:
         mcp = create_server(vault_path=bench_vault)
 
         tools = [
-            ("vault_query (context)", "vault_query",
-             {"project": "large-project", "section": "context"}),
-            ("vault_query (tasks)", "vault_query",
-             {"project": "large-project", "section": "tasks"}),
-            ("vault_query (lessons)", "vault_query",
-             {"project": "large-project", "section": "lessons"}),
-            ("vault_search (100)", "vault_search",
-             {"query": "paragraph", "max_lines": 100}),
-            ("vault_search (500)", "vault_search",
-             {"query": "paragraph", "max_lines": 500}),
-            ("vault_search (ranked)", "vault_search",
-             {"query": "paragraph", "ranked": True, "max_lines": 100}),
-            ("session_briefing", "session_briefing",
-             {"project": "large-project"}),
+            (
+                "vault_query (context)",
+                "vault_query",
+                {"project": "large-project", "section": "context"},
+            ),
+            (
+                "vault_query (tasks)",
+                "vault_query",
+                {"project": "large-project", "section": "tasks"},
+            ),
+            (
+                "vault_query (lessons)",
+                "vault_query",
+                {"project": "large-project", "section": "lessons"},
+            ),
+            ("vault_search (100)", "vault_search", {"query": "paragraph", "max_lines": 100}),
+            ("vault_search (500)", "vault_search", {"query": "paragraph", "max_lines": 500}),
+            (
+                "vault_search (ranked)",
+                "vault_search",
+                {"query": "paragraph", "ranked": True, "max_lines": 100},
+            ),
+            ("session_briefing", "session_briefing", {"project": "large-project"}),
         ]
 
         print(f"\n{'=' * 72}")
         print("SIGNAL-TO-NOISE BY TOOL")
         print(f"{'=' * 72}")
-        print(f"{'Tool':<30s}  {'tokens':>8s}  {'lines':>7s}  "
-              f"{'signal':>7s}  {'noise':>7s}  {'S/N':>7s}")
+        print(
+            f"{'Tool':<30s}  {'tokens':>8s}  {'lines':>7s}  "
+            f"{'signal':>7s}  {'noise':>7s}  {'S/N':>7s}"
+        )
         print(f"{'-' * 72}")
 
         for label, tool_name, args in tools:
@@ -348,8 +360,10 @@ class TestSignalToNoise:
             snr = _signal_ratio(text)
             signal_lines = int(total_lines * snr)
             noise_lines = total_lines - signal_lines
-            print(f"{label:<30s}  {tokens:>8d}  {total_lines:>7d}  "
-                  f"{signal_lines:>7d}  {noise_lines:>7d}  {snr:>6.1%}")
+            print(
+                f"{label:<30s}  {tokens:>8d}  {total_lines:>7d}  "
+                f"{signal_lines:>7d}  {noise_lines:>7d}  {snr:>6.1%}"
+            )
 
         # All tools should have >50% signal
         for label, tool_name, args in tools:
@@ -396,9 +410,14 @@ class TestSessionSimulations:
                 ("session_briefing", {"project": "large-project"}),
                 ("vault_query", {"project": "large-project", "section": "tasks"}),
                 ("vault_search", {"query": "deploy", "max_lines": 300}),
-                ("vault_query", {
-                    "project": "large-project", "section": "lessons", "max_lines": 200,
-                }),
+                (
+                    "vault_query",
+                    {
+                        "project": "large-project",
+                        "section": "lessons",
+                        "max_lines": 200,
+                    },
+                ),
             ],
             "Exploration (heavy)": [
                 ("session_briefing", {"project": "large-project"}),
@@ -415,16 +434,20 @@ class TestSessionSimulations:
         print(f"{'=' * 72}")
         print(f"Static baseline: {static_tokens:,} tokens")
         print(f"{'-' * 72}")
-        print(f"{'Session type':<25s}  {'queries':>8s}  {'tokens':>8s}  "
-              f"{'vs static':>10s}  {'savings':>8s}  {'avg S/N':>8s}")
+        print(
+            f"{'Session type':<25s}  {'queries':>8s}  {'tokens':>8s}  "
+            f"{'vs static':>10s}  {'savings':>8s}  {'avg S/N':>8s}"
+        )
         print(f"{'-' * 72}")
 
         for session_name, queries in sessions.items():
             total, avg_snr = await self._run_session(mcp, session_name, queries)
             ratio = total / static_tokens
             savings = (1 - ratio) * 100
-            print(f"{session_name:<25s}  {len(queries):>8d}  {total:>8d}  "
-                  f"{ratio:>9.2f}x  {savings:>7.1f}%  {avg_snr:>7.1%}")
+            print(
+                f"{session_name:<25s}  {len(queries):>8d}  {total:>8d}  "
+                f"{ratio:>9.2f}x  {savings:>7.1f}%  {avg_snr:>7.1%}"
+            )
 
         # Even the heaviest session should save tokens vs static
         for session_name, queries in sessions.items():
@@ -448,7 +471,8 @@ class TestWriteThroughputBenchmark:
         return 10
 
     async def test_per_write_vs_batched_commit(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         """N writes with default commit=True vs commit=False + one vault_commit."""
         import time
@@ -462,9 +486,9 @@ class TestWriteThroughputBenchmark:
             await mcp.call_tool(
                 "vault_write",
                 {
-                    "project": "medium-project" if (git_vault / "10_projects"
-                                                   / "medium-project").exists()
-                               else "testproject",
+                    "project": "medium-project"
+                    if (git_vault / "10_projects" / "medium-project").exists()
+                    else "testproject",
                     "section": "tasks",
                     "operation": "append",
                     "content": f"\n- [ ] baseline write {i}\n",
@@ -479,9 +503,9 @@ class TestWriteThroughputBenchmark:
             await mcp.call_tool(
                 "vault_write",
                 {
-                    "project": "medium-project" if (git_vault / "10_projects"
-                                                   / "medium-project").exists()
-                               else "testproject",
+                    "project": "medium-project"
+                    if (git_vault / "10_projects" / "medium-project").exists()
+                    else "testproject",
                     "section": "tasks",
                     "operation": "append",
                     "content": f"\n- [ ] batched write {i}\n",
@@ -491,7 +515,8 @@ class TestWriteThroughputBenchmark:
         batched_writes_total = time.perf_counter() - t0
         t0 = time.perf_counter()
         await mcp.call_tool(
-            "vault_commit", {"message": "vault: batched throughput bench"},
+            "vault_commit",
+            {"message": "vault: batched throughput bench"},
         )
         flush_total = time.perf_counter() - t0
         batched_total = batched_writes_total + flush_total
@@ -502,21 +527,26 @@ class TestWriteThroughputBenchmark:
         print("HIVE-104 write throughput — per-write vs batched commit")
         print(f"{'=' * 72}")
         print(f"  N writes              : {n}")
-        print(f"  Baseline (commit=True): "
-              f"{baseline_total * 1000:.1f} ms total "
-              f"({baseline_per_call * 1000:.1f} ms / call)")
-        print(f"  Batched (commit=False): "
-              f"{batched_writes_total * 1000:.1f} ms writes + "
-              f"{flush_total * 1000:.1f} ms flush = "
-              f"{batched_total * 1000:.1f} ms total "
-              f"({batched_per_call_avg * 1000:.1f} ms / call avg)")
+        print(
+            f"  Baseline (commit=True): "
+            f"{baseline_total * 1000:.1f} ms total "
+            f"({baseline_per_call * 1000:.1f} ms / call)"
+        )
+        print(
+            f"  Batched (commit=False): "
+            f"{batched_writes_total * 1000:.1f} ms writes + "
+            f"{flush_total * 1000:.1f} ms flush = "
+            f"{batched_total * 1000:.1f} ms total "
+            f"({batched_per_call_avg * 1000:.1f} ms / call avg)"
+        )
         print(f"  Speed-up              : {speedup:.1f}x")
 
         assert baseline_total > 0
         assert batched_total > 0
 
     async def test_multi_patch_vs_sequential_patches(
-        self, git_vault: Path,
+        self,
+        git_vault: Path,
     ) -> None:
         """One vault_patch with N patches vs N vault_patch calls."""
         import time
@@ -584,12 +614,16 @@ class TestWriteThroughputBenchmark:
         print("HIVE-104 write throughput — N sequential patches vs 1 multi-patch")
         print(f"{'=' * 72}")
         print(f"  N edits              : {n}")
-        print(f"  Sequential (N calls) : "
-              f"{sequential_total * 1000:.1f} ms total "
-              f"({(sequential_total / n) * 1000:.1f} ms / patch)")
-        print(f"  Multi-patch (1 call) : "
-              f"{multi_total * 1000:.1f} ms total "
-              f"({(multi_total / n) * 1000:.1f} ms / patch avg)")
+        print(
+            f"  Sequential (N calls) : "
+            f"{sequential_total * 1000:.1f} ms total "
+            f"({(sequential_total / n) * 1000:.1f} ms / patch)"
+        )
+        print(
+            f"  Multi-patch (1 call) : "
+            f"{multi_total * 1000:.1f} ms total "
+            f"({(multi_total / n) * 1000:.1f} ms / patch avg)"
+        )
         print(f"  Speed-up             : {speedup:.1f}x")
 
         assert sequential_total > 0
@@ -613,12 +647,14 @@ class TestRealVaultBenchmark:
     @pytest.fixture
     def real_mcp(self) -> FastMCP:
         from pathlib import Path
+
         return create_server(vault_path=Path(REAL_VAULT))
 
     @pytest.fixture
     def real_static_tokens(self) -> int:
         """Count all tokens in the real vault projects directory."""
         from pathlib import Path
+
         total = 0
         for f in Path(REAL_VAULT).rglob("*.md"):
             total += _count_file_tokens(f)
@@ -628,6 +664,7 @@ class TestRealVaultBenchmark:
         """max_lines sweep on a real project."""
         # Find the largest project
         from pathlib import Path
+
         projects_dir = Path(REAL_VAULT) / "10_projects"
         projects = sorted(
             [d for d in projects_dir.iterdir() if d.is_dir()],
@@ -651,10 +688,14 @@ class TestRealVaultBenchmark:
             baseline_tokens = _tokens(baseline_text)
 
             print(f"\nvault_query(project='{project}', section='{section}')")
-            print(f"  Full content: {baseline_tokens:,} tokens, "
-                  f"{len(baseline_text.splitlines())} lines")
-            print(f"  {'max_lines':>10s}  {'tokens':>8s}  {'% of full':>10s}  "
-                  f"{'completeness':>13s}  {'signal/noise':>13s}")
+            print(
+                f"  Full content: {baseline_tokens:,} tokens, "
+                f"{len(baseline_text.splitlines())} lines"
+            )
+            print(
+                f"  {'max_lines':>10s}  {'tokens':>8s}  {'% of full':>10s}  "
+                f"{'completeness':>13s}  {'signal/noise':>13s}"
+            )
             print(f"  {'-' * 64}")
 
             for ml in MAX_LINES_SWEEP:
@@ -668,14 +709,14 @@ class TestRealVaultBenchmark:
                 compl = _completeness(text, baseline_text) * 100
                 snr = _signal_ratio(text) * 100
                 label = "unlimited" if ml == 0 else str(ml)
-                print(f"  {label:>10s}  {tokens:>8d}  {pct:>9.1f}%  "
-                      f"{compl:>12.1f}%  {snr:>12.1f}%")
+                print(f"  {label:>10s}  {tokens:>8d}  {pct:>9.1f}%  {compl:>12.1f}%  {snr:>12.1f}%")
 
     async def test_real_vault_session_comparison(
         self, real_mcp: FastMCP, real_static_tokens: int
     ) -> None:
         """Compare on-demand vs static loading on the real vault."""
         from pathlib import Path
+
         projects_dir = Path(REAL_VAULT) / "10_projects"
         projects = [d.name for d in projects_dir.iterdir() if d.is_dir()][:5]
 

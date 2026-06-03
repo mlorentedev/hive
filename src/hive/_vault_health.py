@@ -67,19 +67,23 @@ def identity_block_text(ctx: ServerContext) -> str:
     )
     openrouter_present = ctx.openrouter is not None
     backends = (
-        '{"ollama": ' + ("true" if ollama_present else "false")
-        + ', "openrouter": ' + ("true" if openrouter_present else "false")
+        '{"ollama": '
+        + ("true" if ollama_present else "false")
+        + ', "openrouter": '
+        + ("true" if openrouter_present else "false")
         + "}"
     )
-    return "\n".join([
-        "## server",
-        f"- version: {_hive_version()}",
-        f"- python: {sys.version.split()[0]}",
-        f"- vault_path: {ctx.vault}",
-        f"- backends: {backends}",
-        f"- started_at: {ctx.started_at_iso}",
-        "",
-    ])
+    return "\n".join(
+        [
+            "## server",
+            f"- version: {_hive_version()}",
+            f"- python: {sys.version.split()[0]}",
+            f"- vault_path: {ctx.vault}",
+            f"- backends: {backends}",
+            f"- started_at: {ctx.started_at_iso}",
+            "",
+        ]
+    )
 
 
 def _registered_tool_names(mcp: FastMCP) -> list[str]:
@@ -97,7 +101,7 @@ def _registered_tool_names(mcp: FastMCP) -> list[str]:
         if not isinstance(key, str) or not key.startswith("tool:"):
             continue
         # key shape is `tool:<name>@<scope>` — strip both prefix and suffix.
-        rest = key[len("tool:"):]
+        rest = key[len("tool:") :]
         names.add(rest.split("@", 1)[0])
     return sorted(names)
 
@@ -140,8 +144,7 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
     lines = [
         "## runtime",
         f"- uptime_s: {uptime_s:.1f}",
-        f"- tools_registered: {len(tools)} "
-        f"({', '.join(tools) if tools else '<empty>'})",
+        f"- tools_registered: {len(tools)} ({', '.join(tools) if tools else '<empty>'})",
         f"- wal_size_bytes: {wal_size}",
         f"- competing_pid_count: {competing}",
         "- last_git_lock_wait_ms:",
@@ -176,10 +179,7 @@ def _find_duplicate_names(scope_dir: Path) -> list[tuple[str, list[str]]]:
                 name_paths[d.name].append(rel)
     except OSError:
         return []
-    return [
-        (name, paths) for name, paths in sorted(name_paths.items())
-        if len(paths) > 1
-    ]
+    return [(name, paths) for name, paths in sorted(name_paths.items()) if len(paths) > 1]
 
 
 def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
@@ -212,15 +212,15 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
                 continue
             found_any = True
             md_files, contents, frontmatters = scan_project(project_dir)
-            total_lines = sum(
-                len(c.splitlines()) for c in contents.values() if c is not None
-            )
+            total_lines = sum(len(c.splitlines()) for c in contents.values() if c is not None)
             stale_files = count_stale_from(
-                project_dir, md_files, frontmatters, stale_threshold,
+                project_dir,
+                md_files,
+                frontmatters,
+                stale_threshold,
             )
             missing = [
-                s for s, fname in SECTION_SHORTCUTS.items()
-                if not (project_dir / fname).exists()
+                s for s, fname in SECTION_SHORTCUTS.items() if not (project_dir / fname).exists()
             ]
 
             lines.append(f"## {scope_name}/{project_dir.name}")
@@ -230,8 +230,7 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
                 lines.append(f"- Missing sections: {', '.join(missing)}")
             if stale_files:
                 lines.append(
-                    f"- Stale files (>{ctx.stale_days}d): "
-                    f"{', '.join(sorted(stale_files))}"
+                    f"- Stale files (>{ctx.stale_days}d): {', '.join(sorted(stale_files))}"
                 )
             lines.append("")
 
@@ -272,6 +271,7 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
 
     # ── Ghost-response counter (HIVE-104 Fase C + HIVE-115 PR-3 source) ──
     from hive._compat import GHOST_RESPONSES
+
     snap = GHOST_RESPONSES.snapshot()
     if isinstance(snap.get("total"), int) and snap["total"] > 0:  # type: ignore[operator]
         found_any = True
@@ -281,9 +281,7 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
         lines.append(f"- last_tool: {snap['last_tool'] or '<unknown>'}")
         by_source = snap.get("by_source")
         if isinstance(by_source, dict) and by_source:
-            breakdown = ", ".join(
-                f"{src}={count}" for src, count in sorted(by_source.items())
-            )
+            breakdown = ", ".join(f"{src}={count}" for src, count in sorted(by_source.items()))
             lines.append(f"- by_source: {breakdown}")
         lines.append(
             "- note: ErrorData ack does NOT imply rollback — verify state "
@@ -346,20 +344,23 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
             if unknown:
                 valid_names = ", ".join(sorted(_ALL_CHECKS))
                 return track(
-                    ctx, "vault_health",
-                    f"Unknown check(s): {', '.join(sorted(unknown))}. "
-                    f"Valid: {valid_names}",
+                    ctx,
+                    "vault_health",
+                    f"Unknown check(s): {', '.join(sorted(unknown))}. Valid: {valid_names}",
                     project,
                 )
 
             project_dirs: list[tuple[Path, str]] = []
             if project:
                 resolved = _resolve_project_dir(
-                    ctx.vault, project, ctx.scopes,
+                    ctx.vault,
+                    project,
+                    ctx.scopes,
                 )
                 if resolved is None:
                     return track(
-                        ctx, "vault_health",
+                        ctx,
+                        "vault_health",
                         project_not_found(project),
                         project,
                     )
@@ -383,7 +384,9 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
 
             if not project_dirs:
                 return track(
-                    ctx, "vault_health", "No projects found in vault.",
+                    ctx,
+                    "vault_health",
+                    "No projects found in vault.",
                 )
 
             all_stems: set[str] = set()
@@ -405,9 +408,7 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                         continue
                     all_stems.add(f.stem)
                     with contextlib.suppress(ValueError):
-                        vault_rel = (
-                            f.relative_to(ctx.vault).with_suffix("").as_posix()
-                        )
+                        vault_rel = f.relative_to(ctx.vault).with_suffix("").as_posix()
                         all_paths.add(vault_rel)
                         if "/" in vault_rel:
                             leading, rest = vault_rel.split("/", 1)
@@ -433,21 +434,17 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                     content = _safe_read(f)
                     if content is None:
                         issues.append(
-                            f"[error] {proj_name}/{rel}: "
-                            "File unreadable (I/O or encoding error)",
+                            f"[error] {proj_name}/{rel}: File unreadable (I/O or encoding error)",
                         )
                         continue
 
                     fm = parse_frontmatter(content)
-                    in_memory_dir = "memory" in (
-                        f.relative_to(project_dir).parts
-                    )
+                    in_memory_dir = "memory" in (f.relative_to(project_dir).parts)
 
                     if "frontmatter" in active_checks and not in_memory_dir:
                         if fm is None:
                             issues.append(
-                                f"[error] {proj_name}/{rel}: "
-                                "Missing or invalid frontmatter"
+                                f"[error] {proj_name}/{rel}: Missing or invalid frontmatter"
                             )
                             continue
                         missing_fields = {"id", "type", "status"} - fm.raw.keys()
@@ -459,8 +456,7 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                             )
                         if fm.created and parse_date(fm.created) is None:
                             issues.append(
-                                f"[warning] {proj_name}/{rel}: "
-                                f"Unparseable date: '{fm.created}'"
+                                f"[warning] {proj_name}/{rel}: Unparseable date: '{fm.created}'"
                             )
 
                     if (
@@ -468,25 +464,21 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                         and fm is not None
                         and fm.status not in _TERMINAL_STATUSES
                     ):
-                            created_date = (
-                                parse_date(fm.created)
-                                if fm.created
-                                else None
-                            )
-                            if created_date is None:
-                                try:
-                                    created_date = date.fromtimestamp(
-                                        f.stat().st_mtime,
-                                    )
-                                except OSError:
-                                    continue
-                            if created_date < stale_threshold:
-                                issues.append(
-                                    f"[warning] {proj_name}/{rel}: "
-                                    f"Stale (active since "
-                                    f"{created_date.isoformat()}, "
-                                    f">{ctx.stale_days}d)"
+                        created_date = parse_date(fm.created) if fm.created else None
+                        if created_date is None:
+                            try:
+                                created_date = date.fromtimestamp(
+                                    f.stat().st_mtime,
                                 )
+                            except OSError:
+                                continue
+                        if created_date < stale_threshold:
+                            issues.append(
+                                f"[warning] {proj_name}/{rel}: "
+                                f"Stale (active since "
+                                f"{created_date.isoformat()}, "
+                                f">{ctx.stale_days}d)"
+                            )
 
                     if "links" in active_checks:
                         body = _strip_code(extract_body(content))
@@ -494,13 +486,9 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                             target = m.group(1).strip().rstrip("\\").strip()
                             if _POSIX_CLASS_RE.match(target):
                                 continue
-                            if (
-                                target not in all_stems
-                                and target not in all_paths
-                            ):
+                            if target not in all_stems and target not in all_paths:
                                 issues.append(
-                                    f"[warning] {proj_name}/{rel}: "
-                                    f"Broken link [[{target}]]"
+                                    f"[warning] {proj_name}/{rel}: Broken link [[{target}]]"
                                 )
                                 if len(issues) >= max_issues:
                                     break
@@ -516,20 +504,11 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                     f"({', '.join(sorted(active_checks))})."
                 )
             else:
-                errors = sum(
-                    1 for i in issues if i.startswith("[error]")
-                )
-                warnings = sum(
-                    1 for i in issues if i.startswith("[warning]")
-                )
-                header = (
-                    f"Found {len(issues)} issues "
-                    f"({errors} errors, {warnings} warnings)"
-                )
+                errors = sum(1 for i in issues if i.startswith("[error]"))
+                warnings = sum(1 for i in issues if i.startswith("[warning]"))
+                header = f"Found {len(issues)} issues ({errors} errors, {warnings} warnings)"
                 if len(issues) >= max_issues:
-                    header += (
-                        f" — truncated at {max_issues}, more may exist"
-                    )
+                    header += f" — truncated at {max_issues}, more may exist"
                 validate_lines = [header, ""]
                 validate_lines.extend(issues)
                 parts.append("\n".join(validate_lines))
@@ -537,19 +516,14 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
         if include_usage:
             stats = ctx.tracker.stats(usage_days)
             if stats["total_calls"] == 0:
-                parts.append(
-                    f"\nNo vault tool calls recorded "
-                    f"in the last {usage_days} days."
-                )
+                parts.append(f"\nNo vault tool calls recorded in the last {usage_days} days.")
             else:
                 usage_parts: list[str] = [
                     f"\n# Vault Usage (last {usage_days} days)",
                     "",
                     f"- Total calls: {stats['total_calls']}",
-                    f"- Total response lines: "
-                    f"{stats['total_response_lines']}",
-                    f"- Estimated tokens served: "
-                    f"~{stats['total_response_lines'] * 10}",
+                    f"- Total response lines: {stats['total_response_lines']}",
+                    f"- Estimated tokens served: ~{stats['total_response_lines'] * 10}",
                     "",
                 ]
                 if stats["by_tool"]:

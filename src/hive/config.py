@@ -86,16 +86,14 @@ class HiveSettings(BaseSettings):
         duplicates = sorted({d for d in dirs if dirs.count(d) > 1})
         if duplicates:
             raise ValueError(
-                "vault_scopes maps multiple scopes to the same directory: "
-                f"{duplicates}",
+                f"vault_scopes maps multiple scopes to the same directory: {duplicates}",
             )
         for key, raw in value.items():
             is_absolute = raw.startswith(("/", "\\")) or bool(_DRIVE_RE.match(raw))
             segments = re.split(r"[\\/]", raw)
             if not raw.strip() or is_absolute or ".." in segments:
                 raise ValueError(
-                    f"vault_scopes[{key!r}] must be a relative path inside the "
-                    f"vault, got {raw!r}",
+                    f"vault_scopes[{key!r}] must be a relative path inside the vault, got {raw!r}",
                 )
         return value
 

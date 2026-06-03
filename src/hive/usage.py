@@ -56,8 +56,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
         batch = self._buffer
         self._buffer = []
         self._conn.executemany(
-            "INSERT INTO tool_calls (tool, project, response_lines) "
-            "VALUES (?, ?, ?)",
+            "INSERT INTO tool_calls (tool, project, response_lines) VALUES (?, ?, ?)",
             batch,
         )
         self._conn.commit()
@@ -108,8 +107,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
                 by_project[project] = count
 
             total_lines_row = self._conn.execute(
-                "SELECT COALESCE(SUM(response_lines), 0) FROM tool_calls "
-                f"{since_clause}",
+                f"SELECT COALESCE(SUM(response_lines), 0) FROM tool_calls {since_clause}",
                 (since_param,),
             ).fetchone()
             total_lines = total_lines_row[0] if total_lines_row else 0

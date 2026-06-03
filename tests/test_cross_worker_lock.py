@@ -140,13 +140,9 @@ async def test_tool_span_deadline_evicts_filelock(
         assert key not in _GIT_FILELOCKS, (
             "expected _GIT_FILELOCKS to no longer contain the vault key"
         )
-        eviction_logs = [
-            r.message for r in caplog.records
-            if "mcp.lock_eviction" in r.message
-        ]
+        eviction_logs = [r.message for r in caplog.records if "mcp.lock_eviction" in r.message]
         assert eviction_logs, (
-            f"expected mcp.lock_eviction log line; got: "
-            f"{[r.message for r in caplog.records]}"
+            f"expected mcp.lock_eviction log line; got: {[r.message for r in caplog.records]}"
         )
 
         # 5. Tracker recorded the event

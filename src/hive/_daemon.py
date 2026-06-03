@@ -89,7 +89,9 @@ def write_owner_only(path: Path, content: str) -> None:
         user = os.environ.get("USERNAME") or os.environ.get("USER") or ""
         subprocess.run(  # noqa: S603,S607 — fixed args, owner derived from env
             ["icacls", str(path), "/inheritance:r", "/grant:r", f"{user}:(F)"],
-            check=False, capture_output=True, text=True,
+            check=False,
+            capture_output=True,
+            text=True,
         )
     else:
         path.chmod(0o600)
@@ -266,7 +268,9 @@ async def _serve_until_drift_or_signal(uv_server: uvicorn.Server) -> bool:
     """Run *uv_server* alongside a drift watcher; True iff an upgrade stopped it."""
     watcher = asyncio.create_task(
         _watch_for_upgrade(
-            uv_server, boot=_current_version(), poll_s=settings.upgrade_poll_s,
+            uv_server,
+            boot=_current_version(),
+            poll_s=settings.upgrade_poll_s,
         ),
     )
     try:

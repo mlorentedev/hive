@@ -56,9 +56,7 @@ def _ollama_reachable() -> bool:
 
 
 skip_no_ollama = pytest.mark.skipif(not _ollama_reachable(), reason="Ollama not reachable")
-skip_no_openrouter = pytest.mark.skipif(
-    not OPENROUTER_API_KEY, reason="OPENROUTER_API_KEY not set"
-)
+skip_no_openrouter = pytest.mark.skipif(not OPENROUTER_API_KEY, reason="OPENROUTER_API_KEY not set")
 
 
 # ── Fixtures ────────────────────────────────────────────────────────
@@ -69,15 +67,22 @@ def _init_git(path: Path) -> None:
     subprocess.run(["git", "init"], cwd=path, capture_output=True, check=True)
     subprocess.run(
         ["git", "config", "user.email", "test@test.com"],
-        cwd=path, capture_output=True, check=True,
+        cwd=path,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "config", "user.name", "Test"],
-        cwd=path, capture_output=True, check=True,
+        cwd=path,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(["git", "add", "."], cwd=path, capture_output=True, check=True)
     subprocess.run(
-        ["git", "commit", "-m", "init"], cwd=path, capture_output=True, check=True,
+        ["git", "commit", "-m", "init"],
+        cwd=path,
+        capture_output=True,
+        check=True,
     )
 
 
@@ -130,8 +135,15 @@ def smoke_vault(tmp_path: Path) -> Path:
 
     # Large file for truncation tests
     large_lines = [
-        "---", "id: large-doc", "type: lesson", "status: active",
-        'created: "2026-01-15"', "---", "", "# Large Document", "",
+        "---",
+        "id: large-doc",
+        "type: lesson",
+        "status: active",
+        'created: "2026-01-15"',
+        "---",
+        "",
+        "# Large Document",
+        "",
     ]
     for i in range(1, 101):
         large_lines.append(f"Line {i}: content.")
@@ -171,57 +183,80 @@ class TestVaultSmoke:
 
     # B2
     async def test_query_context(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_query", {"project": "smoketest", "section": "context"},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_query",
+                {"project": "smoketest", "section": "context"},
+            )
+        )
         assert "Smoke Test Project" in result
 
     async def test_query_tasks(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_query", {"project": "smoketest", "section": "tasks"},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_query",
+                {"project": "smoketest", "section": "tasks"},
+            )
+        )
         assert "Task alpha" in result
 
     async def test_query_lessons(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_query", {"project": "smoketest", "section": "lessons"},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_query",
+                {"project": "smoketest", "section": "lessons"},
+            )
+        )
         assert "Lesson One" in result
 
     # B3
     async def test_query_arbitrary_path(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_query", {"project": "smoketest", "path": "30-architecture/adr-001.md"},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_query",
+                {"project": "smoketest", "path": "30-architecture/adr-001.md"},
+            )
+        )
         assert "ADR-001" in result
 
     # B4
     async def test_query_meta(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_query", {"project": "_meta", "path": "patterns/pattern-tdd.md"},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_query",
+                {"project": "_meta", "path": "patterns/pattern-tdd.md"},
+            )
+        )
         assert "TDD" in result
 
     # B5
     async def test_query_max_lines(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_query", {"project": "smoketest", "path": "92-large-doc.md", "max_lines": 5},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_query",
+                {"project": "smoketest", "path": "92-large-doc.md", "max_lines": 5},
+            )
+        )
         assert "truncated" in result.lower()
 
     # B6
     async def test_query_include_metadata(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_query",
-            {"project": "smoketest", "section": "context", "include_metadata": True},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_query",
+                {"project": "smoketest", "section": "context", "include_metadata": True},
+            )
+        )
         assert "type=project" in result
 
     # B7
     async def test_query_project_not_found(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_query", {"project": "nonexistent"},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_query",
+                {"project": "nonexistent"},
+            )
+        )
         assert "not found" in result.lower()
 
     # B8
@@ -231,23 +266,32 @@ class TestVaultSmoke:
 
     # B9
     async def test_search_with_filter(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_search", {"query": "Decision", "type_filter": "adr"},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_search",
+                {"query": "Decision", "type_filter": "adr"},
+            )
+        )
         assert "adr-001" in result
 
     # B10
     async def test_search_regex(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_search", {"query": r"Line\s+\d+:", "use_regex": True},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_search",
+                {"query": r"Line\s+\d+:", "use_regex": True},
+            )
+        )
         assert "92-large-doc.md" in result
 
     # B11
     async def test_search_no_results(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_search", {"query": "xyznonexistent999"},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_search",
+                {"query": "xyznonexistent999"},
+            )
+        )
         assert "no matches" in result.lower()
 
     # B12
@@ -257,118 +301,138 @@ class TestVaultSmoke:
 
     # B13
     async def test_update_append(self, server: FastMCP, smoke_vault: Path) -> None:
-        result = _text(await server.call_tool(
-            "vault_write",
-            {
-                "project": "smoketest",
-                "section": "lessons",
-                "operation": "append",
-                "content": "\n## Lesson Two\nNew lesson.\n",
-            },
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_write",
+                {
+                    "project": "smoketest",
+                    "section": "lessons",
+                    "operation": "append",
+                    "content": "\n## Lesson Two\nNew lesson.\n",
+                },
+            )
+        )
         assert "updated" in result.lower()
         content = (smoke_vault / "10_projects" / "smoketest" / "90-lessons.md").read_text()
         assert "Lesson Two" in content
 
     # B14
     async def test_update_invalid_frontmatter(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_write",
-            {
-                "project": "smoketest",
-                "section": "tasks",
-                "operation": "replace",
-                "content": "# No frontmatter\n",
-            },
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_write",
+                {
+                    "project": "smoketest",
+                    "section": "tasks",
+                    "operation": "replace",
+                    "content": "# No frontmatter\n",
+                },
+            )
+        )
         assert "frontmatter" in result.lower()
 
     # B15
     async def test_create(self, server: FastMCP, smoke_vault: Path) -> None:
-        result = _text(await server.call_tool(
-            "vault_write",
-            {
-                "project": "smoketest",
-                "path": "30-architecture/adr-test.md",
-                "content": "# Test ADR\n",
-                "doc_type": "adr",
-                "operation": "create",
-            },
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_write",
+                {
+                    "project": "smoketest",
+                    "path": "30-architecture/adr-test.md",
+                    "content": "# Test ADR\n",
+                    "doc_type": "adr",
+                    "operation": "create",
+                },
+            )
+        )
         assert "created" in result.lower()
         adr = smoke_vault / "10_projects" / "smoketest" / "30-architecture" / "adr-test.md"
         assert adr.exists()
 
     # B16
     async def test_create_duplicate(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_write",
-            {
-                "project": "smoketest",
-                "path": "30-architecture/adr-001.md",
-                "content": "dup",
-                "doc_type": "adr",
-                "operation": "create",
-            },
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_write",
+                {
+                    "project": "smoketest",
+                    "path": "30-architecture/adr-001.md",
+                    "content": "dup",
+                    "doc_type": "adr",
+                    "operation": "create",
+                },
+            )
+        )
         assert "already exists" in result.lower()
 
     # B17
     async def test_list_files(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_list", {"project": "smoketest"},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_list",
+                {"project": "smoketest"},
+            )
+        )
         assert "00-context.md" in result
         assert "30-architecture/" in result
 
     # B18
     async def test_list_files_pattern(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_list", {"project": "smoketest", "pattern": "adr-*"},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_list",
+                {"project": "smoketest", "pattern": "adr-*"},
+            )
+        )
         assert "adr-001.md" in result
 
     # B19
     async def test_patch(self, server: FastMCP, smoke_vault: Path) -> None:
-        result = _text(await server.call_tool(
-            "vault_patch",
-            {
-                "project": "smoketest",
-                "path": "11-tasks.md",
-                "find": "- [ ] Task alpha",
-                "replace": "- [x] Task alpha",
-            },
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_patch",
+                {
+                    "project": "smoketest",
+                    "path": "11-tasks.md",
+                    "find": "- [ ] Task alpha",
+                    "replace": "- [x] Task alpha",
+                },
+            )
+        )
         assert "patch" in result.lower()
         content = (smoke_vault / "10_projects" / "smoketest" / "11-tasks.md").read_text()
         assert "- [x] Task alpha" in content
 
     # B20
     async def test_patch_ambiguous(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_patch",
-            {
-                "project": "smoketest",
-                "path": "11-tasks.md",
-                "find": "Task",
-                "replace": "Item",
-            },
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_patch",
+                {
+                    "project": "smoketest",
+                    "path": "11-tasks.md",
+                    "find": "Task",
+                    "replace": "Item",
+                },
+            )
+        )
         assert "ambiguous" in result.lower()
 
     # B21
     async def test_capture_lesson(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "capture_lesson",
-            {
-                "project": "smoketest",
-                "title": "Smoke Lesson",
-                "context": "E2E test",
-                "problem": "Need to verify capture works",
-                "solution": "Call the tool",
-                "tags": ["smoke", "test"],
-            },
-        ))
+        result = _text(
+            await server.call_tool(
+                "capture_lesson",
+                {
+                    "project": "smoketest",
+                    "title": "Smoke Lesson",
+                    "context": "E2E test",
+                    "problem": "Need to verify capture works",
+                    "solution": "Call the tool",
+                    "tags": ["smoke", "test"],
+                },
+            )
+        )
         assert "captured" in result.lower()
 
     # B22
@@ -379,46 +443,64 @@ class TestVaultSmoke:
             {
                 "project": "smoketest",
                 "title": "Dedup Lesson",
-                "context": "test", "problem": "test", "solution": "test",
+                "context": "test",
+                "problem": "test",
+                "solution": "test",
             },
         )
         # Second with same title
-        result = _text(await server.call_tool(
-            "capture_lesson",
-            {
-                "project": "smoketest",
-                "title": "Dedup Lesson",
-                "context": "test2", "problem": "test2", "solution": "test2",
-            },
-        ))
+        result = _text(
+            await server.call_tool(
+                "capture_lesson",
+                {
+                    "project": "smoketest",
+                    "title": "Dedup Lesson",
+                    "context": "test2",
+                    "problem": "test2",
+                    "solution": "test2",
+                },
+            )
+        )
         assert "already exists" in result.lower()
 
     # B23
     async def test_summarize_small_file(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "delegate_task", {"project": "smoketest", "section": "context"},
-        ))
+        result = _text(
+            await server.call_tool(
+                "delegate_task",
+                {"project": "smoketest", "section": "context"},
+            )
+        )
         assert "Smoke Test Project" in result
 
     # B24
     async def test_ranked_search(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_search", {"query": "Decision", "ranked": True},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_search",
+                {"query": "Decision", "ranked": True},
+            )
+        )
         assert "adr-001" in result
 
     # B25
     async def test_session_briefing(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "session_briefing", {"project": "smoketest"},
-        ))
+        result = _text(
+            await server.call_tool(
+                "session_briefing",
+                {"project": "smoketest"},
+            )
+        )
         assert "Session Briefing" in result
 
     # B26
     async def test_vault_search_recent(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_search", {"project": "smoketest", "since_days": 30},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_search",
+                {"project": "smoketest", "since_days": 30},
+            )
+        )
         # Should return something (at least the recently created files)
         assert "smoketest" in result.lower() or "recent" in result.lower()
 
@@ -426,9 +508,12 @@ class TestVaultSmoke:
     async def test_vault_health_usage(self, server: FastMCP) -> None:
         # Call a tool first to generate usage data
         await server.call_tool("vault_list", {})
-        result = _text(await server.call_tool(
-            "vault_health", {"include_usage": True},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_health",
+                {"include_usage": True},
+            )
+        )
         assert "vault_list" in result
 
 
@@ -501,22 +586,29 @@ class TestEdgeCasesSmoke:
 
     # G3
     async def test_large_file_truncation(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool(
-            "vault_query", {"project": "smoketest", "path": "92-large-doc.md", "max_lines": 10},
-        ))
+        result = _text(
+            await server.call_tool(
+                "vault_query",
+                {"project": "smoketest", "path": "92-large-doc.md", "max_lines": 10},
+            )
+        )
         assert "truncated" in result.lower()
         lines_before_truncation = result.split("[...")[0].strip().splitlines()
         assert len(lines_before_truncation) == 10
 
     # G4
     async def test_budget_exhausted(
-        self, server: FastMCP, smoke_budget: BudgetTracker,
+        self,
+        server: FastMCP,
+        smoke_budget: BudgetTracker,
     ) -> None:
         smoke_budget.record_request(model="test", cost_usd=5.0, tokens=0, latency_ms=0)
-        result = _text(await server.call_tool(
-            "delegate_task",
-            {"prompt": PING_PROMPT, "model": "openrouter", "max_cost_per_request": 0.01},
-        ))
+        result = _text(
+            await server.call_tool(
+                "delegate_task",
+                {"prompt": PING_PROMPT, "model": "openrouter", "max_cost_per_request": 0.01},
+            )
+        )
         assert "budget" in result.lower()
 
 
@@ -567,9 +659,7 @@ class TestOpenRouterFreeDirect:
     async def test_openrouter_free_records_budget(
         self, server: FastMCP, smoke_budget: BudgetTracker
     ) -> None:
-        await server.call_tool(
-            "delegate_task", {"prompt": PING_PROMPT, "model": "openrouter-free"}
-        )
+        await server.call_tool("delegate_task", {"prompt": PING_PROMPT, "model": "openrouter-free"})
         stats = smoke_budget.month_stats(5.0)
         assert stats["request_count"] == 1
 
@@ -617,15 +707,11 @@ class TestAutoRouting:
     """Auto routing with real backends."""
 
     async def test_auto_picks_ollama_first(self, server: FastMCP) -> None:
-        result = _text(
-            await server.call_tool("delegate_task", {"prompt": PING_PROMPT})
-        )
+        result = _text(await server.call_tool("delegate_task", {"prompt": PING_PROMPT}))
         assert "Worker Response" in result
         assert "qwen2.5-coder" in result
 
-    async def test_auto_records_budget(
-        self, server: FastMCP, smoke_budget: BudgetTracker
-    ) -> None:
+    async def test_auto_records_budget(self, server: FastMCP, smoke_budget: BudgetTracker) -> None:
         await server.call_tool("delegate_task", {"prompt": PING_PROMPT})
         stats = smoke_budget.month_stats(5.0)
         assert stats["request_count"] == 1

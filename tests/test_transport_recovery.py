@@ -51,7 +51,8 @@ class TestInMemoryCancellation:
     """Cancellation at the in-process FastMCP boundary must not poison the server."""
 
     async def test_cancelled_call_does_not_break_subsequent_calls(
-        self, vault_mcp: FastMCP,
+        self,
+        vault_mcp: FastMCP,
     ) -> None:
         task = asyncio.create_task(vault_mcp.call_tool("vault_list", {}))
         await asyncio.sleep(0)
@@ -131,7 +132,9 @@ class TestSubprocessTransportRecovery:
         env["HIVE_DB_PATH"] = str(vault / "worker.db")
         env["HIVE_RELEVANCE_DB_PATH"] = str(vault / "relevance.db")
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "hive.server",
+            sys.executable,
+            "-m",
+            "hive.server",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -153,36 +156,45 @@ class TestSubprocessTransportRecovery:
             await proc.wait()
 
     async def test_server_survives_cancellation_notification(
-        self, mock_vault: Path,
+        self,
+        mock_vault: Path,
     ) -> None:
         """A notifications/cancelled mid-call must not kill the transport."""
         proc = await self._spawn(mock_vault)
         try:
             call_id = 2
-            await _send(proc, {
-                "jsonrpc": "2.0",
-                "id": call_id,
-                "method": "tools/call",
-                "params": {"name": "vault_list", "arguments": {}},
-            })
-            await _send(proc, {
-                "jsonrpc": "2.0",
-                "method": "notifications/cancelled",
-                "params": {"requestId": call_id, "reason": "user rejected"},
-            })
+            await _send(
+                proc,
+                {
+                    "jsonrpc": "2.0",
+                    "id": call_id,
+                    "method": "tools/call",
+                    "params": {"name": "vault_list", "arguments": {}},
+                },
+            )
+            await _send(
+                proc,
+                {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/cancelled",
+                    "params": {"requestId": call_id, "reason": "user rejected"},
+                },
+            )
 
             first = await _recv(proc, timeout=15.0)
             assert first.get("id") == call_id, f"unexpected first response: {first!r}"
 
-            await _send(proc, {
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "tools/call",
-                "params": {"name": "vault_list", "arguments": {}},
-            })
+            await _send(
+                proc,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {"name": "vault_list", "arguments": {}},
+                },
+            )
             second = await _recv(proc, timeout=15.0)
             assert second.get("id") == 3, f"transport poisoned: {second!r}"
             assert "result" in second or "error" in second
         finally:
             await self._shutdown(proc)
-

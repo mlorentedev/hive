@@ -42,7 +42,9 @@ class TestMatchAndReplace:
         # but unique in Pass 2 (body-only)
         content = _FM + "# Title\n\nStatus: active\n"
         ok, new_content = _match_and_replace(
-            content, "Status: active", "Status: done",
+            content,
+            "Status: active",
+            "Status: done",
         )
         assert ok
         assert new_content.startswith("---")
@@ -54,7 +56,9 @@ class TestMatchAndReplace:
         # LLM stripped trailing spaces
         find_text = "| A | B |\n|---|---|\n| 1 | 2 |"
         ok, new_content = _match_and_replace(
-            content, find_text, "| A | B | C |\n|---|---|---|\n| 1 | 2 | 3 |",
+            content,
+            find_text,
+            "| A | B | C |\n|---|---|---|\n| 1 | 2 | 3 |",
         )
         assert ok
         assert "| C |" in new_content
@@ -70,7 +74,9 @@ class TestMatchAndReplace:
         """Total miss returns diagnostic."""
         content = _FM + "# Title\n\nHello world\n"
         ok, msg = _match_and_replace(
-            content, "completely different text", "replacement",
+            content,
+            "completely different text",
+            "replacement",
         )
         assert not ok
         assert "not found" in msg.lower()
@@ -79,7 +85,9 @@ class TestMatchAndReplace:
         """Files without frontmatter still work (pass 1 or pass 3)."""
         content = "# Plain file\n\nHello world\n"
         ok, new_content = _match_and_replace(
-            content, "Hello world", "Goodbye world",
+            content,
+            "Hello world",
+            "Goodbye world",
         )
         assert ok
         assert "Goodbye world" in new_content
@@ -95,7 +103,9 @@ class TestMatchAndReplace:
         """Frontmatter is byte-identical after body replacement."""
         content = _FM + "# Title\n\nOld content\n"
         ok, new_content = _match_and_replace(
-            content, "Old content", "New content",
+            content,
+            "Old content",
+            "New content",
         )
         assert ok
         assert new_content.startswith(_FM)
@@ -104,7 +114,9 @@ class TestMatchAndReplace:
         """Pass 3 replacement preserves frontmatter."""
         content = _FM + "Hello world  \n"
         ok, new_content = _match_and_replace(
-            content, "Hello world", "Goodbye world",
+            content,
+            "Hello world",
+            "Goodbye world",
         )
         assert ok
         assert new_content.startswith("---")
@@ -180,7 +192,9 @@ class TestResolveProjectDir:
     def test_explicit_scope_flat(self, mock_vault: Path) -> None:
         """Explicit scope:slug resolves for flat scopes."""
         result = _resolve_project_dir(
-            mock_vault, "projects:testproject", _default_scopes(),
+            mock_vault,
+            "projects:testproject",
+            _default_scopes(),
         )
         assert result is not None
         assert result[0] == mock_vault / "10_projects" / "testproject"
@@ -271,7 +285,9 @@ class TestResolveProjectDir:
         assert "agents" in _default_scopes()
         (tmp_path / "80_agents" / "Hermes-NaN").mkdir(parents=True)
         result = _resolve_project_dir(
-            tmp_path, "agents:Hermes-NaN", _default_scopes(),
+            tmp_path,
+            "agents:Hermes-NaN",
+            _default_scopes(),
         )
         assert result is not None
         assert result[0] == tmp_path / "80_agents" / "Hermes-NaN"
@@ -373,21 +389,21 @@ class TestFindLessonHeading:
         """Heading inside ``` ... ``` must NOT be returned."""
         content = (
             "intro\n"
-            "```\n"                    # line 2  fence open
+            "```\n"  # line 2  fence open
             "### [2026-01-01] fake\n"  # line 3  fake heading
-            "```\n"                    # line 4  fence close
-            "body\n"                   # line 5  match line
+            "```\n"  # line 4  fence close
+            "body\n"  # line 5  match line
         )
         assert find_lesson_heading(content, 5) is None
 
     def test_real_heading_wins_when_fake_heading_inside_codeblock(self) -> None:
         content = (
             "### [2026-05-18] real heading\n"  # line 1
-            "intro\n"                            # line 2
-            "```\n"                              # line 3
-            "### [2026-01-01] fake\n"            # line 4
-            "```\n"                              # line 5
-            "body\n"                             # line 6  match line
+            "intro\n"  # line 2
+            "```\n"  # line 3
+            "### [2026-01-01] fake\n"  # line 4
+            "```\n"  # line 5
+            "body\n"  # line 6  match line
         )
         assert find_lesson_heading(content, 6) == "[2026-05-18] real heading"
 
@@ -403,8 +419,8 @@ class TestFindLessonHeading:
 
     def test_ignores_malformed_heading_without_date(self) -> None:
         content = (
-            "### no date here\n"   # line 1  malformed heading
-            "body line\n"           # line 2
+            "### no date here\n"  # line 1  malformed heading
+            "body line\n"  # line 2
         )
         assert find_lesson_heading(content, 2) is None
 
@@ -439,7 +455,9 @@ class TestGitCommitCoalesce:
     """
 
     def test_coalesces_multi_path(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """``_git_commit(vault, [p1, p2, p3], msg)`` → 1 add + 1 commit.
 
@@ -453,7 +471,10 @@ class TestGitCommitCoalesce:
         calls: list[list[str]] = []
 
         def fake_run_git(
-            args: list[str], _vault: Path, *, registry: object = None,  # noqa: ARG001
+            args: list[str],
+            _vault: Path,
+            *,
+            registry: object = None,  # noqa: ARG001
         ) -> tuple[int, str, str]:
             calls.append(["git", *args])
             return 0, "", ""
@@ -469,19 +490,22 @@ class TestGitCommitCoalesce:
         add_calls = [c for c in calls if c[:2] == ["git", "add"]]
         commit_calls = [c for c in calls if c[:2] == ["git", "commit"]]
         assert len(add_calls) == 1, f"expected 1 add, got {len(add_calls)}: {calls}"
-        assert len(commit_calls) == 1, (
-            f"expected 1 commit, got {len(commit_calls)}: {calls}"
-        )
+        assert len(commit_calls) == 1, f"expected 1 commit, got {len(commit_calls)}: {calls}"
         assert add_calls[0] == ["git", "add", "a.md", "b.md", "c.md"]
 
     def test_noop_on_empty_paths(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Empty path list must skip the helper entirely (no git invocation)."""
         calls: list[list[str]] = []
 
         def fake_run_git(
-            args: list[str], _vault: Path, *, registry: object = None,  # noqa: ARG001
+            args: list[str],
+            _vault: Path,
+            *,
+            registry: object = None,  # noqa: ARG001
         ) -> tuple[int, str, str]:
             calls.append(["git", *args])
             return 0, "", ""

@@ -101,8 +101,12 @@ async def _spawn(vault: Path, db_dir: Path) -> asyncio.subprocess.Process:
     env["HIVE_LESSON_DB_PATH"] = str(db_dir / "lesson_reinforcement.db")
     env["HIVE_LOG_LEVEL"] = "DEBUG"
     proc = await _spawn_subprocess(
-        sys.executable, "-m", "hive.server",
-        stdin=PIPE, stdout=PIPE, stderr=PIPE,
+        sys.executable,
+        "-m",
+        "hive.server",
+        stdin=PIPE,
+        stdout=PIPE,
+        stderr=PIPE,
         env=env,
     )
     await _send(proc, _INIT_MSG)
@@ -173,17 +177,23 @@ async def test_classify_cancellation_race(tmp_path: Path) -> None:
     try:
         for i in range(iterations):
             call_id = 100 + i
-            await _send(proc, {
-                "jsonrpc": "2.0",
-                "id": call_id,
-                "method": "tools/call",
-                "params": {"name": "vault_list", "arguments": {}},
-            })
-            await _send(proc, {
-                "jsonrpc": "2.0",
-                "method": "notifications/cancelled",
-                "params": {"requestId": call_id, "reason": "race-classifier"},
-            })
+            await _send(
+                proc,
+                {
+                    "jsonrpc": "2.0",
+                    "id": call_id,
+                    "method": "tools/call",
+                    "params": {"name": "vault_list", "arguments": {}},
+                },
+            )
+            await _send(
+                proc,
+                {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/cancelled",
+                    "params": {"requestId": call_id, "reason": "race-classifier"},
+                },
+            )
             msgs = await _drain_with_id(proc, call_id, timeout=2.0)
             scenario, detail = _classify(msgs)
             counts[scenario] = counts.get(scenario, 0) + 1
@@ -254,14 +264,12 @@ async def test_ghost_response_counter_records_and_logs(
     assert snap["last_tool"] is None or isinstance(snap["last_tool"], str)
     assert isinstance(snap["last_seen"], str)
     assert any(
-        "mcp.ghost_response.suppressed_after_cancel_ack" in rec.message
-        for rec in caplog.records
+        "mcp.ghost_response.suppressed_after_cancel_ack" in rec.message for rec in caplog.records
     ), [r.message for r in caplog.records]
 
 
 @pytest.mark.asyncio
-async def test_ghost_response_counter_passes_through_when_not_completed(
-) -> None:
+async def test_ghost_response_counter_passes_through_when_not_completed() -> None:
     """Not-yet-completed responder must call original respond — no count bump."""
     from hive import _compat as _hc
 

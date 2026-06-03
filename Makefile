@@ -7,8 +7,9 @@ help: ## Show this help
 install: ## Create venv and install deps
 	uv venv && uv pip install -e ".[dev]"
 
-lint: ## Run ruff linter
+lint: ## Run ruff linter + formatter check
 	uv run ruff check src/ tests/
+	uv run ruff format --check src/ tests/
 
 typecheck: ## Run mypy --strict
 	uv run mypy src/

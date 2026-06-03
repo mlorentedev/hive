@@ -134,8 +134,7 @@ def _make_patched_exit(original_exit: Any) -> Any:  # noqa: ARG001 (kept for sym
                 cancelled_cls = anyio.get_cancelled_exc_class()
                 if self._completed and isinstance(exc, cancelled_cls):
                     _log.debug(
-                        "Swallowed spurious cancellation on completed "
-                        "responder %s (issue #75)",
+                        "Swallowed spurious cancellation on completed responder %s (issue #75)",
                         self.request_id,
                     )
                     return
@@ -181,7 +180,8 @@ def _make_patched_respond(original_respond: Any) -> Any:
                 "mcp.ghost_response.suppressed_after_cancel_ack "
                 "request_id=%s tool=%s — disk state may be mutated; "
                 "verify via vault_query, do not retry.",
-                self.request_id, tool or "<unknown>",
+                self.request_id,
+                tool or "<unknown>",
             )
             return
         await original_respond(self, response)
@@ -222,15 +222,19 @@ def apply() -> None:
     except ImportError as exc:
         _log.warning(
             "Could not import mcp.shared.session.RequestResponder — "
-            "cancellation patch skipped (issue #75): %s", exc,
+            "cancellation patch skipped (issue #75): %s",
+            exc,
         )
         return
 
     if getattr(RequestResponder, _PATCH_APPLIED_ATTR, False):
         return
 
-    missing = [a for a in _REQUIRED_ATTRS if a not in RequestResponder.__dict__
-               and not hasattr(RequestResponder, a)]
+    missing = [
+        a
+        for a in _REQUIRED_ATTRS
+        if a not in RequestResponder.__dict__ and not hasattr(RequestResponder, a)
+    ]
     # Instance attrs aren't in the class dict; we test via __init__ source.
     # A simpler heuristic: just check __exit__ exists, then trust it at call
     # time — our patch only short-circuits when the attrs are set on the
@@ -238,7 +242,8 @@ def apply() -> None:
     if not hasattr(RequestResponder, "__exit__"):
         _log.warning(
             "RequestResponder has no __exit__ — cancellation patch skipped "
-            "(issue #75). Missing attrs hint: %s", missing,
+            "(issue #75). Missing attrs hint: %s",
+            missing,
         )
         return
 

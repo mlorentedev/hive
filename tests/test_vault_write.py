@@ -71,6 +71,4 @@ def test_commit_status_suffix_routes_deadline_killed(
     if expected_substring == "":
         assert result == "", f"expected empty suffix, got {result!r}"
     else:
-        assert expected_substring in result, (
-            f"expected {expected_substring!r} in {result!r}"
-        )
+        assert expected_substring in result, f"expected {expected_substring!r} in {result!r}"

@@ -14,8 +14,7 @@ class TestSchemaInit:
     def test_schema_has_lesson_reinforcement_table(self) -> None:
         t = LessonReinforcementTracker()
         rows = t._conn.execute(  # noqa: SLF001
-            "SELECT name FROM sqlite_master "
-            "WHERE type='table' AND name='lesson_reinforcement'",
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='lesson_reinforcement'",
         ).fetchall()
         assert rows, "lesson_reinforcement table missing"
 
@@ -28,8 +27,12 @@ class TestSchemaInit:
             ).fetchall()
         ]
         expected = {
-            "project", "heading", "reinforcements", "confidence",
-            "first_seen", "last_referenced",
+            "project",
+            "heading",
+            "reinforcements",
+            "confidence",
+            "first_seen",
+            "last_referenced",
         }
         assert expected.issubset(set(cols))
 
@@ -169,7 +172,7 @@ class TestTopByReinforcements:
     def test_top_respects_limit(self) -> None:
         t = LessonReinforcementTracker()
         for i in range(5):
-            heading = f"[2026-01-0{i+1}] l{i}"
+            heading = f"[2026-01-0{i + 1}] l{i}"
             t.ensure("hive", heading)
             for _ in range(i):
                 t.increment("hive", heading)
@@ -191,15 +194,13 @@ class TestTopByConfidenceTieBreaker:
         t.increment("hive", "[2026-01-01] old")
         t.flush()
         t._conn.execute(  # noqa: SLF001
-            "UPDATE lesson_reinforcement SET last_referenced='2026-01-01' "
-            "WHERE heading=?",
+            "UPDATE lesson_reinforcement SET last_referenced='2026-01-01' WHERE heading=?",
             ("[2026-01-01] old",),
         )
         t.increment("hive", "[2026-01-02] new")
         t.flush()
         t._conn.execute(  # noqa: SLF001
-            "UPDATE lesson_reinforcement SET last_referenced='2026-05-18' "
-            "WHERE heading=?",
+            "UPDATE lesson_reinforcement SET last_referenced='2026-05-18' WHERE heading=?",
             ("[2026-01-02] new",),
         )
         t._conn.commit()  # noqa: SLF001
@@ -211,8 +212,8 @@ class TestTopByHybridBlend:
     def test_hybrid_blend_favors_high_bm25_when_low_conf_gap(self) -> None:
         """High BM25 wins over moderate confidence gap (alpha=0.7 BM25-leaning)."""
         t = LessonReinforcementTracker()
-        t.ensure("hive", "[2026-01-01] hi_bm25", confidence=0.7)   # low conf
-        t.ensure("hive", "[2026-01-02] hi_conf", confidence=1.0)   # high conf
+        t.ensure("hive", "[2026-01-01] hi_bm25", confidence=0.7)  # low conf
+        t.ensure("hive", "[2026-01-02] hi_conf", confidence=1.0)  # high conf
 
         bm25 = {
             "[2026-01-01] hi_bm25": 1.0,  # max BM25
@@ -221,7 +222,10 @@ class TestTopByHybridBlend:
         # hybrid_score(hi_bm25) = 0.7*1.0 + 0.3*0.7 = 0.91
         # hybrid_score(hi_conf) = 0.7*0.0 + 0.3*1.0 = 0.30
         top = t.top(
-            "hive", by="hybrid", limit=2, bm25_scores=bm25,
+            "hive",
+            by="hybrid",
+            limit=2,
+            bm25_scores=bm25,
         )
         assert top[0] == "[2026-01-01] hi_bm25"
 

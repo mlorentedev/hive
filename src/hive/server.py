@@ -122,7 +122,8 @@ def create_server(
     tracker = usage_tracker or UsageTracker()
     budget = budget_tracker or BudgetTracker(db_path=settings.db_path)
     ollama = ollama_client or OllamaClient(
-        endpoint=settings.ollama_endpoint, model=settings.ollama_model,
+        endpoint=settings.ollama_endpoint,
+        model=settings.ollama_model,
         timeout=settings.http_timeout,
     )
     openrouter: OpenRouterClient | None = None
@@ -130,7 +131,8 @@ def create_server(
         openrouter = openrouter_client
     elif settings.openrouter_api_key:
         openrouter = OpenRouterClient(
-            api_key=settings.openrouter_api_key, default_model=settings.openrouter_model,
+            api_key=settings.openrouter_api_key,
+            default_model=settings.openrouter_model,
             timeout=settings.http_timeout,
         )
     relevance = relevance_tracker or RelevanceTracker(
@@ -556,7 +558,10 @@ def _setup_file_logging() -> None:
     template.parent.mkdir(parents=True, exist_ok=True)
     log_file = template.with_name(f"{template.stem}-{os.getpid()}{template.suffix}")
     handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=1_000_000, backupCount=1, encoding="utf-8",
+        log_file,
+        maxBytes=1_000_000,
+        backupCount=1,
+        encoding="utf-8",
     )
     handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"),
@@ -610,7 +615,8 @@ def _run_service(argv: list[str]) -> int:
     sub = parser.add_subparsers(dest="action", required=True)
     install = sub.add_parser("install", help="install + enable the service")
     install.add_argument(
-        "--no-enable", action="store_true",
+        "--no-enable",
+        action="store_true",
         help="write the unit/task only; do not start it",
     )
     sub.add_parser("uninstall", help="stop + remove the service")
