@@ -70,6 +70,7 @@ export default defineConfig({
 						{ label: 'Benchmarks', slug: 'guides/benchmarks' },
 						{ label: 'Troubleshooting', translations: { es: 'Solución de Problemas' }, slug: 'guides/troubleshooting' },
 						{ label: 'Obsidian-Git Integration', translations: { es: 'Integración con Obsidian-Git' }, slug: 'guides/obsidian-git-integration' },
+						{ label: 'Daemon Mode', translations: { es: 'Modo Daemon' }, slug: 'guides/daemon-mode' },
 					],
 				},
 				{

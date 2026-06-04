@@ -77,6 +77,17 @@ Per [ADR-006 (commit policy)](docs/adr/adr-006-commit-policy.md), the recommende
 
 When a tool call is cancelled mid-flight (slow worker, client timeout), the server may have already mutated the disk before the cancel ack reaches the wire. `vault_health` surfaces a `## ghost_responses` counter and emits a `mcp.ghost_response.suppressed_after_cancel_ack` WARNING for each event — verify state via `vault_query` rather than retrying, since the ErrorData ack does **not** imply rollback ([ADR-007](docs/adr/adr-007-mcp-cancellation-response.md)).
 
+## Daemon mode (optional)
+
+The default `uvx hive-vault` runs a fresh server per session. **Daemon mode** instead runs one long-lived `hive serve` that owns the vault, with each session connecting through a thin `hive client` shim — useful for concurrent sessions, single-owner guarantees ([ADR-011](docs/adr/adr-011-phase-c-daemon-model.md)), and automatic version adoption. It always degrades to an in-process server if the daemon is down, so it never breaks a session.
+
+```bash
+uv tool install --upgrade hive-vault   # >= 1.32.0
+hive service install                   # supervise hive serve (systemd --user / Task Scheduler)
+```
+
+Once supervised, the daemon self-updates: it polls its installed version and, on an upgrade, exits `75` so the supervisor restarts it into the new code — so a periodic `uv tool upgrade hive-vault` keeps every client current with no added startup latency. See the [daemon mode guide](https://mlorentedev.github.io/hive/guides/daemon-mode/) and the [activation runbook](docs/runbooks/daemon-activation.md).
+
 ## Tools
 
 | Tool | What it does |

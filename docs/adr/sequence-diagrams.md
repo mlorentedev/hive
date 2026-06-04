@@ -163,3 +163,35 @@ sequenceDiagram
         V-->>C: "Updated project/section (replace)."
     end
 ```
+
+## 6. Restart-on-Upgrade Flow (Daemon Mode)
+
+How a supervised `hive serve` adopts a newer published version without a manual
+restart — the exit-75 / `Restart=on-failure` contract behind daemon auto-update
+(ADR-011). See the [daemon mode guide](../../site/src/content/docs/guides/daemon-mode.md).
+
+```mermaid
+sequenceDiagram
+    participant Op as Operator / timer
+    participant Disk as Installed package
+    participant Sup as Supervisor (systemd --user / Task Scheduler)
+    participant D as hive serve (daemon)
+    participant Cl as hive client (session)
+
+    Op->>Disk: uv tool upgrade hive-vault
+    Note over D: booted at version v_boot
+    loop every HIVE_UPGRADE_POLL_S
+        D->>Disk: importlib.metadata.version("hive-vault")
+        Disk-->>D: v_current
+        alt v_current == v_boot (or version not-found, swap window)
+            Note over D: keep serving — no restart
+        else version drift detected
+            D->>D: should_exit = True (cooperative stop)
+            D-->>Sup: exit 75 (EX_TEMPFAIL)
+            Note over Cl: daemon briefly down — hive client<br/>degrades to in-process server (never breaks)
+            Sup->>D: Restart=on-failure relaunch
+            Note over D: re-booted at version v_current
+        end
+    end
+    Note over Sup,D: graceful signal stop / declined install exits 0 — NO restart
+```
