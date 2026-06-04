@@ -304,7 +304,14 @@ class TestMaxLinesSweep:
             snr = _signal_ratio(text) * 100
             print(f"{project:<25s}  {tokens:>8d}  {lines:>7d}  {snr:>12.1f}%")
 
-        assert True  # informational
+            # Regression guard: session_briefing's whole purpose is a compact
+            # context pack (~50 lines, not ~800). Observed baselines are
+            # 66-93 lines / 1034-1435 tokens; these generous ~2x caps catch a
+            # real blow-up without flaking on content variance, and the
+            # non-empty guard catches a regression that returns nothing.
+            assert text.strip(), f"{project}: session_briefing returned empty"
+            assert lines < 200, f"{project}: briefing ballooned to {lines} lines"
+            assert tokens < 3000, f"{project}: briefing ballooned to {tokens} tokens"
 
 
 # ── 3. Signal-to-noise by tool ────────────────────────────────────

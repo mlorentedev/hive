@@ -16,6 +16,7 @@ import sys
 import time
 from typing import TYPE_CHECKING
 
+import httpx
 import pytest
 
 if TYPE_CHECKING:
@@ -329,7 +330,10 @@ def test_hive_serve_rejects_bad_token(daemon_env: tuple[dict[str, str], Path]) -
     proc = _spawn_daemon(env, port)
     try:
         assert _wait_ready(port)
-        with pytest.raises(Exception):  # noqa: B017, PT011 — any auth refusal
+        # A bad bearer token is refused at the transport with HTTP 401 — not a
+        # generic failure. Asserting the status distinguishes auth refusal from
+        # an unrelated server error (which would surface a different code).
+        with pytest.raises(httpx.HTTPStatusError, match="401"):
             asyncio.run(_list_tools(f"http://{HOST}:{port}/mcp", "not-the-token"))
     finally:
         proc.terminate()

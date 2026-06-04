@@ -57,7 +57,7 @@ class TestInMemoryCancellation:
         task = asyncio.create_task(vault_mcp.call_tool("vault_list", {}))
         await asyncio.sleep(0)
         task.cancel()
-        with pytest.raises(BaseException):  # noqa: B017,PT011
+        with pytest.raises(asyncio.CancelledError):
             await task
 
         result = await vault_mcp.call_tool("vault_list", {})
@@ -68,7 +68,7 @@ class TestInMemoryCancellation:
             task = asyncio.create_task(vault_mcp.call_tool("vault_list", {}))
             await asyncio.sleep(0)
             task.cancel()
-            with pytest.raises(BaseException):  # noqa: B017,PT011
+            with pytest.raises(asyncio.CancelledError):
                 await task
 
         result = await vault_mcp.call_tool("vault_list", {})

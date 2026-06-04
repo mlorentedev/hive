@@ -49,7 +49,6 @@ jobs:
 
   cross_worker_lock:
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
