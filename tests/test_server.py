@@ -6,7 +6,7 @@ import asyncio
 import json
 import sys
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -4287,6 +4287,123 @@ class TestSetupFileLogging:
         for h in file_handlers:
             logger.removeHandler(h)
             h.close()
+
+
+# ── CLI dispatch (hive --version / --help / unknown token) ─────────
+
+
+class TestCliDispatch:
+    """`main()` runs the stdio MCP server ONLY on a bare invocation (the v1
+    per-session contract). Any explicit token routes to a subcommand or a usage
+    error — `hive --version` must print a version, never boot the daemon.
+    """
+
+    def test_version_flag_prints_and_exits_zero(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from hive.server import _dispatch
+
+        assert _dispatch(["--version"]) == 0
+        assert "hive-vault" in capsys.readouterr().out
+
+    def test_version_short_flag(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from hive.server import _dispatch
+
+        assert _dispatch(["-V"]) == 0
+        assert "hive-vault" in capsys.readouterr().out
+
+    def test_help_flag_prints_usage_and_exits_zero(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from hive.server import _dispatch
+
+        assert _dispatch(["--help"]) == 0
+        assert "usage" in capsys.readouterr().out.lower()
+
+    def test_help_short_flag(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from hive.server import _dispatch
+
+        assert _dispatch(["-h"]) == 0
+        assert "usage" in capsys.readouterr().out.lower()
+
+    def test_unknown_command_exits_two_on_stderr(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from hive.server import _dispatch
+
+        assert _dispatch(["frobnicate"]) == 2
+        assert "unknown command" in capsys.readouterr().err.lower()
+
+    def test_stray_flag_exits_two_not_server_launch(self) -> None:
+        from hive.server import _dispatch
+
+        # The original footgun: a stray flag used to fall through to the
+        # stdio-server `else` branch instead of erroring.
+        assert _dispatch(["--bogus"]) == 2
+
+    def test_serve_routes_to_run_serve(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from hive import server
+
+        seen: dict[str, list[str]] = {}
+        monkeypatch.setattr(
+            server,
+            "_run_serve",
+            lambda argv: (seen.update(argv=argv), 0)[1],
+        )
+        assert server._dispatch(["serve", "--port", "9"]) == 0
+        assert seen["argv"] == ["--port", "9"]
+
+    def test_bare_invocation_runs_stdio_server(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from hive import server
+
+        monkeypatch.setattr(server, "_setup_file_logging", lambda: None)
+        run = Mock()
+        monkeypatch.setattr(server, "create_server", lambda: Mock(run=run))
+        monkeypatch.setattr(sys, "argv", ["hive"])
+
+        server.main()  # bare path returns normally, no SystemExit
+
+        run.assert_called_once_with()
+
+    def test_version_via_main_exits_zero_without_launching_server(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from hive import server
+
+        monkeypatch.setattr(server, "_setup_file_logging", lambda: None)
+        never = Mock()
+        monkeypatch.setattr(server, "create_server", never)
+        monkeypatch.setattr(sys, "argv", ["hive", "--version"])
+
+        with pytest.raises(SystemExit) as exc:
+            server.main()
+
+        assert exc.value.code == 0
+        never.assert_not_called()
+
+    def test_unknown_token_via_main_exits_two_without_launching_server(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from hive import server
+
+        monkeypatch.setattr(server, "_setup_file_logging", lambda: None)
+        never = Mock()
+        monkeypatch.setattr(server, "create_server", never)
+        monkeypatch.setattr(sys, "argv", ["hive", "--bogus"])
+
+        with pytest.raises(SystemExit) as exc:
+            server.main()
+
+        assert exc.value.code == 2
+        never.assert_not_called()
 
 
 # ── Timeout tests (issue #63) ──────────────────────────────────────
