@@ -83,4 +83,10 @@ jobs:
 
       - name: Smoke test
         run: |
-          docker run --rm hive-vault:ci python -c "from hive.server import create_server; print('OK')"
+          # Import check: the image ENTRYPOINT is `hive-vault`, so override it to
+          # run python directly. (A bare `... python -c ...` would pass `python`
+          # as an argument to the hive CLI, not run the interpreter.)
+          docker run --rm --entrypoint python hive-vault:ci -c "from hive.server import create_server; print('OK')"
+          # CLI check: the entrypoint prints a version and exits 0 — never boots
+          # the blocking stdio server on a flag.
+          docker run --rm hive-vault:ci --version

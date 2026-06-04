@@ -629,6 +629,61 @@ def _run_service(argv: list[str]) -> int:
     return service_status()
 
 
+_USAGE = """\
+usage: hive [COMMAND]
+
+Commands:
+  (no args)                            run the stdio MCP server (v1 per-session contract)
+  serve                                run the single-owner daemon (ADR-011)
+  client                               run the thin stdio shim that proxies to the daemon
+  service {install,uninstall,status}   manage the daemon as a per-user OS service
+
+Options:
+  -V, --version                        print the installed hive-vault version and exit
+  -h, --help                           show this message and exit
+"""
+
+
+def _package_version() -> str:
+    """Installed ``hive-vault`` version, or a sentinel when run from a source
+    checkout without dist-info. SSOT: package metadata — the same source the
+    daemon's restart-on-upgrade drift check reads (see ``_daemon``).
+    """
+    import importlib.metadata as metadata
+
+    try:
+        return metadata.version("hive-vault")
+    except metadata.PackageNotFoundError:
+        return "0.0.0+unknown"
+
+
+def _dispatch(argv: list[str]) -> int:
+    """Route a *non-empty* ``hive`` argv to a subcommand; return the exit code.
+
+    Bare ``hive`` (empty argv) never reaches here — ``main`` runs the stdio MCP
+    server directly, the load-bearing v1 per-session contract. An unrecognised
+    token is a usage error (exit 2), NOT a silent server launch: ``hive
+    --version`` must print a version, never boot the daemon.
+    """
+    cmd = argv[0]
+    if cmd in ("-V", "--version"):
+        print(f"hive-vault {_package_version()}")
+        return 0
+    if cmd in ("-h", "--help"):
+        print(_USAGE, end="")
+        return 0
+    if cmd == "serve":
+        return _run_serve(argv[1:])
+    if cmd == "service":
+        return _run_service(argv[1:])
+    if cmd == "client":
+        _run_client(argv[1:])
+        return 0
+    print(f"hive: unknown command: {cmd}", file=sys.stderr)
+    print(_USAGE, file=sys.stderr, end="")
+    return 2
+
+
 def main() -> None:
     """Entry point for the hive CLI command.
 
@@ -637,21 +692,18 @@ def main() -> None:
     bearer token (ADR-011). ``hive client`` runs the thin stdio shim that
     proxies to that daemon (falling back to the in-process server when none is
     reachable). ``hive service {install,uninstall,status}`` manages the daemon
-    as a per-user OS service. ``create_server()`` is called here rather than at
-    module import so importing ``hive.server`` is side-effect free.
+    as a per-user OS service. ``hive --version`` / ``--help`` print and exit;
+    an unknown token is a usage error (exit 2). ``create_server()`` is called
+    here rather than at module import so importing ``hive.server`` is
+    side-effect free.
     """
     _setup_file_logging()
     _log = logging.getLogger("hive")
     argv = sys.argv[1:]
     try:
-        if argv and argv[0] == "serve":
-            raise SystemExit(_run_serve(argv[1:]))
-        if argv and argv[0] == "service":
-            raise SystemExit(_run_service(argv[1:]))
-        if argv and argv[0] == "client":
-            _run_client(argv[1:])
-        else:
-            create_server().run()
+        if argv:
+            raise SystemExit(_dispatch(argv))
+        create_server().run()
     except SystemExit:
         # Clean exit-code propagation (e.g. restart-on-upgrade = 75). Not a
         # crash, so it must not be logged at CRITICAL nor swallowed.
