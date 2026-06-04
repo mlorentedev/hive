@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.32.3](https://github.com/mlorentedev/hive/compare/v1.32.2...v1.32.3) (2026-06-04)
+
+
+### Documentation
+
+* document daemon mode, auto-update, and HIVE_UPGRADE_POLL_S ([#199](https://github.com/mlorentedev/hive/issues/199)) ([f089316](https://github.com/mlorentedev/hive/commit/f08931641342a4da4924940885b3c0419b05ed6d))
+
 ## [1.32.2](https://github.com/mlorentedev/hive/compare/v1.32.1...v1.32.2) (2026-06-03)
 
 
