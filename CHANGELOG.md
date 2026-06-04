@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.32.4](https://github.com/mlorentedev/hive/compare/v1.32.3...v1.32.4) (2026-06-04)
+
+
+### Bug Fixes
+
+* print version/help instead of launching the stdio server on unknown args ([#203](https://github.com/mlorentedev/hive/issues/203)) ([c5d97f4](https://github.com/mlorentedev/hive/commit/c5d97f4a79b5cd52fb4562ac7891fd38ee3c031f))
+
 ## [1.32.3](https://github.com/mlorentedev/hive/compare/v1.32.2...v1.32.3) (2026-06-04)
 
 
