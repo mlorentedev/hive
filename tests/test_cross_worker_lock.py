@@ -5,7 +5,8 @@ Promoted from Red-phase placeholder (PR-1) to green (PR-2) once
 wired into the supervisor.
 
 POSIX-first; Windows variant promoted to CI matrix lane in HIVE-116 PR-3
-(``cross_worker_lock`` job on ``windows-latest``, allowed-to-fail for 14d).
+(``cross_worker_lock`` job on ``windows-latest``). The lane is gating after a
+14-day soak (2026-05-27 → 2026-06-10) that stayed green on both OSes.
 """
 
 from __future__ import annotations
