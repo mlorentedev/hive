@@ -71,6 +71,16 @@ def _resolve_exec() -> str:
     return f"{sys.executable} -m hive.server"
 
 
+def _current_windows_user() -> str:
+    """The S4U principal account (``DOMAIN\\user`` or bare user), read from the
+    environment at install time — the daemon runs as the installing user. S4U
+    needs an explicit account; an empty result omits ``<UserId>`` and lets
+    schtasks default to the current user."""
+    domain = os.environ.get("USERDOMAIN", "")
+    user = os.environ.get("USERNAME", "")
+    return f"{domain}\\{user}" if domain and user else user
+
+
 # ── pure renderers (host-OS independent) ─────────────────────────────────
 
 
@@ -100,41 +110,77 @@ def render_systemd_unit(exec_start: str, *, vault: str) -> str:
     )
 
 
-def render_windows_task_xml(command: str, arguments: str = "serve") -> str:
-    """A Task Scheduler definition: a LogonTrigger auto-starts the daemon and
-    RestartOnFailure restarts it whenever the last run exits non-zero (exit 75
-    / crash) — the Windows mapping of ``Restart=on-failure``. A daemon runs
-    indefinitely, hence ``ExecutionTimeLimit=PT0S`` (no limit)."""
-    return (
-        '<?xml version="1.0" encoding="UTF-16"?>\n'
-        '<Task version="1.2" '
-        'xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n'
-        "  <RegistrationInfo>\n"
-        "    <Description>Hive vault daemon (single-owner MCP over loopback)"
-        "</Description>\n"
-        "  </RegistrationInfo>\n"
-        "  <Triggers>\n"
-        "    <LogonTrigger>\n"
-        "      <Enabled>true</Enabled>\n"
-        "    </LogonTrigger>\n"
-        "  </Triggers>\n"
-        "  <Settings>\n"
-        "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n"
-        "    <StartWhenAvailable>true</StartWhenAvailable>\n"
-        "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n"
-        "    <RestartOnFailure>\n"
-        "      <Interval>PT1M</Interval>\n"
-        "      <Count>3</Count>\n"
-        "    </RestartOnFailure>\n"
-        "    <Enabled>true</Enabled>\n"
-        "  </Settings>\n"
-        "  <Actions>\n"
-        "    <Exec>\n"
-        f"      <Command>{escape(command)}</Command>\n"
-        f"      <Arguments>{escape(arguments)}</Arguments>\n"
-        "    </Exec>\n"
-        "  </Actions>\n"
-        "</Task>\n"
+_WINDOWS_TASK_TEMPLATE = (
+    '<?xml version="1.0" encoding="UTF-16"?>\n'
+    '<Task version="1.2" '
+    'xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n'
+    "  <RegistrationInfo>\n"
+    "    <Description>Hive vault daemon (single-owner MCP over loopback)"
+    "</Description>\n"
+    "  </RegistrationInfo>\n"
+    "  <Triggers>\n"
+    "    <LogonTrigger>\n"
+    "      <Enabled>true</Enabled>\n"
+    "    </LogonTrigger>\n"
+    "  </Triggers>\n"
+    "  <Principals>\n"
+    '    <Principal id="Author">\n'
+    "{principal_user}"
+    "      <LogonType>S4U</LogonType>\n"
+    "      <RunLevel>LeastPrivilege</RunLevel>\n"
+    "    </Principal>\n"
+    "  </Principals>\n"
+    "  <Settings>\n"
+    "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n"
+    "    <StartWhenAvailable>true</StartWhenAvailable>\n"
+    "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n"
+    "    <RestartOnFailure>\n"
+    "      <Interval>PT1M</Interval>\n"
+    "      <Count>3</Count>\n"
+    "    </RestartOnFailure>\n"
+    "    <Enabled>true</Enabled>\n"
+    "  </Settings>\n"
+    '  <Actions Context="Author">\n'
+    "    <Exec>\n"
+    "      <Command>powershell.exe</Command>\n"
+    "      <Arguments>{arguments}</Arguments>\n"
+    "    </Exec>\n"
+    "  </Actions>\n"
+    "</Task>\n"
+)
+
+
+def render_windows_task_xml(
+    command: str,
+    arguments: str = "serve",
+    *,
+    user: str = "",
+) -> str:
+    """A Task Scheduler definition for the Phase C daemon on Windows (ADR-015).
+
+    Two Windows mechanisms replace ADR-011's POSIX assumptions, both validated
+    on real hardware (2026-06-04):
+
+    * **Supervisor loop (restart).** ``<RestartOnFailure>`` does NOT restart on
+      an application's non-zero exit — it reacts to the engine failing to launch
+      — so it cannot map ``systemd Restart=on-failure``. The action is instead an
+      inline PowerShell loop that relaunches ``<command> serve`` while it exits
+      non-zero and stops on a clean exit 0 (drift → 75 → relaunch onto new code;
+      clean stop / singleton-decline → 0 → no relaunch). ``<RestartOnFailure>``
+      is kept only as a secondary net for an engine-launch failure.
+    * **S4U principal (windowless).** ``<LogonType>S4U</LogonType>`` runs the task
+      in session 0 — no console window — at logon, no stored password, no admin
+      (the per-user analogue of ``systemd --user``).
+    """
+    loop = (
+        f"while($true){{ & '{command}' {arguments}; "
+        f"if($LASTEXITCODE -eq 0){{break}} Start-Sleep -Seconds 1 }}"
+    )
+    ps_arguments = f'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "{loop}"'
+    principal_user = f"      <UserId>{escape(user)}</UserId>\n" if user else ""
+    return _WINDOWS_TASK_TEMPLATE.format(
+        principal_user=principal_user,
+        arguments=escape(ps_arguments),
     )
 
 
@@ -215,7 +261,7 @@ def _install_systemd(*, enable: bool) -> int:
 
 
 def _install_windows(*, enable: bool) -> int:
-    xml = render_windows_task_xml(_resolve_exec())
+    xml = render_windows_task_xml(_resolve_exec(), user=_current_windows_user())
     if not enable:
         path = _config_root() / "hive" / f"{WINDOWS_TASK_NAME}.xml"
         path.parent.mkdir(parents=True, exist_ok=True)
