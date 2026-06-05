@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.33.0](https://github.com/mlorentedev/hive/compare/v1.32.4...v1.33.0) (2026-06-05)
+
+
+### Features
+
+* **service:** Windows daemon supervision — windowless S4U + supervisor-loop restart ([#207](https://github.com/mlorentedev/hive/issues/207)) ([34f9a03](https://github.com/mlorentedev/hive/commit/34f9a032165da88525d7a285fb4752ff5abd73d8))
+
 ## [1.32.4](https://github.com/mlorentedev/hive/compare/v1.32.3...v1.32.4) (2026-06-04)
 
 
