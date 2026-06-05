@@ -38,20 +38,30 @@ def test_render_systemd_unit_encodes_the_exit75_restart_contract() -> None:
     assert "EnvironmentFile=-" in unit
 
 
-def test_render_windows_task_xml_has_logon_trigger_and_restart_on_failure() -> None:
-    """The Windows Scheduled Task is the per-user analogue of `systemd --user`:
-    a LogonTrigger auto-starts it at login and RestartOnFailure restarts it when
-    the last run exits non-zero (exit 75 / crash) — the same contract as
-    `Restart=on-failure`, with a non-zero exit mapping to a failed run."""
+def test_render_windows_task_xml_uses_s4u_principal_and_supervisor_loop() -> None:
+    """ADR-015: Task Scheduler's `<RestartOnFailure>` does NOT restart on an
+    application's exit 75 (it reacts to the engine failing to launch), so it
+    cannot map `systemd Restart=on-failure`. The action is instead an inline
+    PowerShell supervisor loop that relaunches `hive serve` on a non-zero exit
+    and stops on a clean exit 0. An S4U principal runs it in session 0 — no
+    console window — non-elevated. Both validated on real Windows hardware
+    (2026-06-04)."""
     from hive._service import render_windows_task_xml
 
-    xml = render_windows_task_xml(r"C:\Users\u\hive.exe")
+    xml = render_windows_task_xml(r"C:\Users\u\hive.exe", user="WINBOX\\u")
 
+    # Windowless, non-elevated: a session-0 S4U principal.
+    assert "<LogonType>S4U</LogonType>" in xml
+    assert "<UserId>WINBOX\\u</UserId>" in xml
+    assert '<Actions Context="Author">' in xml
+    # Restart mechanism = supervisor loop (the `<RestartOnFailure>` is kept only
+    # as a secondary net for an engine-launch failure).
+    assert "<Command>powershell.exe</Command>" in xml
+    assert "while($true)" in xml
+    assert r"'C:\Users\u\hive.exe' serve" in xml
+    assert "if($LASTEXITCODE -eq 0){break}" in xml  # clean exit 0 → stop, no relaunch
+    # LogonTrigger auto-starts at login; a daemon runs indefinitely.
     assert "<LogonTrigger>" in xml
-    assert "<RestartOnFailure>" in xml
-    assert "<Command>C:\\Users\\u\\hive.exe</Command>" in xml
-    assert "<Arguments>serve</Arguments>" in xml
-    # A daemon runs indefinitely: no execution time limit.
     assert "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>" in xml
 
 
@@ -119,7 +129,8 @@ def test_install_windows_registers_scheduled_task(
 
     assert rc == 0
     assert "<LogonTrigger>" in str(recorded["xml"])
-    assert "<RestartOnFailure>" in str(recorded["xml"])
+    assert "<LogonType>S4U</LogonType>" in str(recorded["xml"])
+    assert "while($true)" in str(recorded["xml"])
 
 
 def test_install_macos_is_a_clear_stub(monkeypatch: pytest.MonkeyPatch) -> None:
