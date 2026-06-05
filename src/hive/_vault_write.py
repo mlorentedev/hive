@@ -157,15 +157,20 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
         Modes:
         - append/replace: Update a project section. Requires section.
-        - create: Create a new file with auto-generated frontmatter. Requires path and doc_type.
+        - create: Create a new file with auto-generated frontmatter. Requires
+          path; doc_type defaults to "note". Inferred automatically when you
+          pass a path with no section, so operation may be omitted.
 
         Args:
             project: Project slug or '_meta' for cross-project content.
             content: Markdown content to write (body only for create mode).
             operation: 'append', 'replace', or 'create'. Default 'append'.
+                'create' is inferred when path is set and section is empty.
             section: Section shortcut (context, tasks, roadmap, lessons). For append/replace.
-            path: Relative path for new file. For create mode.
-            doc_type: Document type for frontmatter. For create mode.
+            path: Relative path for the file. Setting this with no section
+                creates the file (create mode).
+            doc_type: Document type for frontmatter (create mode). Optional;
+                defaults to "note".
             commit: If True (default), auto-commit to git. If False, write to
                 disk but leave the file dirty so the caller can batch many
                 writes into one commit via the ``vault_commit`` tool, or let
@@ -181,6 +186,12 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         guard = _vault_guard(ctx)
         if guard:
             return track(ctx, "vault_write", guard, project)
+
+        # #202 Bug 2: a default-op write that supplies a path but no section is
+        # unambiguously a file create, not a section append — infer it so
+        # vault_write(project, path=..., content=...) "just works".
+        if operation == "append" and not section and path:
+            operation = "create"
 
         if operation not in _WRITE_OPERATIONS:
             return track(
@@ -209,13 +220,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     "Path is required for create operation.",
                     project,
                 )
-            if not doc_type:
-                return track(
-                    ctx,
-                    "vault_write",
-                    "doc_type is required for create operation.",
-                    project,
-                )
+            doc_type = doc_type or "note"  # #202 Bug 2: doc_type optional, default note
 
             filepath = project_dir / path
             boundary_error = _check_path_boundary(filepath, ctx.vault)
@@ -296,7 +301,9 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             return track(
                 ctx,
                 "vault_write",
-                "Section is required for append/replace operations.",
+                "Section is required for append/replace operations. To create a "
+                "new file instead, pass a path (operation='create' is inferred "
+                "from a path with no section).",
                 project,
             )
 

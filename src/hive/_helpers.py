@@ -254,14 +254,19 @@ def find_lesson_heading(content: str, line_no: int) -> str | None:
 
 _VAULT_NOT_FOUND_MSG = (
     "Vault not found at {path}.\n\n"
-    "Set the vault path when registering the MCP server:\n\n"
+    "Set the vault path via the HIVE_VAULT_PATH env var (alias: VAULT_PATH) "
+    "on the MCP server.\n\n"
+    "  Config-file clients (Hermes, Cursor, Windsurf, …) — add to the "
+    "server's env block:\n"
+    "    env:\n"
+    "      HIVE_VAULT_PATH: /path/to/your-vault\n\n"
     "  Claude Code:\n"
     "    claude mcp add -s user hive "
-    "-e VAULT_PATH=$HOME/your-vault "
+    "-e HIVE_VAULT_PATH=$HOME/your-vault "
     "-- uvx --upgrade hive-vault\n\n"
     "  Gemini CLI:\n"
     "    gemini mcp add -s user "
-    "-e VAULT_PATH=$HOME/your-vault "
+    "-e HIVE_VAULT_PATH=$HOME/your-vault "
     "hive-vault uvx -- --upgrade hive-vault\n\n"
     "See https://mlorentedev.github.io/hive/configuration/"
 )

@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.35.1](https://github.com/mlorentedev/hive/compare/v1.35.0...v1.35.1) (2026-06-05)
+
+
+### Bug Fixes
+
+* **vault:** surface HIVE_VAULT_PATH + env-block in vault-not-found error ([#202](https://github.com/mlorentedev/hive/issues/202) Bug 1) ([#215](https://github.com/mlorentedev/hive/issues/215)) ([22d1bfa](https://github.com/mlorentedev/hive/commit/22d1bfa31c7dd9364730f2c9b54ecadf144be51c))
+
+## [1.35.0](https://github.com/mlorentedev/hive/compare/v1.34.0...v1.35.0) (2026-06-05)
+
+
+### Features
+
+* **vault:** infer create mode in vault_write + optional doc_type ([#202](https://github.com/mlorentedev/hive/issues/202) Bug 2) ([#213](https://github.com/mlorentedev/hive/issues/213)) ([5f8f704](https://github.com/mlorentedev/hive/commit/5f8f704e5dd067fdba8e1fbe1b43dbeee79522eb))
+
+## [1.34.0](https://github.com/mlorentedev/hive/compare/v1.33.0...v1.34.0) (2026-06-05)
+
+
+### Features
+
+* **search:** accept vault_search `limit` as alias of max_results ([#202](https://github.com/mlorentedev/hive/issues/202) Bug 3) ([#209](https://github.com/mlorentedev/hive/issues/209)) ([4d50ff4](https://github.com/mlorentedev/hive/commit/4d50ff4634f66e051423934d084c66c7f4777d43))
+
 ## [1.33.0](https://github.com/mlorentedev/hive/compare/v1.32.4...v1.33.0) (2026-06-05)
 
 
