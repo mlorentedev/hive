@@ -614,3 +614,108 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 "Working tree clean — nothing to commit.",
             )
         return track(ctx, "vault_commit", f"Commit failed: {detail}")
+
+    @mcp.tool(annotations=_WRITE)
+    @wrap_sync_tool(ctx, "vault_delete")
+    def vault_delete(
+        project: str,
+        path: str,
+        commit: bool = True,
+        idempotency_key: str = "",
+    ) -> str:
+        """Delete a single file from the vault (destructive; recoverable via git).
+
+        Removes one file and, by default, commits the deletion so it stays
+        recoverable from git history (``git revert`` / ``git show``). Files
+        only — directories are rejected. A non-existent path is an error,
+        unless ``idempotency_key`` is set (then a retry against an already-gone
+        file is a no-op success).
+
+        Args:
+            project: Project slug or '_meta' for cross-project content.
+            path: Relative path to the file within the project.
+            commit: If True (default), stage + commit the deletion. If False,
+                unlink on disk but leave the removal staged for a later
+                ``vault_commit`` (or obsidian-git). Same durability contract as
+                ``vault_write``.
+            idempotency_key: Optional at-most-once token. If set, a retry with
+                the same key is a no-op after the first delete (ADR-013), which
+                also makes deleting an already-removed file succeed. Empty
+                (default) disables idempotency.
+        """
+        guard = _vault_guard(ctx)
+        if guard:
+            return track(ctx, "vault_delete", guard, project)
+
+        resolved = _resolve_project_dir(ctx.vault, project, ctx.scopes)
+        if resolved is None:
+            return track(ctx, "vault_delete", project_not_found(project), project)
+        project_dir, _ = resolved
+
+        filepath = project_dir / path
+        boundary_error = _check_path_boundary(filepath, ctx.vault)
+        if boundary_error:
+            return track(ctx, "vault_delete", boundary_error, project)
+
+        should_defer = False
+        try:
+            with vault_write_lock(ctx.vault):
+                if idempotency_key and ctx.idempotency.is_applied(idempotency_key):
+                    return track(ctx, "vault_delete", _IDEMPOTENT_NOOP, project)
+
+                if not filepath.exists():
+                    if idempotency_key:
+                        ctx.idempotency.claim(idempotency_key)
+                        return track(
+                            ctx,
+                            "vault_delete",
+                            f"Already deleted: {project}/{path}.",
+                            project,
+                            path,
+                        )
+                    return track(
+                        ctx,
+                        "vault_delete",
+                        f"File '{path}' not found in project '{project}'.",
+                        project,
+                    )
+
+                if filepath.is_dir():
+                    return track(
+                        ctx,
+                        "vault_delete",
+                        f"'{path}' is a directory; vault_delete removes single files only.",
+                        project,
+                    )
+
+                try:
+                    filepath.unlink()
+                except OSError as exc:
+                    return track(
+                        ctx,
+                        "vault_delete",
+                        format_io_error(exc, path, "delete"),
+                        project,
+                    )
+                mark_disk_write_done()
+                if idempotency_key:
+                    ctx.idempotency.claim(idempotency_key)
+
+                rel = filepath.relative_to(ctx.vault)
+                should_defer = commit and _should_defer_to_external_committer(ctx.vault)
+                if commit and not should_defer:
+                    _git_commit(ctx.vault, [rel], f"vault: delete {project}/{path}")
+        except WriteLockTimeout as exc:
+            return track(
+                ctx,
+                "vault_delete",
+                f"Server busy — {exc.reason}. Retry shortly.",
+                project,
+            )
+
+        suffix = _commit_status_suffix(
+            commit,
+            should_defer,
+            deadline_killed=_was_deadline_killed(),
+        )
+        return track(ctx, "vault_delete", f"Deleted {project}/{path}.{suffix}", project, path)

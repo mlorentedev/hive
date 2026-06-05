@@ -212,6 +212,9 @@ def create_server(
             "batch of deferred writes with `vault_commit(message=...)`. "
             "When obsidian-git is configured on the vault, `commit=False` "
             "is safe — `vault_health` surfaces the detected interval.\n"
+            "- **Deleting a file:** Use `vault_delete(project, path)` to remove "
+            "a single file (git-recoverable). Destructive — only on explicit "
+            "user request.\n"
             "- **Offloading work:** Use `delegate_task` for summarization, "
             "boilerplate generation, or analysis. Use "
             "`delegate_task(project=...)` to summarize vault files. Best for "
@@ -414,7 +417,7 @@ Vault Sync Plan:
 - Context/tasks: `vault_write(operation="replace", commit=False, ...)` for factual updates
 - Lessons: `vault_write(operation="append", commit=False, ...)` for new entries only
 - After all updates, flush with a single `vault_commit(message="vault-sync: <project> <date>")`
-- Never delete vault content without explicit user request
+- Never delete vault content (e.g. `vault_delete`) without explicit user request
 
 ### Step 6 — Verify
 - `vault_query` the updated sections to confirm changes applied correctly

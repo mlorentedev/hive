@@ -1,6 +1,6 @@
 ---
 title: Vault Tools
-description: 7 tools for querying, searching, and managing your Obsidian vault.
+description: Tools for querying, searching, and managing your Obsidian vault.
 ---
 
 ## vault_list
@@ -222,6 +222,21 @@ vault_commit(message="vault: end-of-session checkpoint")
 ```
 
 Stages everything dirty in the vault (`git add -A`) and creates a single commit. Returns the new SHA, a clean-tree notice if nothing is dirty, or a human-readable error. Best paired with the obsidian-git plugin (see [Configuration → Recommended configuration](/configuration/#recommended-configuration)).
+
+## vault_delete
+
+Delete a single file from the vault. **Destructive — only on explicit user request.** Recoverable from git history.
+
+```python
+vault_delete(
+    project="my-project",
+    path="30-architecture/adr-005.md",
+    commit=True,            # default: stage + commit the deletion
+    idempotency_key=""      # optional at-most-once token
+)
+```
+
+Removes one file and commits the deletion, so it stays recoverable via `git revert` / `git show`. **Files only** — directories are rejected. A non-existent path is an error, unless `idempotency_key` is set, in which case a retry against an already-removed file is a no-op success. Pass `commit=False` to defer the commit (same durability contract as `vault_write`).
 
 ## capture_lesson
 

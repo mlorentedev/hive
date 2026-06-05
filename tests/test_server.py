@@ -1497,6 +1497,95 @@ class TestVaultWriteCreate:
         assert "created" not in text
 
 
+class TestVaultDelete:
+    # #202 Bug 4: destructive single-file delete, git-recoverable, no confirm.
+    async def test_delete_removes_file_and_commits(self, git_vault: Path) -> None:
+        import subprocess
+
+        mcp = create_server(vault_path=git_vault)
+        target = git_vault / "10_projects" / "testproject" / "00-context.md"
+        assert target.exists()
+        result = await mcp.call_tool(
+            "vault_delete",
+            {"project": "testproject", "path": "00-context.md"},
+        )
+        assert "deleted" in _text(result).lower()
+        assert not target.exists()
+        log = subprocess.run(
+            ["git", "log", "--oneline", "-1"],
+            cwd=git_vault,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert "delete" in log.stdout.lower()
+
+    async def test_delete_nonexistent_returns_error(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_delete",
+            {"project": "testproject", "path": "does-not-exist.md"},
+        )
+        assert "not found" in _text(result).lower()
+
+    async def test_delete_directory_rejected(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_delete",
+            {"project": "testproject", "path": "30-architecture"},
+        )
+        text = _text(result).lower()
+        assert "directory" in text
+        assert (git_vault / "10_projects" / "testproject" / "30-architecture").is_dir()
+
+    async def test_delete_path_escape_blocked(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_delete",
+            {"project": "testproject", "path": "../../../../escape.md"},
+        )
+        assert "deleted" not in _text(result).lower()
+
+    async def test_delete_missing_project(self, git_vault: Path) -> None:
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_delete",
+            {"project": "nonexistent", "path": "x.md"},
+        )
+        assert "not found" in _text(result).lower()
+
+    async def test_delete_idempotent_with_key(self, git_vault: Path) -> None:
+        import uuid
+
+        # Unique key per run: the idempotency store is not test-isolated (#212),
+        # so a fixed key would collide across runs and make the first call a no-op.
+        key = uuid.uuid4().hex
+        mcp = create_server(vault_path=git_vault)
+        first = await mcp.call_tool(
+            "vault_delete",
+            {"project": "testproject", "path": "92-large-doc.md", "idempotency_key": key},
+        )
+        assert "deleted" in _text(first).lower()
+        second = await mcp.call_tool(
+            "vault_delete",
+            {"project": "testproject", "path": "92-large-doc.md", "idempotency_key": key},
+        )
+        assert "idempotent" in _text(second).lower()
+
+    async def test_delete_already_gone_with_key_succeeds(self, git_vault: Path) -> None:
+        import uuid
+
+        key = uuid.uuid4().hex
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_delete",
+            {"project": "testproject", "path": "never-existed.md", "idempotency_key": key},
+        )
+        text = _text(result).lower()
+        assert "already deleted" in text
+        assert "not found" not in text
+
+
 # ── delegate_task: vault summarize mode ──────────────────────────────
 
 
