@@ -1,0 +1,51 @@
+[
+  {
+    "id": "HIVE-202-mcp-contract-gaps-f1",
+    "behavior": "vault_search(query=Q, limit=5) raises no validation error (no unexpected_keyword_argument)",
+    "verification": "uv run pytest tests/test_tool_param_aliases.py -k limit_no_validation_error -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-202-mcp-contract-gaps-f2",
+    "behavior": "flat mode: vault_search(query=Q, limit=N) caps result-file blocks to N when more than N match",
+    "verification": "uv run pytest tests/test_tool_param_aliases.py -k limit_caps_flat -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-202-mcp-contract-gaps-f3",
+    "behavior": "ranked mode: vault_search(ranked=True, limit=N) is byte-identical to max_results=N",
+    "verification": "uv run pytest tests/test_tool_param_aliases.py -k limit_aliases_max_results_ranked -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-202-mcp-contract-gaps-f4",
+    "behavior": "recent mode: vault_search(since_days=D, limit=N) caps to N files when more than N changed",
+    "verification": "uv run pytest tests/test_tool_param_aliases.py -k limit_caps_recent -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-202-mcp-contract-gaps-f5",
+    "behavior": "when both limit and max_results are supplied, the agreed precedence rule holds deterministically",
+    "verification": "uv run pytest tests/test_tool_param_aliases.py -k limit_max_results_precedence -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-202-mcp-contract-gaps-f6",
+    "behavior": "no registered tool's JSON Schema contains anyOf (the load-bearing | None ban holds)",
+    "verification": "uv run pytest tests/test_tool_param_aliases.py -k anyof -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-202-mcp-contract-gaps-f7",
+    "behavior": "vault_search docstring names canonical max_results/max_lines and calls out limit as the accepted alias",
+    "verification": "uv run pytest tests/test_tool_param_aliases.py -k wrong_names -q",
+    "state": "pending",
+    "evidence": ""
+  }
+]

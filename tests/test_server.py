@@ -1986,9 +1986,11 @@ class TestVaultSearchRecent:
             check=True,
         )
         mcp = create_server(vault_path=git_vault)
+        # max_results=200 opts out of the #202 default file cap (10) so this
+        # still exercises the independent max_lines line-truncation guard.
         result = await mcp.call_tool(
             "vault_search",
-            {"since_days": 1, "max_lines": 100},
+            {"since_days": 1, "max_lines": 100, "max_results": 200},
         )
         assert "truncated" in _text(result).lower()
 
