@@ -145,7 +145,7 @@ class TestDocstringsCallOutWrongNames:
     WRONG_NAMES = {
         "vault_list": ["subpath"],
         "vault_query": ["identifier"],
-        "vault_search": ["regex"],
+        "vault_search": ["regex", "limit"],
         "vault_patch": ["old_string", "new_string"],
         "vault_commit": ["project"],
         "session_briefing": ["days"],
@@ -165,3 +165,111 @@ class TestDocstringsCallOutWrongNames:
                 if token not in doc:
                     missing.append(f"{tool}:{token}")
         assert missing == [], f"docstrings missing wrong-name call-outs: {missing}"
+
+
+# ── HIVE-202: vault_search `limit` alias of max_results (#202) ────────────
+#
+# Bug 3 of the Hermes beta test: `vault_search(limit=N)` raised
+# `unexpected_keyword_argument`. `limit` becomes an int alias of the canonical
+# `max_results`, AND `max_results` is extended from ranked-only to also cap the
+# result-file count in flat + recent modes. Precedence when both are supplied:
+# tightest cap wins — `min(limit, max_results) if limit else max_results`
+# (a `limit` of 0 means "unset"). Flat/recent keep their alphabetical path
+# order; `limit` only slices (relevance ordering stays `ranked=True`'s job).
+# Spec: specs/HIVE-202-mcp-contract-gaps/proposal.md.
+
+
+def _count_blocks(text: str) -> int:
+    """Count result-file blocks (``### header`` lines) in a search response."""
+    return sum(1 for ln in text.splitlines() if ln.startswith("### "))
+
+
+def _count_recent(text: str) -> int:
+    """Count file rows (``- path`` lines) in a recent-mode response."""
+    return sum(1 for ln in text.splitlines() if ln.startswith("- "))
+
+
+class TestVaultSearchLimit:
+    async def test_limit_no_validation_error(self, mock_vault: Path) -> None:
+        # 'limit' must be accepted, not rejected at the FastMCP boundary (AC1).
+        mcp = create_server(vault_path=mock_vault)
+        out = _text(await mcp.call_tool("vault_search", {"query": "test", "limit": 5}))
+        assert "unexpected_keyword_argument" not in out.lower()
+        assert "Search:" in out or "Ranked" in out  # a real result, not an error
+
+    async def test_limit_caps_flat(self, mock_vault: Path) -> None:
+        # 'test' matches ≥3 files in the fixture; limit must bound flat results (AC2).
+        mcp = create_server(vault_path=mock_vault)
+        uncapped = _text(await mcp.call_tool("vault_search", {"query": "test"}))
+        capped = _text(await mcp.call_tool("vault_search", {"query": "test", "limit": 2}))
+        assert _count_blocks(uncapped) > 2
+        assert _count_blocks(capped) == 2
+
+    async def test_limit_aliases_max_results_ranked(self, mock_vault: Path) -> None:
+        # In ranked mode, limit=N is byte-identical to max_results=N (AC3).
+        mcp = create_server(vault_path=mock_vault)
+        canonical = _text(
+            await mcp.call_tool(
+                "vault_search",
+                {"query": "test", "ranked": True, "max_results": 3},
+            )
+        )
+        alias = _text(
+            await mcp.call_tool(
+                "vault_search",
+                {"query": "test", "ranked": True, "limit": 3},
+            )
+        )
+        assert alias == canonical
+
+    async def test_limit_caps_recent(self, git_vault: Path) -> None:
+        # Recent mode lists every changed file; limit must bound it (AC4).
+        mcp = create_server(vault_path=git_vault)
+        uncapped = _text(await mcp.call_tool("vault_search", {"since_days": 3650}))
+        capped = _text(await mcp.call_tool("vault_search", {"since_days": 3650, "limit": 2}))
+        assert _count_recent(uncapped) > 2
+        assert _count_recent(capped) == 2
+
+    async def test_limit_max_results_precedence_tightest_cap(self, mock_vault: Path) -> None:
+        # Both supplied -> the smaller cap wins (AC5).
+        mcp = create_server(vault_path=mock_vault)
+        limit_tighter = _text(
+            await mcp.call_tool(
+                "vault_search",
+                {"query": "test", "ranked": True, "limit": 2, "max_results": 4},
+            )
+        )
+        max_tighter = _text(
+            await mcp.call_tool(
+                "vault_search",
+                {"query": "test", "ranked": True, "limit": 4, "max_results": 2},
+            )
+        )
+        both_loose = _text(
+            await mcp.call_tool(
+                "vault_search",
+                {"query": "test", "ranked": True, "max_results": 10},
+            )
+        )
+        assert _count_blocks(limit_tighter) == 2  # limit < max_results -> limit wins
+        assert _count_blocks(max_tighter) == 2  # max_results < limit -> max_results wins
+        assert _count_blocks(both_loose) > 2  # control: caps above genuinely bit
+
+    async def test_limit_and_max_lines_compose(self, mock_vault: Path) -> None:
+        # limit caps FILES; max_lines caps LINES — independent, composable guards.
+        mcp = create_server(vault_path=mock_vault)
+        full = _text(
+            await mcp.call_tool(
+                "vault_search",
+                {"query": "test", "limit": 3, "max_lines": 0},
+            )
+        )
+        assert _count_blocks(full) == 3
+        truncated = _text(
+            await mcp.call_tool(
+                "vault_search",
+                {"query": "test", "limit": 3, "max_lines": 4},
+            )
+        )
+        assert "truncated" in truncated
+        assert len(truncated.splitlines()) < len(full.splitlines())

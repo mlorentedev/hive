@@ -329,6 +329,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         scope: str = "",
         rank_by: str = "bm25",
         regex: bool = False,
+        limit: int = 0,
     ) -> str:
         """Search the vault: full-text, ranked, or recent changes.
 
@@ -346,7 +347,9 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             use_regex: Treat query as regex. Default False. (Use `use_regex`,
                 not `regex` — `regex` is accepted as an alias.)
             ranked: Score results by relevance. Default False.
-            max_results: Max files when ranked. Default 10.
+            max_results: Max result files. Default 10. Caps the file count in
+                all modes (flat, ranked, recent); in flat/recent the cap is by
+                path order (alphabetical) — use ranked=True for relevance order.
             since_days: Show recent changes (0 = disabled). Default 0.
             project: Filter to this project (recent mode only).
             scope: Restrict search to a scope (e.g. 'work', 'projects'). Empty = all.
@@ -356,8 +359,15 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             regex: Alias of `use_regex` (#151). Prefer `use_regex`. To narrow
                 by location use `scope` / `project`, not `path_filter` /
                 `path_prefix`.
+            limit: Alias of `max_results` (#202). Prefer `max_results`. When
+                both are given the tighter (smaller) cap wins; 0 = unset.
         """
         use_regex = use_regex or regex  # #151: accept `regex` as alias of `use_regex`
+        # #202: `limit` is an int alias of `max_results`; tightest cap wins when
+        # both are set (a 0 on either side means "unset"). After this line
+        # `max_results` is the single effective file cap for all three modes.
+        if limit:
+            max_results = min(limit, max_results) if max_results else limit
         guard = _vault_guard(ctx)
         if guard:
             return track(ctx, "vault_search", guard)
@@ -444,7 +454,10 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
                 f"# Recent Changes (last {since_days} days)",
                 "",
             ]
-            for rel_path in sorted(git_paths):
+            ordered_paths = sorted(git_paths)
+            if max_results > 0:  # #202: limit/max_results caps recent mode too
+                ordered_paths = ordered_paths[:max_results]
+            for rel_path in ordered_paths:
                 full = ctx.vault / rel_path
                 if not full.exists():
                     rlines.append(f"- {rel_path} (deleted)")
@@ -565,10 +578,15 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
                 )
 
         flat_results: list[str] = []
+        files_added = 0
         query_lower = query.lower()
         has_filters = bool(type_filter or status_filter or tag_filter)
 
         for md_file in sorted(search_root.rglob("*.md")):
+            # #202: cap result files (alphabetical-first-N) in flat mode too,
+            # mirroring ranked. max_results <= 0 means "no file cap".
+            if max_results > 0 and files_added >= max_results:
+                break
             content = _safe_read(md_file)
             if content is None:
                 continue
@@ -601,6 +619,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
                 flat_results.append(f"### {file_rel}{meta}")
                 for line in matching_lines[:5]:
                     flat_results.append(f"  - {line}")
+                files_added += 1
 
         if not flat_results:
             return track(
