@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.34.0](https://github.com/mlorentedev/hive/compare/v1.33.0...v1.34.0) (2026-06-05)
+
+
+### Features
+
+* **search:** accept vault_search `limit` as alias of max_results ([#202](https://github.com/mlorentedev/hive/issues/202) Bug 3) ([#209](https://github.com/mlorentedev/hive/issues/209)) ([4d50ff4](https://github.com/mlorentedev/hive/commit/4d50ff4634f66e051423934d084c66c7f4777d43))
+
 ## [1.33.0](https://github.com/mlorentedev/hive/compare/v1.32.4...v1.33.0) (2026-06-05)
 
 
