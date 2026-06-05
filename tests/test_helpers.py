@@ -153,6 +153,16 @@ class TestVaultGuard:
         ctx.vault = fake
         assert "Vault not found" in _vault_guard(ctx)
 
+    def test_error_names_canonical_env_var_and_env_block(self, tmp_path: Path) -> None:
+        # #202 Bug 1: the message must name the canonical HIVE_VAULT_PATH and
+        # show the generic env-block pattern used by config-file MCP clients
+        # (Hermes, Cursor, Windsurf), not just the CLI `add` commands.
+        ctx = MagicMock()
+        ctx.vault = tmp_path / "nonexistent"
+        result = _vault_guard(ctx)
+        assert "HIVE_VAULT_PATH" in result
+        assert "env:" in result
+
 
 class TestToolSpan:
     """Tests for tool_span async context manager."""
