@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.35.1](https://github.com/mlorentedev/hive/compare/v1.35.0...v1.35.1) (2026-06-05)
+
+
+### Bug Fixes
+
+* **vault:** surface HIVE_VAULT_PATH + env-block in vault-not-found error ([#202](https://github.com/mlorentedev/hive/issues/202) Bug 1) ([#215](https://github.com/mlorentedev/hive/issues/215)) ([22d1bfa](https://github.com/mlorentedev/hive/commit/22d1bfa31c7dd9364730f2c9b54ecadf144be51c))
+
 ## [1.35.0](https://github.com/mlorentedev/hive/compare/v1.34.0...v1.35.0) (2026-06-05)
 
 
