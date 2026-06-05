@@ -42,7 +42,7 @@ Cuando una llamada a una herramienta se cancela a mitad de ejecución (worker le
 
 | Variable | Valor por defecto | Descripción |
 |---|---|---|
-| `VAULT_PATH` | `~/Projects/knowledge` | Ruta a tu vault de Obsidian. También aceptado como `HIVE_VAULT_PATH`. |
+| `HIVE_VAULT_PATH` | `~/Projects/knowledge` | Ruta a tu vault de Obsidian (nombre canónico; también se acepta el `VAULT_PATH` sin prefijo). Para clientes MCP basados en fichero de configuración (Hermes, Cursor, Windsurf, …), defínelo en el bloque `env` del servidor en lugar de con un flag de CLI. |
 | `HIVE_OLLAMA_ENDPOINT` | `http://localhost:11434` | Endpoint de la API de Ollama |
 | `HIVE_OLLAMA_MODEL` | `qwen2.5-coder:7b` | Modelo de Ollama por defecto |
 | `HIVE_OPENROUTER_API_KEY` | — | API key de OpenRouter |
