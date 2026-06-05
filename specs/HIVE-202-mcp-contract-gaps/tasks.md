@@ -49,3 +49,24 @@ created: "2026-06-05"
 Sibling `features.json` follows [[pattern-feature-list-as-primitive]]. Each acceptance criterion maps to ≥1 feature with `id`, `behavior`, `verification` (executable command), `state`, `evidence`.
 
 **Pass-state gating:** the agent CANNOT write `"state": "passing"` — only the harness, after running `verification` and capturing exit code 0, may set that terminal state.
+
+---
+
+## PR2 — Bug 2: vault_write create-mode ergonomics
+
+> Decision (2026-06-05): **infer create + optional doc_type** (vs. error-only). Touches public-contract behaviour → own atomic PR off `master`.
+
+- [x] Branch `feat/HIVE-202-vault-write-create-ergonomics` off `master`
+- [x] TDD red: `vault_write(project, path, content)` infers create (type note); doc_type optional; explicit create still works; append/replace unaffected; actionable error when neither section nor path
+- [x] Implement inference (`operation=='append' and not section and path -> create`) + `doc_type or "note"` + actionable Section error (`src/hive/_vault_write.py`)
+- [x] Update docstring (create inferred from path; doc_type optional)
+- [x] Repurpose `test_create_missing_doc_type_rejected` -> `test_create_without_doc_type_defaults_to_note`
+- [x] `make check`: ruff clean; mypy --strict clean; `TestVaultWrite`+`TestVaultWriteCreate` 23 passed; full suite 685 passed / 4 pre-existing (tracked in #212) / 0 new failures
+
+### PR2 acceptance criteria
+
+- [x] AC-B1 — `vault_write(project, path, content)` with no operation/section creates the file with frontmatter `type: note`.
+- [x] AC-B2 — `operation='create'` without `doc_type` succeeds (defaults to `note`).
+- [x] AC-B3 — inference does NOT fire when a section is present (append still appends).
+- [x] AC-B4 — neither section nor path → error names both `section` (append/replace) and `path`/`create`.
+- [x] AC-B5 — inferred create still respects the existing-file guard.

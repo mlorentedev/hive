@@ -1353,13 +1353,16 @@ class TestVaultWriteCreate:
         )
         assert "path" in _text(result).lower()
 
-    async def test_create_missing_doc_type_rejected(self, git_vault: Path) -> None:
+    async def test_create_without_doc_type_defaults_to_note(self, git_vault: Path) -> None:
+        # #202 Bug 2: doc_type is now optional and defaults to "note".
         mcp = create_server(vault_path=git_vault)
         result = await mcp.call_tool(
             "vault_write",
             {"project": "testproject", "path": "new.md", "content": "x", "operation": "create"},
         )
-        assert "doc_type" in _text(result).lower()
+        assert "created" in _text(result).lower()
+        content = (git_vault / "10_projects" / "testproject" / "new.md").read_text()
+        assert "type: note" in content
 
     async def test_rejects_existing_file(self, git_vault: Path) -> None:
         mcp = create_server(vault_path=git_vault)
@@ -1448,6 +1451,50 @@ class TestVaultWriteCreate:
             },
         )
         assert "not found" in _text(result).lower()
+
+    async def test_infers_create_from_path_without_operation(self, git_vault: Path) -> None:
+        # #202 Bug 2: vault_write(project, path, content) — default op, no
+        # section — is unambiguously a create and "just works" (type note).
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_write",
+            {"project": "testproject", "path": "notes/idea.md", "content": "# Idea\n"},
+        )
+        assert "created" in _text(result).lower()
+        filepath = git_vault / "10_projects" / "testproject" / "notes" / "idea.md"
+        assert filepath.exists()
+        assert "type: note" in filepath.read_text()
+
+    async def test_inferred_create_respects_existing_file(self, git_vault: Path) -> None:
+        # Inference still routes through create's existing-file guard.
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_write",
+            {"project": "testproject", "path": "00-context.md", "content": "# Nope\n"},
+        )
+        assert "exists" in _text(result).lower()
+
+    async def test_no_section_no_path_gives_actionable_error(self, git_vault: Path) -> None:
+        # With neither section nor path, the error must point to BOTH ways out.
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_write",
+            {"project": "testproject", "content": "orphan content"},
+        )
+        text = _text(result).lower()
+        assert "section" in text  # still names the append/replace requirement
+        assert "path" in text or "create" in text  # now also points to create
+
+    async def test_append_with_section_not_inferred_as_create(self, git_vault: Path) -> None:
+        # Boundary: inference must NOT fire when a section is present.
+        mcp = create_server(vault_path=git_vault)
+        result = await mcp.call_tool(
+            "vault_write",
+            {"project": "testproject", "section": "tasks", "content": "\n- [ ] New task\n"},
+        )
+        text = _text(result).lower()
+        assert "updated" in text
+        assert "created" not in text
 
 
 # ── delegate_task: vault summarize mode ──────────────────────────────
