@@ -36,6 +36,7 @@ from hive._idempotency import IdempotencyStore  # noqa: E402
 from hive._lesson_reinforcement import LessonReinforcementTracker  # noqa: E402
 from hive._lock_eviction import LockEvictionTracker  # noqa: E402
 from hive._metrics import METRICS  # noqa: E402
+from hive._vault_ask import register_vault_ask  # noqa: E402
 from hive._vault_health import (  # noqa: E402
     _hive_version,
     health_report_text,
@@ -107,6 +108,9 @@ def create_server(
     lock_eviction_tracker: LockEvictionTracker | None = None,
     idempotency_store: IdempotencyStore | None = None,
     auth: AuthProvider | None = None,
+    embed_base_url: str | None = None,
+    embed_model: str | None = None,
+    embed_api_key: str | None = None,
 ) -> FastMCP:
     """Create and configure the Hive MCP server.
 
@@ -173,6 +177,13 @@ def create_server(
         openrouter_budget=settings.openrouter_budget,
         openrouter_paid_model=settings.openrouter_paid_model,
         tool_timeout=settings.tool_timeout,
+        embed_base_url=(
+            embed_base_url if embed_base_url is not None else settings.embed_base_url
+        ),
+        embed_model=embed_model if embed_model is not None else settings.embed_model,
+        embed_api_key=(
+            embed_api_key if embed_api_key is not None else settings.embed_api_key
+        ),
         started_at_iso=datetime.now(UTC).isoformat(timespec="seconds"),
         started_at_monotonic=time.monotonic(),
     )
@@ -495,6 +506,7 @@ Total estimated savings: ~C tokens
     register_vault_write(mcp, ctx)
     register_vault_health(mcp, ctx)
     register_workers(mcp, ctx)
+    register_vault_ask(mcp, ctx)
 
     # ── /status — cross-session observability (ADR-011 §4) ───────────────
     # Live metrics from memory (no DB on the hot path). Token-gated with the

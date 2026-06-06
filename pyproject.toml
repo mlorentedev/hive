@@ -49,6 +49,12 @@ dev = [
     "types-PyYAML>=6.0",
     "types-psutil>=5.9.0",
 ]
+# HIVE-211: optional semantic retrieval (vault_ask). Heavy/native deps stay
+# behind this extra so a base ``pip install hive-vault`` pulls nothing extra
+# and never fails to import when the extra is absent.
+semantic = [
+    "numpy>=1.26",
+]
 
 [project.scripts]
 hive = "hive.server:main"
@@ -79,6 +85,13 @@ python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+
+# numpy ships with the optional [semantic] extra (HIVE-211); it is absent from
+# base + dev installs, so its import in _vault_ask is probed behind try/except.
+# Tell mypy the missing module is expected rather than a type error.
+[[tool.mypy.overrides]]
+module = ["numpy"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

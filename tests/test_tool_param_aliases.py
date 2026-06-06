@@ -150,6 +150,7 @@ class TestDocstringsCallOutWrongNames:
         "vault_commit": ["project"],
         "session_briefing": ["days"],
         "capture_lesson": ["commit"],
+        "vault_ask": ["query"],
     }
 
     async def test_descriptions_mention_common_wrong_names(self, mock_vault: Path) -> None:

@@ -39,6 +39,13 @@ class HiveSettings(BaseSettings):
     openrouter_budget: float = 1.0
     openrouter_model: str = "qwen/qwen3-coder:free"
     openrouter_paid_model: str = "qwen/qwen3-coder"
+    # HIVE-211: optional semantic backend for vault_ask. Empty base_url =
+    # disabled (the default) — no index, no embed-on-write, zero overhead.
+    # OpenAI-compatible; default config points at NaN, Ollama is the local
+    # alternative (HIVE_EMBED_BASE_URL=http://localhost:11434/v1).
+    embed_base_url: str = ""
+    embed_model: str = ""
+    embed_api_key: str = ""
     db_path: str = str(Path.home() / ".local" / "share" / "hive" / "worker.db")
     relevance_db_path: str = str(
         Path.home() / ".local" / "share" / "hive" / "relevance.db",
