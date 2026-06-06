@@ -90,7 +90,26 @@ builder `_build_synthesis_prompt` (anti-hallucination: cite-only-shown-sources),
 ### Test status (PR4)
 
 - Targeted: `uv run pytest tests/test_vault_ask.py -q` -> **12 passed** (7 old + 5 new). ruff + mypy clean.
-- Full suite: pending CI.
+- Full suite: **4 failed, 735 passed, 19 skipped, 62 deselected**. Same 4 pre-existing dev-box failures. CI green.
+
+## PR5 — incremental re-embed hook + provider-swap test (AC3, AC4)
+
+PR5 delivers `VaultIndex.update_file()` (incremental re-embed) and wires it into `vault_write`/`vault_patch`
+via a fire-and-forget async hook. A `_RUNNING_LOOP_CV` contextvar in `_helpers.py` bridges the sync write tools
+(running in `asyncio.to_thread`) to `asyncio.run_coroutine_threadsafe`. 4 new tests.
+
+- [x] `VaultIndex.update_file()` re-embeds changed file in-place -> `TestVaultIndexUpdateFile::test_update_file_adds_new_chunks`
+- [x] Deleted file's chunks removed -> `TestVaultIndexUpdateFile::test_update_file_removes_deleted_file`
+- [x] No-op when index not built (AC4 zero overhead) -> `TestVaultIndexUpdateFile::test_update_file_noop_when_index_not_built`
+- [x] AC3 provider-swap: `_build_embed_client` receives configured `base_url` -> `TestVaultAskProviderSwap::test_configured_base_url_flows_to_embed_client`
+- [x] Stage-2 instrumentation: `_log.info` after retrieval (chunks/sources/scores logged)
+- [x] `schedule_async_hook` in `_helpers.py`: thread-safe hook dispatch via `run_coroutine_threadsafe`
+- [x] `vault_write` / `vault_patch` fire hook after every successful disk write (3 call sites)
+
+### Test status (PR5)
+
+- Targeted: `uv run pytest tests/test_semantic.py::TestVaultIndexUpdateFile tests/test_vault_ask.py::TestVaultAskProviderSwap -q` -> **4 passed**. ruff + mypy clean.
+- Full suite: pending CI. PR #232 open.
 
 ## Decisions made during implementation
 
