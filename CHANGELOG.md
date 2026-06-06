@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.1](https://github.com/mlorentedev/hive/compare/v1.38.0...v1.38.1) (2026-06-06)
+
+
+### Documentation
+
+* **lessons:** capture Windows daemon supervision + uv-upgrade footguns ([#224](https://github.com/mlorentedev/hive/issues/224)) ([aa9ee99](https://github.com/mlorentedev/hive/commit/aa9ee99fb57ea4c1e80b1977b346265b2a9df739))
+
 ## [1.38.0](https://github.com/mlorentedev/hive/compare/v1.37.0...v1.38.0) (2026-06-06)
 
 
