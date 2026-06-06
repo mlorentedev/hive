@@ -1,14 +1,15 @@
-"""Tests for vault_ask — optional semantic Q&A (HIVE-211, disabled by default).
+"""Tests for vault_ask — optional semantic Q&A (HIVE-211).
 
-PR2 scope: the tool is registered and behaves gracefully when no semantic
-backend is configured (or the optional ``[semantic]`` extra is absent). The
-retrieval/synthesis pipeline lands in later changes.
+PR2 scope: graceful disabled-by-default behavior.
+PR3 scope: retrieval pipeline (chunker + embed + numpy vector store).
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 
+from hive.clients import EmbedResponse
 from hive.server import create_server
 
 if TYPE_CHECKING:
@@ -32,6 +33,24 @@ def _has_anyof(node: object) -> bool:
     return False
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+def _make_embed_mock(dim: int = 4) -> MagicMock:
+    """Mock OpenAICompatibleClient that returns unit vectors for any input."""
+
+    async def _embed(texts: list[str], model: str = "") -> EmbedResponse:
+        vecs = [[1.0] + [0.0] * (dim - 1)] * len(texts)
+        return EmbedResponse(vectors=vecs, model=model or "mock", tokens=5, latency_ms=1)
+
+    client = MagicMock()
+    client.embed = _embed
+    return client
+
+
+# ── PR2: disabled-by-default (AC2, AC5) ──────────────────────────────────────
+
+
 class TestVaultAskDisabledByDefault:
     """AC2: with no embed backend, vault_ask is disabled but graceful."""
 
@@ -51,10 +70,16 @@ class TestVaultAskDisabledByDefault:
         # A representative sample of existing tools must still be present:
         assert {"vault_search", "vault_query", "vault_write", "vault_health"} <= names
 
-    async def test_disabled_when_backend_set_but_extra_missing(self, mock_vault: Path) -> None:
+    async def test_disabled_when_backend_set_but_extra_missing(
+        self, mock_vault: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Backend configured but the [semantic] extra (numpy) absent -> disabled
-        with an install hint, still graceful (AC2). numpy is not in the base/dev
-        env, so this exercises the real extra-absent branch (no mocking)."""
+        with an install hint, still graceful (AC2). The 'absent' branch is exercised
+        by monkeypatching _semantic_extra_available to False (numpy is in dev extras
+        so it is genuinely installed; mocking ensures the branch is always tested)."""
+        import hive._vault_ask as va
+
+        monkeypatch.setattr(va, "_semantic_extra_available", lambda: False)
         mcp = create_server(
             vault_path=mock_vault,
             embed_base_url="https://api.nan.builders/v1",
@@ -65,26 +90,74 @@ class TestVaultAskDisabledByDefault:
         assert "[semantic]" in answer
 
 
-class TestVaultAskBackendReady:
-    """Enabled path: backend configured + [semantic] extra present. PR2 returns
-    a pending-index placeholder until the retrieval pipeline ships."""
+# ── PR3: retrieval pipeline (AC1 partial — raw chunks, no synthesis yet) ─────
 
-    async def test_backend_ready_returns_pending_index(
-        self, mock_vault: Path, monkeypatch: pytest.MonkeyPatch
+
+class TestVaultAskRetrieval:
+    """Backend + [semantic] extra present — vault_ask returns retrieved chunks."""
+
+    async def test_retrieval_returns_chunks_from_vault(
+        self,
+        mock_vault: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
-        import hive._vault_ask as va
-
-        # numpy is genuinely absent in the base env, so simulate the extra
-        # being installed to exercise the enabled branch.
-        monkeypatch.setattr(va, "_semantic_extra_available", lambda: True)
+        """vault_ask with a configured backend returns relevant vault sections."""
+        monkeypatch.setattr(
+            "hive._vault_ask._build_embed_client",
+            lambda base_url, api_key, model: _make_embed_mock(),
+        )
+        monkeypatch.setattr(
+            "hive._vault_ask._index_dir_for",
+            lambda: tmp_path / "idx",
+        )
         mcp = create_server(
             vault_path=mock_vault,
             embed_base_url="https://api.nan.builders/v1",
             embed_model="qwen3-embedding",
         )
-        answer = _text(await mcp.call_tool("vault_ask", {"question": "what did I decide?"}))
-        assert "configured" in answer.lower()
-        assert "vault_search" in answer
+        answer = _text(await mcp.call_tool("vault_ask", {"question": "what is the test project?"}))
+        # Returns vault content — not the disabled/pending message
+        assert "disabled" not in answer.lower()
+        assert "vault_search" not in answer or "vault_ask" in answer  # not just a redirect
+
+    async def test_empty_question_rejected_gracefully(
+        self, mock_vault: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mcp = create_server(
+            vault_path=mock_vault,
+            embed_base_url="https://api.nan.builders/v1",
+            embed_model="qwen3-embedding",
+        )
+        answer = _text(await mcp.call_tool("vault_ask", {"question": ""}))
+        assert "question" in answer.lower() or "empty" in answer.lower()
+
+    async def test_retrieval_output_cites_sources(
+        self,
+        mock_vault: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """Output format must cite vault source paths."""
+        monkeypatch.setattr(
+            "hive._vault_ask._build_embed_client",
+            lambda base_url, api_key, model: _make_embed_mock(),
+        )
+        monkeypatch.setattr(
+            "hive._vault_ask._index_dir_for",
+            lambda: tmp_path / "idx",
+        )
+        mcp = create_server(
+            vault_path=mock_vault,
+            embed_base_url="https://api.nan.builders/v1",
+            embed_model="qwen3-embedding",
+        )
+        answer = _text(await mcp.call_tool("vault_ask", {"question": "TDD pattern"}))
+        # At minimum the answer should cite a .md file from the vault
+        assert ".md" in answer
+
+
+# ── PR2: schema (AC5) ────────────────────────────────────────────────────────
 
 
 class TestVaultAskSchema:

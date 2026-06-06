@@ -536,6 +536,7 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "numpy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -554,6 +555,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "mcp", specifier = ">=1.27,<2.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
+    { name = "numpy", marker = "extra == 'dev'", specifier = ">=1.26" },
     { name = "numpy", marker = "extra == 'semantic'", specifier = ">=1.26" },
     { name = "psutil", specifier = ">=5.9.0" },
     { name = "pydantic-settings", specifier = ">=2.0" },
