@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.36.0](https://github.com/mlorentedev/hive/compare/v1.35.1...v1.36.0) (2026-06-05)
+
+
+### Features
+
+* **vault:** add vault_delete — destructive single-file delete ([#202](https://github.com/mlorentedev/hive/issues/202) Bug 4) ([#217](https://github.com/mlorentedev/hive/issues/217)) ([7713752](https://github.com/mlorentedev/hive/commit/7713752f2f9f92cf2151c29e0aef3a7d717a36da))
+
 ## [1.35.1](https://github.com/mlorentedev/hive/compare/v1.35.0...v1.35.1) (2026-06-05)
 
 
