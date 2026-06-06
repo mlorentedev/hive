@@ -1,7 +1,7 @@
 ---
 id: "HIVE-202-mcp-contract-gaps"
 type: spec
-status: draft # draft | implementing | verifying | archived
+status: archived # draft | implementing | verifying | archived
 created: "2026-06-05"
 tags: [spec, proposal]
 template_version: "1.0"
@@ -9,7 +9,20 @@ template_version: "1.0"
 
 # HIVE-202: MCP contract gaps
 
-> **Naming**: file lives at `<repo>/specs/HIVE-202-mcp-contract-gaps/proposal.md`.
+> **Naming**: file lives at `<repo>/specs/archive/HIVE-202-mcp-contract-gaps/proposal.md`.
+
+## Outcome (archived 2026-06-05)
+
+All four findings shipped — one atomic PR each, all merged; issue [#202](https://github.com/mlorentedev/hive/issues/202) CLOSED:
+
+| Bug | Change | PR | Release |
+|---|---|---|---|
+| 3 | `vault_search` `limit` alias of `max_results` (+ cap flat/recent) | [#209](https://github.com/mlorentedev/hive/pull/209) | v1.34.0 |
+| 2 | `vault_write` infers create + optional `doc_type` | [#213](https://github.com/mlorentedev/hive/pull/213) | v1.35.0 |
+| 1 | `HIVE_VAULT_PATH` discoverability (error UX + docs EN/ES) | [#215](https://github.com/mlorentedev/hive/pull/215) | v1.35.1 |
+| 4 | `vault_delete` (dedicated tool, git-recoverable, no-confirm) | [#217](https://github.com/mlorentedev/hive/pull/217) | 1.36.0 (pending #218) |
+
+Follow-ups spun out: semantic `vault_ask` ([#211](https://github.com/mlorentedev/hive/issues/211)), test-isolation/Windows-env debt ([#212](https://github.com/mlorentedev/hive/issues/212)), dotfiles windowless upgrade task ([dotfiles#230](https://github.com/mlorentedev/dotfiles/issues/230)).
 
 ## Why
 
