@@ -39,6 +39,8 @@ class ServerContext:
     embed_base_url: str = ""
     embed_model: str = ""
     embed_api_key: str = ""
+    # HIVE-211 PR4: synthesis chat model (empty = retrieval-only, no LLM call).
+    synth_model: str = ""
     started_at_iso: str = ""
     started_at_monotonic: float = 0.0
 

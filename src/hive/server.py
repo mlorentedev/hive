@@ -111,6 +111,7 @@ def create_server(
     embed_base_url: str | None = None,
     embed_model: str | None = None,
     embed_api_key: str | None = None,
+    synth_model: str | None = None,
 ) -> FastMCP:
     """Create and configure the Hive MCP server.
 
@@ -180,6 +181,7 @@ def create_server(
         embed_base_url=(embed_base_url if embed_base_url is not None else settings.embed_base_url),
         embed_model=embed_model if embed_model is not None else settings.embed_model,
         embed_api_key=(embed_api_key if embed_api_key is not None else settings.embed_api_key),
+        synth_model=synth_model if synth_model is not None else settings.synth_model,
         started_at_iso=datetime.now(UTC).isoformat(timespec="seconds"),
         started_at_monotonic=time.monotonic(),
     )
