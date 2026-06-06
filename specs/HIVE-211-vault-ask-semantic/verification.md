@@ -26,10 +26,10 @@ adds **no** MCP tool yet, so the feature ACs (AC1–AC6, all about `vault_ask`) 
 ### Feature ACs (deferred — not satisfied by PR1)
 
 - [ ] AC1 (answer with cited sources) -> PR4 (retrieval -> synthesis)
-- [ ] AC2 (disabled-default never breaks) -> PR2 (vault_ask skeleton)
-- [ ] AC3 (Ollama <-> NaN by config) -> PR2/PR5
+- [x] AC2 (disabled-default never breaks) -> **PR2** `TestVaultAskDisabledByDefault`
+- [ ] AC3 (Ollama <-> NaN by config) -> PR5 (needs the index/retrieval path)
 - [ ] AC4 (lazy/incremental index; zero overhead when disabled) -> PR5
-- [ ] AC5 (no anyOf in schema) -> PR2 (when the tool is registered)
+- [x] AC5 (no anyOf in schema) -> **PR2** `test_vault_ask_schema_has_no_anyof` + repo-wide `TestSchemaClean`
 - [ ] AC6 (cites real, existing files) -> PR4
 
 ## Test status (PR1)
@@ -37,6 +37,24 @@ adds **no** MCP tool yet, so the feature ACs (AC1–AC6, all about `vault_ask`) 
 - Targeted: `uv run pytest tests/test_clients.py -q` -> **34 passed** (15 original + 19 new).
 - ruff `src/ tests/`: clean. `mypy --strict src/hive/clients.py`: clean.
 - Full suite (`uv run pytest -q`): **4 failed, 707 passed, 19 skipped, 62 deselected** (11m11s). All 4 failures are the documented pre-existing dev-box failures (#212): `test_bounded_call::test_windows_subprocess_terminated_reaches_descendants`, `test_daemon::test_client_degrades_in_process_when_daemon_dies_mid_session`, `test_lock_eviction::TestLockEvictionTracker::test_multiple_records_ordered`, `TestVaultHealthRuntime::test_runtime_block_includes_lock_eviction` — **none touch `clients.py`**. The visible `count_30d: 15 == 0` confirms #212's root cause (fixtures read real `~/.local/share/hive` state). **Zero new regressions.** CI (Linux + Windows) is green.
+
+## PR2 — vault_ask tool (disabled-by-default skeleton)
+
+PR2 registers the `vault_ask` MCP tool and the graceful-degradation gate. No
+index/retrieval yet; the heavy deps stay behind the new `[semantic]` extra.
+
+- [x] `vault_ask` registered; disabled by default (no `HIVE_EMBED_BASE_URL`) returns a clear how-to-enable message, never raises -> `test_disabled_default_is_graceful`
+- [x] Other tools + import unaffected by registration -> `test_tool_registered_and_others_intact`
+- [x] Backend set but `[semantic]` extra absent -> disabled + install hint (numpy genuinely absent in base env, real branch) -> `test_disabled_when_backend_set_but_extra_missing`
+- [x] Enabled branch (backend + extra) returns pending-index placeholder -> `test_backend_ready_returns_pending_index`
+- [x] AC5 schema has no `anyOf` (`question: str = ""`) -> `test_vault_ask_schema_has_no_anyof`
+- [x] `[semantic]` optional extra declared (`numpy>=1.26`); base install pulls nothing new, no import at module load
+
+### Test status (PR2)
+
+- Targeted: `uv run pytest tests/test_vault_ask.py -q` -> **5 passed**. `tests/test_tool_param_aliases.py` (repo-wide schema/docstring) -> green.
+- ruff `src/ tests/`: clean. `mypy --strict src/`: only the 5 pre-existing `_deadline.py` POSIX-on-Windows errors (Linux CI clean); numpy resolved via a `[[tool.mypy.overrides]]` ignore_missing_imports.
+- Full suite (`uv run pytest -q`): **4 failed, 712 passed, 19 skipped, 62 deselected** (10m47s). The 4 failures are identical to PR1's — the documented #212 pre-existing dev-box failures (`test_bounded_call`, `test_daemon`, `test_lock_eviction`, `TestVaultHealthRuntime`); none touch the new code. Pass count rose 707 -> 712 (the 5 new `test_vault_ask.py` tests). **Zero new regressions.** CI (Linux + Windows) is green.
 
 ## Decisions made during implementation
 

@@ -35,6 +35,10 @@ class ServerContext:
     openrouter_budget: float
     openrouter_paid_model: str
     tool_timeout: float
+    # HIVE-211: optional semantic backend for vault_ask (empty = disabled).
+    embed_base_url: str = ""
+    embed_model: str = ""
+    embed_api_key: str = ""
     started_at_iso: str = ""
     started_at_monotonic: float = 0.0
 
