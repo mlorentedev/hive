@@ -226,6 +226,85 @@ class VaultIndex:
             loaded = self._load()
             self._data = loaded if loaded is not None else await self._build()
 
+    async def update_file(self, filepath: Path) -> None:
+        """Incrementally re-embed a single file; no-op if the index is not built (AC4).
+
+        Removes stale chunks for the given file, then re-embeds the current
+        content (if the file still exists). Persists the updated index to disk.
+        Safe to call via asyncio.create_task() — the lock prevents concurrent
+        index corruption.
+        """
+        async with self._lock:
+            if self._data is None:
+                return  # index not built — zero overhead guaranteed
+
+            source = filepath.relative_to(self._vault).as_posix()
+
+            # Identify rows to keep (exclude the file being updated)
+            keep_idx = [i for i, c in enumerate(self._data.chunks) if c.source != source]
+            kept_chunks = [self._data.chunks[i] for i in keep_idx]
+            kept_vectors = (
+                self._data.vectors[np.array(keep_idx, dtype=np.intp)]
+                if keep_idx
+                else np.zeros((0, self._data.vectors.shape[-1]), dtype=np.float32)
+            )
+
+            # Re-embed if the file still exists
+            new_chunks: list[Chunk] = []
+            new_vectors: np.ndarray | None = None
+            if filepath.exists():
+                try:
+                    content = filepath.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    pass
+                else:
+                    new_chunks = chunk_markdown(content, source)
+                    if new_chunks:
+                        texts = [c.text for c in new_chunks]
+                        all_vecs: list[list[float]] = []
+                        for i in range(0, len(texts), _EMBED_BATCH):
+                            resp = await self._embed_client.embed(
+                                texts[i : i + _EMBED_BATCH], model=self._model
+                            )
+                            all_vecs.extend(resp.vectors)
+                        new_vectors = _l2_normalize(np.array(all_vecs, dtype=np.float32))
+
+            # Merge kept + new
+            all_chunks = kept_chunks + new_chunks
+            if new_vectors is not None and new_vectors.shape[0] > 0:
+                all_vectors = (
+                    new_vectors
+                    if kept_vectors.shape[0] == 0
+                    else np.concatenate([kept_vectors, new_vectors], axis=0)
+                )
+            else:
+                all_vectors = kept_vectors
+
+            self._data = _IndexData(
+                _INDEX_VERSION, str(self._vault), self._model, all_chunks, all_vectors
+            )
+
+            # Persist
+            d = self._index_dir_path()
+            d.mkdir(parents=True, exist_ok=True)
+            np.save(str(d / "index.npy"), all_vectors)
+            meta = {
+                "version": _INDEX_VERSION,
+                "vault": str(self._vault),
+                "model": self._model,
+                "chunks": [
+                    {
+                        "text": c.text,
+                        "source": c.source,
+                        "heading": c.heading,
+                        "chunk_idx": c.chunk_idx,
+                    }
+                    for c in all_chunks
+                ],
+            }
+            (d / "index.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+            _log.info("vault_ask: updated %s → %d chunks remain", source, len(new_chunks))
+
     async def search(self, question: str, top_k: int = 5) -> list[tuple[Chunk, float]]:
         """Return top-k chunks by cosine similarity to the embedded question."""
         await self.ensure_built()

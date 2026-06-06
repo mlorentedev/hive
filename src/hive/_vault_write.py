@@ -22,6 +22,7 @@ from hive._helpers import (
     get_partial_state,
     mark_disk_write_done,
     project_not_found,
+    schedule_async_hook,
     track,
     vault_write_lock,
     wrap_sync_tool,
@@ -288,6 +289,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 should_defer,
                 deadline_killed=_was_deadline_killed(),
             )
+            schedule_async_hook(ctx.index_update_hook, filepath)
             return track(
                 ctx,
                 "vault_write",
@@ -381,6 +383,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             should_defer,
             deadline_killed=_was_deadline_killed(),
         )
+        schedule_async_hook(ctx.index_update_hook, filepath)
         return track(
             ctx,
             "vault_write",
@@ -569,6 +572,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             should_defer,
             deadline_killed=_was_deadline_killed(),
         )
+        schedule_async_hook(ctx.index_update_hook, filepath)
         return track(
             ctx, "vault_patch", f"Applied {n} {noun} to {project}/{path}.{suffix}", project, path
         )

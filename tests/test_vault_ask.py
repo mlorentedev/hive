@@ -347,6 +347,43 @@ class TestVaultAskSynthesis:
         assert "disabled" not in answer.lower()
 
 
+# ── PR5: provider-swap (AC3) ─────────────────────────────────────────────────
+
+
+class TestVaultAskProviderSwap:
+    """AC3: switching providers is a config-only change — architecture is provider-agnostic."""
+
+    async def test_configured_base_url_flows_to_embed_client(
+        self,
+        mock_vault: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """_build_embed_client receives exactly the base_url passed to create_server (AC3)."""
+        captured: list[dict[str, str]] = []
+
+        def _spy_build(base_url: str, api_key: str, model: str) -> object:
+            captured.append({"base_url": base_url, "api_key": api_key, "model": model})
+            return _make_embed_mock()
+
+        monkeypatch.setattr("hive._vault_ask._build_embed_client", _spy_build)
+        monkeypatch.setattr("hive._vault_ask._index_dir_for", lambda: tmp_path / "idx")
+
+        target_url = "http://localhost:11434/v1"
+        mcp = create_server(
+            vault_path=mock_vault,
+            embed_base_url=target_url,
+            embed_model="nomic-embed-text",
+            embed_api_key="ollama-no-key",
+        )
+        # Trigger index build so _build_embed_client is actually called
+        await mcp.call_tool("vault_ask", {"question": "anything"})
+
+        assert len(captured) == 1, "expected exactly one _build_embed_client call"
+        assert captured[0]["base_url"] == target_url
+        assert captured[0]["model"] == "nomic-embed-text"
+
+
 # ── PR2: schema (AC5) ────────────────────────────────────────────────────────
 
 
