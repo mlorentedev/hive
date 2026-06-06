@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.37.0](https://github.com/mlorentedev/hive/compare/v1.36.0...v1.37.0) (2026-06-06)
+
+
+### Features
+
+* **workers:** generalize worker client to OpenAI-compatible (chat + embeddings) ([#220](https://github.com/mlorentedev/hive/issues/220)) ([e0f7cb2](https://github.com/mlorentedev/hive/commit/e0f7cb258e8f481d6a4e26928459b1c95b212cae)), closes [#211](https://github.com/mlorentedev/hive/issues/211)
+
 ## [1.36.0](https://github.com/mlorentedev/hive/compare/v1.35.1...v1.36.0) (2026-06-05)
 
 
