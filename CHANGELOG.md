@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.41.0](https://github.com/mlorentedev/hive/compare/v1.40.0...v1.41.0) (2026-06-06)
+
+
+### Features
+
+* **vault:** incremental re-embed hook + provider-swap test (HIVE-211 PR5) ([#232](https://github.com/mlorentedev/hive/issues/232)) ([5d8bac1](https://github.com/mlorentedev/hive/commit/5d8bac1f6dce148191ef8720495d28988a55e38c))
+
 ## [1.40.0](https://github.com/mlorentedev/hive/compare/v1.39.0...v1.40.0) (2026-06-06)
 
 
