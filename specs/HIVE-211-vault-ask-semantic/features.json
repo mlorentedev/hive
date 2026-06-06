@@ -1,0 +1,44 @@
+[
+  {
+    "id": "HIVE-211-vault-ask-semantic-f1",
+    "behavior": "vault_ask(question) returns a synthesized answer with cited source files when an embed backend is configured",
+    "verification": "uv run pytest tests/test_vault_ask.py -k answers_with_citations -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-211-vault-ask-semantic-f2",
+    "behavior": "with no embed backend configured, vault_ask returns a clear disabled/how-to-enable message and no other tool or import breaks",
+    "verification": "uv run pytest tests/test_vault_ask.py -k disabled_default_is_graceful -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-211-vault-ask-semantic-f3",
+    "behavior": "vault_ask works against both a local Ollama endpoint and a remote OpenAI-compatible endpoint (NaN) by config alone",
+    "verification": "uv run pytest tests/test_vault_ask.py -k provider_swap_by_config -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-211-vault-ask-semantic-f4",
+    "behavior": "the index builds lazily and re-embeds incrementally on writes only when present; disabled vault_ask adds zero overhead",
+    "verification": "uv run pytest tests/test_vault_ask.py -k lazy_incremental_zero_overhead -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-211-vault-ask-semantic-f5",
+    "behavior": "vault_ask JSON schema contains no anyOf (the load-bearing | None ban holds)",
+    "verification": "uv run pytest tests/test_vault_ask.py -k anyof -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-211-vault-ask-semantic-f6",
+    "behavior": "answers cite real files that exist in the vault (no invented sources)",
+    "verification": "uv run pytest tests/test_vault_ask.py -k cites_real_files -q",
+    "state": "pending",
+    "evidence": ""
+  }
+]
