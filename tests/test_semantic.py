@@ -1,8 +1,8 @@
-"""Unit tests for the semantic retrieval engine (HIVE-211 PR3).
+"""Unit tests for the semantic retrieval engine (HIVE-211 PR3 + PR5).
 
 Tests cover:
   - chunk_markdown: hybrid chunker (structural + size-cap)
-  - VaultIndex: build, persist, reload, mismatch-rebuild, search
+  - VaultIndex: build, persist, reload, mismatch-rebuild, search, update_file
 """
 
 from __future__ import annotations
@@ -218,7 +218,7 @@ class TestVaultIndex:
         await idx.ensure_built()  # no-op: already built
         assert build_calls == first_calls
 
-    async def test_cosine_similarity_ordering(self, tmp_path: Path) -> None:
+    async def test_cosine_similarity_ordering(self, tmp_path: Path) -> None:  # noqa: E501 keep last VaultIndex test
         """Chunk with higher cosine similarity to query ranks first."""
         vault = tmp_path / "vault"
         vault.mkdir()
@@ -249,3 +249,71 @@ class TestVaultIndex:
         top_chunk, top_score = results[0]
         assert top_chunk.heading == "# Relevant"
         assert top_score > results[1][1]
+
+
+# ── PR5: incremental update ────────────────────────────────────────────────────
+
+
+class TestVaultIndexUpdateFile:
+    """VaultIndex.update_file() — incremental re-embed for a single file (AC4)."""
+
+    async def test_update_file_adds_new_chunks(self, tmp_path: Path) -> None:
+        """update_file() re-embeds the modified file and adds its chunks to the index."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        (vault / "a.md").write_text("# A\nbody A")
+        (vault / "b.md").write_text("# B\nbody B")
+
+        # _fake_embed_client returns the MagicMock with embed already set — use directly
+        client = _fake_embed_client(_unit_vectors(10))
+        idx = VaultIndex(vault, client, "m", tmp_path / "idx")  # type: ignore[arg-type]
+        await idx.ensure_built()
+        sources_before = {c.source for c in idx._data.chunks}  # type: ignore[union-attr]
+        assert "b.md" in sources_before
+
+        # Overwrite b.md with new content; same client pool has remaining vectors
+        (vault / "b.md").write_text("# B updated\nnew body B")
+        await idx.update_file(vault / "b.md")
+
+        sources_after = {c.source for c in idx._data.chunks}  # type: ignore[union-attr]
+        assert "b.md" in sources_after
+        headings = {c.heading for c in idx._data.chunks if c.source == "b.md"}  # type: ignore[union-attr]
+        assert "# B updated" in headings
+
+    async def test_update_file_removes_deleted_file(self, tmp_path: Path) -> None:
+        """update_file() removes chunks for a deleted file from the index."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        (vault / "a.md").write_text("# A\nbody A")
+        (vault / "del.md").write_text("# Del\nwill be deleted")
+
+        client = _fake_embed_client(_unit_vectors(10))
+        idx = VaultIndex(vault, client, "m", tmp_path / "idx")  # type: ignore[arg-type]
+        await idx.ensure_built()
+        assert any(c.source == "del.md" for c in idx._data.chunks)  # type: ignore[union-attr]
+
+        (vault / "del.md").unlink()
+        await idx.update_file(vault / "del.md")
+
+        assert not any(c.source == "del.md" for c in idx._data.chunks)  # type: ignore[union-attr]
+
+    async def test_update_file_noop_when_index_not_built(self, tmp_path: Path) -> None:
+        """update_file() is a no-op if the index has never been built (AC4 zero overhead)."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        (vault / "x.md").write_text("# X\nbody")
+
+        client = MagicMock()
+        embed_called = []
+
+        async def _track_embed(texts: list[str], model: str = "") -> EmbedResponse:
+            embed_called.extend(texts)
+            return EmbedResponse(
+                vectors=_unit_vectors(len(texts)), model="m", tokens=1, latency_ms=1
+            )
+
+        client.embed = _track_embed
+        idx = VaultIndex(vault, client, "m", tmp_path / "idx")  # type: ignore[arg-type]
+        # Do NOT call ensure_built — index is None
+        await idx.update_file(vault / "x.md")
+        assert not embed_called, "update_file should not embed when index not built"

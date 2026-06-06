@@ -41,6 +41,9 @@ class ServerContext:
     embed_api_key: str = ""
     # HIVE-211 PR4: synthesis chat model (empty = retrieval-only, no LLM call).
     synth_model: str = ""
+    # HIVE-211 PR5: called after a successful vault write with the written Path,
+    # so vault_ask's index stays current without a full rebuild. None = disabled.
+    index_update_hook: object = None
     started_at_iso: str = ""
     started_at_monotonic: float = 0.0
 

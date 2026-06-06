@@ -93,6 +93,28 @@ _PARTIAL_STATE_TOOLS: frozenset[str] = frozenset(
     {"vault_write", "vault_patch"},
 )
 
+# HIVE-211 PR5: event loop captured by wrap_sync_tool's async wrapper and
+# propagated into the thread via contextvars. Lets sync write tools schedule
+# async hooks (e.g. index update) without converting the tools to async.
+_RUNNING_LOOP_CV: contextvars.ContextVar[asyncio.AbstractEventLoop | None] = contextvars.ContextVar(
+    "_RUNNING_LOOP", default=None
+)
+
+
+def schedule_async_hook(hook: object, filepath: Path) -> None:
+    """Submit an async hook to the event loop from a sync tool running in a thread.
+
+    Uses ``asyncio.run_coroutine_threadsafe`` with the loop captured in
+    :data:`_RUNNING_LOOP_CV` by ``wrap_sync_tool`` before the thread was
+    spawned. No-op when ``hook`` is ``None`` or no loop was captured.
+    """
+    if hook is None:
+        return
+    loop = _RUNNING_LOOP_CV.get()
+    if loop is None or not loop.is_running():
+        return
+    asyncio.run_coroutine_threadsafe(hook(filepath), loop)  # type: ignore[operator]
+
 
 def mark_disk_write_done() -> None:
     """Signal that the partial-state CV write tool's FS write completed.
@@ -1237,6 +1259,7 @@ def wrap_sync_tool(
             vault_token: contextvars.Token[Path | None] | None = None
             if tool_name in _PARTIAL_STATE_TOOLS and ctx.vault.is_dir():
                 vault_token = _VAULT_FOR_EVICTION_CV.set(ctx.vault)
+            loop_token = _RUNNING_LOOP_CV.set(asyncio.get_running_loop())
             try:
                 return await run_sync_tool(
                     tool_name,
@@ -1248,6 +1271,7 @@ def wrap_sync_tool(
             finally:
                 if vault_token is not None:
                     _VAULT_FOR_EVICTION_CV.reset(vault_token)
+                _RUNNING_LOOP_CV.reset(loop_token)
 
         wrapper.__signature__ = sig  # type: ignore[attr-defined]
         return wrapper

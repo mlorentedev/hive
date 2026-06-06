@@ -14,10 +14,13 @@ Synthesis into a full cited answer lands in PR4.
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from hive._helpers import _READ_ONLY, tool_span, track
+
+_log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -212,6 +215,18 @@ def register_vault_ask(mcp: FastMCP, ctx: ServerContext) -> None:
             )
         return _synth_state["client"]
 
+    async def _update_index(filepath: Path) -> None:
+        """Fire-and-forget hook: incrementally re-embed a changed vault file."""
+        try:
+            if _state["index"] is not None:
+                await _state["index"].update_file(filepath)
+        except Exception:
+            _log.exception("vault_ask: index update failed for %s", filepath)
+
+    # Register the hook on ctx so vault_write/vault_patch can fire it
+    if ctx.embed_base_url:
+        ctx.index_update_hook = _update_index
+
     @mcp.tool(annotations=_READ_ONLY)
     async def vault_ask(question: str = "") -> str:
         """Ask a natural-language question; get a source-cited synthesized answer
@@ -237,6 +252,12 @@ def register_vault_ask(mcp: FastMCP, ctx: ServerContext) -> None:
             async with tool_span("vault_ask", ctx.tool_timeout):
                 idx = await _get_index()
                 results = await idx.search(question, top_k=5)
+                _log.info(
+                    "vault_ask: retrieved %d chunks from %s for %r",
+                    len(results),
+                    {c.source for c, _ in results},
+                    question[:50],
+                )
                 if ctx.synth_model:
                     synth_client = await _get_synth_client()
                     answer = await _synthesize(question, results, synth_client, ctx.synth_model)
