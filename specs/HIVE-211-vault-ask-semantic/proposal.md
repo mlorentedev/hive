@@ -1,7 +1,7 @@
 ---
 id: "HIVE-211-vault-ask-semantic"
 type: spec
-status: draft # draft | implementing | verifying | archived
+status: implementing # draft | implementing | verifying | archived
 created: "2026-06-05"
 tags: [spec, proposal]
 template_version: "1.0"
@@ -32,10 +32,11 @@ After **Stage 1**, an MCP client can call `vault_ask(question)` and receive an L
 - **Any mandatory heavy dependency** — `hive[semantic]` is an opt-in extra; base install must be unaffected.
 - **Re-ranking or replacing the existing `vault_search` modes** — `vault_ask` is additive.
 - **Structural wikilink/frontmatter graph edges** — Stage 2.
+- **Automatic runtime fallback between embed providers.** Config selects **one** embed backend (`HIVE_EMBED_BASE_URL`). Unlike `delegate_task`'s stateless chat cost-ladder, embeddings persist an index keyed to a single model's dimensionality (NaN `qwen3-embedding` = 4096-dim vs Ollama `nomic-embed-text` = 768-dim) — a transparent cross-provider fallback would query a 4096-dim index with a 768-dim vector (mathematically invalid). Switching providers is a config change that triggers an index **rebuild** (model-id mismatch guard), never a silent runtime fallback. Default config = NaN; Ollama is the local/private alternative.
 
 ## Risks / open questions
 
-- **[VERIFY] Does NaN expose an `/embeddings` endpoint?** Reported yes by the maintainer (2026-06-05); confirm against `api.nan.builders` before committing to NaN-only embeddings. If not, fall back to a tiny local Ollama embedding model (`nomic-embed-text`, ~300 MB) or another embeddings provider — the LLM synthesis can still be NaN.
+- **[RESOLVED 2026-06-05] NaN exposes `/embeddings`.** Confirmed live against `api.nan.builders/v1`: model `qwen3-embedding`, **4096-dim** vectors, standard OpenAI-shaped `{data:[{embedding}], usage}` response (HTTP 200). **NaN-only is viable** for both embeddings and synthesis (`deepseek-v4-flash` / `qwen3.6` for chat). The provider-agnostic design is retained so Ollama (`nomic-embed-text`, 768-dim, local / free / private) stays a config-only alternative. **Dimensionality differs per provider (4096 vs 768)** → the index MUST record its embed-model id and rebuild on mismatch (binary-incompatible vectors otherwise).
 - **Index cost & privacy.** First build embeds every chunk (N calls; cost depends on provider pricing + vault size — estimate before enabling on a large vault). Chunks + embeddings leave the machine for a remote provider (NaN) — acceptable only if the user already trusts that provider with vault content; document the trade-off vs. Kwipu's "no cloud".
 - **Dependency weight.** The vector-store/embedding libs must stay behind the `[semantic]` extra and be lazy-imported so a base `pip install hive` pulls nothing new and no import fails when the extra is absent.
 - **Index staleness / corruption.** Embedding-model mismatch must be detected (store the model id with the index; rebuild on mismatch). Incremental re-embed must stay consistent with the git-committed file state.

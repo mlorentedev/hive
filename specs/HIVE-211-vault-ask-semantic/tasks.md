@@ -10,9 +10,9 @@ created: "2026-06-05"
 
 ## Setup
 
-- [ ] Resolve [VERIFY] NaN `/embeddings` endpoint (Risks) — decides embeddings provider
-- [ ] Branch `feat/HIVE-211-vault-ask` off `master`
-- [ ] Decide vector store (sqlite-vec vs numpy+pickle) and the `[semantic]` optional-extra packaging
+- [x] Resolve [VERIFY] NaN `/embeddings` endpoint — **CONFIRMED viable** (`qwen3-embedding`, 4096-dim, OpenAI-shaped); see proposal Risks (2026-06-05)
+- [x] Branch `feat/HIVE-211-vault-ask-semantic` off `master` (rebased onto master @ release 1.36.0)
+- [x] Decide vector store: **numpy + pickle** (in-memory dot-product; sufficient for Stage 1 scale, no native wheel); `[semantic]` extra packaging lands in PR2. Default embed provider documented = **NaN** (`qwen3-embedding`), Ollama as local/private alt (2026-06-05)
 - [ ] `proposal.md` complete; open questions in Risks resolved before freezing
 
 ## Implementation (TDD order)
