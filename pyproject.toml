@@ -48,6 +48,10 @@ dev = [
     "mypy>=1.13",
     "types-PyYAML>=6.0",
     "types-psutil>=5.9.0",
+    # HIVE-211 PR3: numpy in dev so the retrieval engine tests always run;
+    # the "extra absent" branch is tested via monkeypatching, not by
+    # genuinely removing numpy from the install.
+    "numpy>=1.26",
 ]
 # HIVE-211: optional semantic retrieval (vault_ask). Heavy/native deps stay
 # behind this extra so a base ``pip install hive-vault`` pulls nothing extra

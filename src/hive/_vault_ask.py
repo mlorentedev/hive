@@ -3,21 +3,27 @@
 Disabled unless an embeddings backend is configured (``HIVE_EMBED_BASE_URL``)
 AND the optional ``[semantic]`` dependencies are installed. When disabled it
 returns a clear "how to enable" message and never raises — base installs are
-unaffected and no heavy dependency is imported at module load. The retrieval /
-synthesis pipeline lands in a later change; this module ships the tool surface
-plus the graceful-degradation gate.
+unaffected and no heavy dependency is imported at module load.
+
+PR3: the retrieval pipeline is live. vault_ask embeds the question, searches a
+lazily-built VaultIndex (numpy cosine similarity, persisted as JSON + .npy),
+and returns the top-5 most relevant vault sections with source citations.
+Synthesis into a full cited answer lands in PR4.
 """
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from hive._helpers import _READ_ONLY, track, wrap_sync_tool
+from hive._helpers import _READ_ONLY, tool_span, track
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
     from hive._context import ServerContext
+    from hive._semantic import Chunk, VaultIndex
 
 _ENABLE_STEPS = (
     "To enable natural-language Q&A grounded in your vault:\n"
@@ -46,12 +52,6 @@ _DISABLED_NO_EXTRA = (
     "then restart the server."
 )
 
-_BACKEND_READY_PENDING_INDEX = (
-    "vault_ask: embeddings backend configured. Semantic retrieval becomes "
-    "available once the index pipeline ships (HIVE-211). For now, use "
-    "vault_search for keyword / regex search."
-)
-
 
 def _semantic_extra_available() -> bool:
     """True if the optional ``[semantic]`` dependencies import.
@@ -67,8 +67,7 @@ def _semantic_extra_available() -> bool:
 
 
 def _disabled_reason(ctx: ServerContext) -> str:
-    """Return a non-empty "how to enable" message when vault_ask is disabled,
-    or ``""`` when a semantic backend is fully available."""
+    """Non-empty "how to enable" message when vault_ask is disabled; empty when ready."""
     if not ctx.embed_base_url:
         return _DISABLED_NO_BACKEND
     if not _semantic_extra_available():
@@ -76,14 +75,82 @@ def _disabled_reason(ctx: ServerContext) -> str:
     return ""
 
 
+# ── Seam functions: replaceable in tests without touching the real HTTP client ─
+
+
+def _build_embed_client(base_url: str, api_key: str, model: str) -> object:
+    """Build the OpenAICompatibleClient for embedding. Seam for test mocking."""
+    from hive.clients import OpenAICompatibleClient
+
+    return OpenAICompatibleClient(
+        base_url=base_url,
+        api_key=api_key,
+        default_model=model,
+        provider_name="embed",
+    )
+
+
+def _index_dir_for() -> Path:
+    """Return the directory for persisted index files. Seam for test mocking."""
+    from hive.config import settings
+
+    return Path(settings.db_path).parent / "index"
+
+
+# ── Result formatting ─────────────────────────────────────────────────────────
+
+
+def _format_retrieval(question: str, results: list[tuple[Chunk, float]]) -> str:
+    if not results:
+        return (
+            f"vault_ask: '{question}' — no relevant sections found in the vault.\n\n"
+            "Consider rephrasing, or use vault_search for keyword / regex lookup."
+        )
+    lines = [f"# vault_ask: '{question}'\n"]
+    for rank, (chunk, score) in enumerate(results, start=1):
+        heading_label = f" — {chunk.heading!r}" if chunk.heading else ""
+        lines.append(f"### {rank}. {chunk.source}{heading_label}  (score: {score:.2f})")
+        preview = chunk.text[:500] + "…" if len(chunk.text) > 500 else chunk.text
+        lines.append(f"> {preview}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+# ── Registration ──────────────────────────────────────────────────────────────
+
+
 def register_vault_ask(mcp: FastMCP, ctx: ServerContext) -> None:
     """Register the vault_ask tool on the MCP server."""
 
+    # Closure-scoped state: each create_server() call gets its own VaultIndex.
+    # Dict is used so the nonlocal assignment is avoided (mypy-friendly).
+    _state: dict[str, VaultIndex | None] = {"index": None}
+    _build_lock: asyncio.Lock = asyncio.Lock()
+
+    async def _get_index() -> VaultIndex:
+        if _state["index"] is not None:
+            return _state["index"]
+        async with _build_lock:
+            if _state["index"] is not None:
+                return _state["index"]
+            from hive._semantic import VaultIndex
+
+            embed_client = _build_embed_client(
+                ctx.embed_base_url, ctx.embed_api_key, ctx.embed_model
+            )
+            idx: VaultIndex = VaultIndex(
+                vault=ctx.vault,
+                embed_client=embed_client,  # type: ignore[arg-type]
+                model=ctx.embed_model,
+                index_dir=_index_dir_for(),
+            )
+            _state["index"] = idx
+        return _state["index"]  # type: ignore[return-value]
+
     @mcp.tool(annotations=_READ_ONLY)
-    @wrap_sync_tool(ctx, "vault_ask")
-    def vault_ask(question: str = "") -> str:
-        """Ask a natural-language question; get a synthesized, source-cited
-        answer grounded in your vault (semantic retrieval / RAG).
+    async def vault_ask(question: str = "") -> str:
+        """Ask a natural-language question; get source-cited relevant vault sections
+        (semantic retrieval / RAG).
 
         OPTIONAL — disabled by default. Requires the `[semantic]` extra plus an
         embeddings backend (`HIVE_EMBED_BASE_URL`); until then it returns a
@@ -99,4 +166,10 @@ def register_vault_ask(mcp: FastMCP, ctx: ServerContext) -> None:
             return track(ctx, "vault_ask", reason)
         if not question.strip():
             return track(ctx, "vault_ask", "vault_ask: provide a non-empty question.")
-        return track(ctx, "vault_ask", _BACKEND_READY_PENDING_INDEX)
+        try:
+            async with tool_span("vault_ask", ctx.tool_timeout):
+                idx = await _get_index()
+                results = await idx.search(question, top_k=5)
+                return track(ctx, "vault_ask", _format_retrieval(question, results))
+        except TimeoutError:
+            return track(ctx, "vault_ask", "vault_ask: retrieval timed out. Try a simpler query.")
