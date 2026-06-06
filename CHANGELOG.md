@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.2](https://github.com/mlorentedev/hive/compare/v1.38.1...v1.38.2) (2026-06-06)
+
+
+### Documentation
+
+* migrate recent vault lessons into docs/lessons.md ([#226](https://github.com/mlorentedev/hive/issues/226)) ([cb1c3fc](https://github.com/mlorentedev/hive/commit/cb1c3fc5acd5c830d49b64d434780e9fb27d9e2c))
+
 ## [1.38.1](https://github.com/mlorentedev/hive/compare/v1.38.0...v1.38.1) (2026-06-06)
 
 
