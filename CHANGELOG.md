@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.38.0](https://github.com/mlorentedev/hive/compare/v1.37.0...v1.38.0) (2026-06-06)
+
+
+### Features
+
+* **vault:** add vault_ask tool — optional semantic Q&A, disabled by default ([#222](https://github.com/mlorentedev/hive/issues/222)) ([3efb5c8](https://github.com/mlorentedev/hive/commit/3efb5c80d0611816e23ade6e9f11010fa6978812)), closes [#211](https://github.com/mlorentedev/hive/issues/211)
+
 ## [1.37.0](https://github.com/mlorentedev/hive/compare/v1.36.0...v1.37.0) (2026-06-06)
 
 
