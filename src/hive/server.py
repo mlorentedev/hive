@@ -177,13 +177,9 @@ def create_server(
         openrouter_budget=settings.openrouter_budget,
         openrouter_paid_model=settings.openrouter_paid_model,
         tool_timeout=settings.tool_timeout,
-        embed_base_url=(
-            embed_base_url if embed_base_url is not None else settings.embed_base_url
-        ),
+        embed_base_url=(embed_base_url if embed_base_url is not None else settings.embed_base_url),
         embed_model=embed_model if embed_model is not None else settings.embed_model,
-        embed_api_key=(
-            embed_api_key if embed_api_key is not None else settings.embed_api_key
-        ),
+        embed_api_key=(embed_api_key if embed_api_key is not None else settings.embed_api_key),
         started_at_iso=datetime.now(UTC).isoformat(timespec="seconds"),
         started_at_monotonic=time.monotonic(),
     )

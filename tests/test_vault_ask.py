@@ -37,9 +37,7 @@ class TestVaultAskDisabledByDefault:
 
     async def test_disabled_default_is_graceful(self, mock_vault: Path) -> None:
         mcp = create_server(vault_path=mock_vault)  # no embed config
-        answer = _text(
-            await mcp.call_tool("vault_ask", {"question": "what did I decide about X?"})
-        )
+        answer = _text(await mcp.call_tool("vault_ask", {"question": "what did I decide about X?"}))
         # Clear, actionable, names the enable knobs — never an error/exception.
         assert "disabled" in answer.lower()
         assert "HIVE_EMBED_BASE_URL" in answer
