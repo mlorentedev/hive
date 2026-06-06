@@ -22,16 +22,16 @@ created: "2026-06-05"
 - [x] Write failing test: `vault_ask` with NO embed backend → clear "disabled / how to enable" message; no import error; other tools still register (AC2) — **PR2** `tests/test_vault_ask.py`
 - [x] Generalize the worker client into a parameterized OpenAI-compatible client (Ollama / NaN / OpenRouter) for chat + embeddings — **PR1 (#220)** `OpenAICompatibleClient`
 - [x] Implement config (`HIVE_EMBED_BASE_URL` / `HIVE_EMBED_MODEL` / `HIVE_EMBED_API_KEY`) + capability detection — **PR2** (`config.py` + `_vault_ask._disabled_reason`)
-- [ ] Write failing test: chunk + embed a small fixture vault; vector search returns the relevant chunk
-- [ ] Implement chunker + embedding pass + vector store (lazy build / `vault_reindex`)
-- [ ] Write failing test: `vault_ask(question)` returns a synthesized answer citing a real source file (AC1, AC6)
-- [ ] Implement retrieval → anti-hallucination cite-your-sources synthesis prompt → answer
-- [ ] Write failing test: incremental re-embed on `vault_write`/`vault_patch` only when index exists; disabled = zero overhead (AC4)
-- [ ] Hook incremental re-embed into the write path (guarded by index presence)
-- [ ] Write failing test: provider swap (Ollama ↔ NaN) by config only (AC3) — mock both endpoints
+- [x] Write failing test: chunk + embed a small fixture vault; vector search returns the relevant chunk — **PR3** `tests/test_semantic.py`
+- [x] Implement chunker + embedding pass + vector store (lazy build / persistence) — **PR3 (#228)** `_semantic.py` + `_vault_ask.py`
+- [x] Write failing test: `vault_ask(question)` returns a synthesized answer citing a real source file (AC1, AC6) — **PR4** `TestVaultAskSynthesis`
+- [x] Implement retrieval → anti-hallucination cite-your-sources synthesis prompt → answer — **PR4** `_synthesize` + `_build_synthesis_prompt` + `HIVE_SYNTH_MODEL`
+- [ ] Write failing test: incremental re-embed on `vault_write`/`vault_patch` only when index exists; disabled = zero overhead (AC4) — **PR5**
+- [ ] Hook incremental re-embed into the write path (guarded by index presence) — **PR5**
+- [ ] Write failing test: provider swap (Ollama ↔ NaN) by config only (AC3) — mock both endpoints — **PR5**
 - [x] Write failing test: `vault_ask` schema contains no `anyOf` (AC5; reuse HIVE-119 helper) — **PR2** (`test_vault_ask_schema_has_no_anyof` + repo-wide `TestSchemaClean`)
-- [ ] Add retriever-attribution + recall instrumentation (the Stage-2 gate)
-- [ ] Embedding-model-mismatch detection + rebuild
+- [x] Embedding-model-mismatch detection + rebuild — **PR3** (index keyed by `sha256(vault)[:12]+model_slug`)
+- [ ] Add retriever-attribution + recall instrumentation (the Stage-2 gate) — **PR5**
 
 ## Closing
 

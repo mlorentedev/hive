@@ -56,13 +56,50 @@ index/retrieval yet; the heavy deps stay behind the new `[semantic]` extra.
 - ruff `src/ tests/`: clean. `mypy --strict src/`: only the 5 pre-existing `_deadline.py` POSIX-on-Windows errors (Linux CI clean); numpy resolved via a `[[tool.mypy.overrides]]` ignore_missing_imports.
 - Full suite (`uv run pytest -q`): **4 failed, 712 passed, 19 skipped, 62 deselected** (10m47s). The 4 failures are identical to PR1's — the documented #212 pre-existing dev-box failures (`test_bounded_call`, `test_daemon`, `test_lock_eviction`, `TestVaultHealthRuntime`); none touch the new code. Pass count rose 707 -> 712 (the 5 new `test_vault_ask.py` tests). **Zero new regressions.** CI (Linux + Windows) is green.
 
+## PR3 — semantic retrieval engine
+
+PR3 delivers the full retrieval pipeline: hybrid markdown chunker (`_semantic.py`), `VaultIndex`
+(lazy-build, asyncio.Lock, numpy cosine similarity, JSON+npy persistence keyed by
+`sha256(vault)[:12]+model_slug`, mismatch-rebuild), and `vault_ask` rewritten as native async
+with seam functions for testability. 16 new tests.
+
+- [x] Hybrid markdown chunker (structural-by-heading + size-cap with overlap) -> `test_semantic.py::TestChunkMarkdown`
+- [x] `VaultIndex` build, persist, reload, mismatch-rebuild -> `test_semantic.py::TestVaultIndex`
+- [x] `vault_ask` with backend + extra returns retrieved chunks -> `TestVaultAskRetrieval::test_retrieval_returns_chunks_from_vault`
+- [x] Empty question rejected gracefully -> `TestVaultAskRetrieval::test_empty_question_rejected_gracefully`
+- [x] Output cites .md sources -> `TestVaultAskRetrieval::test_retrieval_output_cites_sources`
+- [x] numpy in dev extras; "extra absent" branch via monkeypatch -> `TestVaultAskDisabledByDefault::test_disabled_when_backend_set_but_extra_missing`
+
+### Test status (PR3)
+
+- Targeted: `uv run pytest tests/test_vault_ask.py tests/test_semantic.py -q` -> **16 new tests pass**.
+- Full suite: **4 failed, 730 passed, 19 skipped, 62 deselected** (14m10s). Same 4 pre-existing dev-box failures. Zero new regressions. CI green.
+
+## PR4 — LLM synthesis (AC1, AC6)
+
+PR4 wires the synthesis LLM on top of retrieval. New seam `_build_synth_client`, synthesis prompt
+builder `_build_synthesis_prompt` (anti-hallucination: cite-only-shown-sources), `_synthesize`
+(async, falls back to formatted retrieval on any error), and `HIVE_SYNTH_MODEL` config. 5 new tests.
+
+- [x] Synthesis returns LLM answer when `synth_model` is set (AC1) -> `TestVaultAskSynthesis::test_synthesis_returns_synthesized_answer`
+- [x] Answer cites .md source (AC6) -> `TestVaultAskSynthesis::test_synthesis_cites_vault_source`
+- [x] Synthesis prompt includes retrieved vault content -> `TestVaultAskSynthesis::test_synthesis_prompt_includes_chunk_context`
+- [x] No `synth_model` → formatted retrieval only (no LLM call) -> `TestVaultAskSynthesis::test_no_synth_model_returns_retrieval_only`
+- [x] generate() failure → graceful fallback, no crash -> `TestVaultAskSynthesis::test_synthesis_graceful_on_llm_error`
+
+### Test status (PR4)
+
+- Targeted: `uv run pytest tests/test_vault_ask.py -q` -> **12 passed** (7 old + 5 new). ruff + mypy clean.
+- Full suite: pending CI.
+
 ## Decisions made during implementation
 
 - NaN `/embeddings` available? -> **YES** — `qwen3-embedding`, 4096-dim, OpenAI-shaped (probed 2026-06-05). NaN-only viable; Ollama stays a config alternative.
-- Vector store choice -> **numpy + pickle** (in-memory dot-product; no native wheel behind `[semantic]`). Settled for PR3.
+- Vector store choice -> **numpy + JSON+npy** (`numpy.save/load(allow_pickle=False)`) — NOT pickle (security hook flagged arbitrary code execution). Settled for PR3.
 - Provider fallback -> **config selects ONE embed backend; no cross-provider runtime fallback** (4096 vs 768 dim mismatch makes it unsafe — see proposal "Out of scope"). Switching = config change -> index rebuild.
 - Client design -> build full URLs from a stored `base_url` (which includes the version prefix), NOT httpx's RFC-3986 `base_url` join (which silently drops a base path on absolute request paths). `OpenRouterClient` kept as a thin subclass for backward compat.
-- Chunking strategy -> <to fill: PR3>
+- Chunking strategy -> **hybrid** (structural-by-H1/H2/H3 heading split, then size-cap with overlap for long sections). Implemented in PR3 `_semantic.py::chunk_markdown`.
+- Synthesis config -> **`HIVE_SYNTH_MODEL`** (empty = retrieval-only; same `base_url`/`api_key` as embed). `cast("OpenAICompatibleClient", ...)` for mypy; lazy import inside seam function avoids circular dep at module load.
 
 ## Promotion candidates
 

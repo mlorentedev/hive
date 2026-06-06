@@ -46,6 +46,10 @@ class HiveSettings(BaseSettings):
     embed_base_url: str = ""
     embed_model: str = ""
     embed_api_key: str = ""
+    # HIVE-211 PR4: LLM synthesis model. Uses the same base_url/api_key as
+    # embeddings. Empty = return formatted retrieval chunks (no LLM call).
+    # Example: HIVE_SYNTH_MODEL=deepseek-v4-flash (NaN) or qwen2.5-coder:7b (Ollama).
+    synth_model: str = ""
     db_path: str = str(Path.home() / ".local" / "share" / "hive" / "worker.db")
     relevance_db_path: str = str(
         Path.home() / ".local" / "share" / "hive" / "relevance.db",
