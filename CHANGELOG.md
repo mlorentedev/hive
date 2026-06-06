@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.40.0](https://github.com/mlorentedev/hive/compare/v1.39.0...v1.40.0) (2026-06-06)
+
+
+### Features
+
+* **vault:** synthesize cited answers from vault chunks (HIVE-211 PR4) ([#230](https://github.com/mlorentedev/hive/issues/230)) ([3fb726e](https://github.com/mlorentedev/hive/commit/3fb726e932569cb928892ec1f3a882c33560141b))
+
 ## [1.39.0](https://github.com/mlorentedev/hive/compare/v1.38.2...v1.39.0) (2026-06-06)
 
 
