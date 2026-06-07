@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.41.1](https://github.com/mlorentedev/hive/compare/v1.41.0...v1.41.1) (2026-06-06)
+
+
+### Documentation
+
+* **spec:** add PR5 verification evidence — HIVE-211 all ACs done ([996092f](https://github.com/mlorentedev/hive/commit/996092fb897f6a1a03784b0d7596399050989782))
+
 ## [1.41.0](https://github.com/mlorentedev/hive/compare/v1.40.0...v1.41.0) (2026-06-06)
 
 
