@@ -1,0 +1,64 @@
+name: Bitácora status — In Progress on assign
+
+# When an issue is assigned, move its bitácora (GitHub Project #1) Status to
+# "In Progress". Self-assigning at pickup (AGENTS.md "Neural Hive" Phase 1) now
+# moves the board automatically — closing the manual-transition gap (HARNESS-010,
+# observed 2026-06-06 when #261 was worked while still in Backlog).
+#
+# The other transitions are already covered: built-in Project workflows set
+# "Backlog" on add and "Done" on close; "Blocked" stays a deliberate manual
+# transition (no reliable machine signal) — see runbook §5.
+#
+# Uses actions/github-script for the Projects v2 GraphQL (the `gh project` CLI
+# fails with "unknown owner type" under a fine-grained PAT).
+#
+# Canonical IDs (re-list: gh project field-list 1 --owner mlorentedev --format json):
+#   Project  PVT_kwHOAM7xJs4BZ6GY
+#   Status   PVTSSF_lAHOAM7xJs4BZ6GYzhU1dtI   (option "In Progress" = 6c133cc8)
+# Full reference: docs/runbooks/guide-bitacora-setup.md §2 / §5 / §7.
+
+on:
+  issues:
+    types: [assigned]
+
+permissions: {}   # authenticates via the github-script token input (BITACORA_PAT), not the default GITHUB_TOKEN
+
+jobs:
+  in-progress:
+    # Never resurrect a closed issue's status when it is (re)assigned.
+    if: github.event.issue.state == 'open'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Move assigned issue to In Progress
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.BITACORA_PAT }}   # needs project + repo scope
+          script: |
+            const projectId = 'PVT_kwHOAM7xJs4BZ6GY';
+            const statusFieldId = 'PVTSSF_lAHOAM7xJs4BZ6GYzhU1dtI';
+            const inProgressId = '6c133cc8';
+            const contentId = context.payload.issue.node_id;
+
+            // addProjectV2ItemById is idempotent: returns the existing item id
+            // if the issue is already on the board.
+            const added = await github.graphql(
+              `mutation($projectId: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                  item { id }
+                }
+              }`,
+              { projectId, contentId },
+            );
+            const itemId = added.addProjectV2ItemById.item.id;
+
+            await github.graphql(
+              `mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: $projectId, itemId: $itemId, fieldId: $fieldId,
+                  value: { singleSelectOptionId: $optionId },
+                }) { projectV2Item { id } }
+              }`,
+              { projectId, itemId, fieldId: statusFieldId, optionId: inProgressId },
+            );
+
+            core.info(`Moved issue #${context.payload.issue.number} → In Progress (item ${itemId})`);
