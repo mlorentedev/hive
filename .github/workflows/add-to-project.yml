@@ -1,0 +1,21 @@
+name: Add to bitácora
+
+# Puts every opened/reopened issue and PR onto the cross-repo bitácora board
+# (GitHub Project #1). Pairs with bitacora-status.yml (which flips an assigned
+# issue to In Progress). Canonical copy for the OPS-002 (#258) multi-repo rollout.
+
+on:
+  issues:
+    types: [opened, reopened]
+  pull_request:
+    types: [opened, reopened]
+
+jobs:
+  add-to-project:
+    runs-on: ubuntu-latest
+    steps:
+      # Pin a real release: actions/add-to-project@v1 does NOT resolve (no floating v1 tag).
+      - uses: actions/add-to-project@v1.0.2
+        with:
+          project-url: https://github.com/users/mlorentedev/projects/1
+          github-token: ${{ secrets.BITACORA_PAT }}
