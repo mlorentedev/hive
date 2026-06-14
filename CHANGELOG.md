@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.41.2](https://github.com/mlorentedev/hive/compare/v1.41.1...v1.41.2) (2026-06-14)
+
+
+### Documentation
+
+* **lessons:** capture HIVE-202 and HIVE-211 lessons ([#238](https://github.com/mlorentedev/hive/issues/238)) ([b944aef](https://github.com/mlorentedev/hive/commit/b944aef1df2f8918014a313a881fa4988f6dbba5))
+
 ## [1.41.1](https://github.com/mlorentedev/hive/compare/v1.41.0...v1.41.1) (2026-06-06)
 
 
