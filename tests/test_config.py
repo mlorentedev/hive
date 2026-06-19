@@ -1,5 +1,6 @@
 """Tests for HiveSettings (pydantic-settings)."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -8,10 +9,27 @@ from pydantic import ValidationError
 from hive.config import HiveSettings
 
 
+@pytest.fixture(autouse=True)
+def _isolate_hive_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Strip ambient hive configuration before every test.
+
+    ``HiveSettings`` reads ``HIVE_*`` env vars plus the unprefixed
+    ``VAULT_PATH`` / ``OPENROUTER_API_KEY`` deploy aliases. A developer or
+    deploy box with any of these set (a real ``VAULT_PATH`` is the normal
+    case) would otherwise mask the hardcoded defaults and fail the
+    default-value assertions — green in CI, red locally. Clearing here runs
+    before each test body, so the override tests still set their own vars.
+    """
+    for key in list(os.environ):
+        if key.startswith("HIVE_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("VAULT_PATH", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+
 class TestDefaults:
     def test_vault_path_default(self) -> None:
-        s = HiveSettings()
-        assert s.vault_path == Path.home() / "Projects" / "knowledge"
+        assert HiveSettings().vault_path == Path.home() / "Projects" / "knowledge"
 
     def test_ollama_endpoint_default(self) -> None:
         assert HiveSettings().ollama_endpoint == "http://localhost:11434"
@@ -19,9 +37,7 @@ class TestDefaults:
     def test_ollama_model_default(self) -> None:
         assert HiveSettings().ollama_model == "qwen2.5-coder:7b"
 
-    def test_openrouter_api_key_default_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-        monkeypatch.delenv("HIVE_OPENROUTER_API_KEY", raising=False)
+    def test_openrouter_api_key_default_none(self) -> None:
         assert HiveSettings().openrouter_api_key is None
 
     def test_openrouter_budget_default(self) -> None:
