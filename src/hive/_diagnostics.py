@@ -10,8 +10,9 @@ request when the log level is INFO or below. It does not buffer or
 serialise the payload.
 
 If the request handler raises ``CancelledError``, the middleware logs
-it explicitly and re-raises — the patch in :mod:`hive._compat` is what
-keeps the cancellation from killing the receive loop.
+it explicitly and re-raises. The in-flight cancellation is then absorbed
+by ``mcp``'s own ``Server._handle_request`` guard; the residual
+respond-after-cancel race is handled by the patch in :mod:`hive._compat`.
 """
 
 from __future__ import annotations
