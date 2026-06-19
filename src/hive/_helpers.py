@@ -43,6 +43,20 @@ _REJECT_MSG = "The host should handle this task directly."
 RC_EXTERNAL_TERMINATION: int = -1
 
 
+def _subprocess_run_kwargs() -> dict[str, object]:
+    """Platform-specific kwargs for read-path ``subprocess.run`` calls.
+
+    On Windows, adds ``CREATE_NO_WINDOW`` to suppress the console window
+    flash on git invocations (hive issue #249).  POSIX returns an empty
+    dict — no creation flags needed.
+    """
+    import sys as _sys
+
+    if _sys.platform == "win32":
+        return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+    return {}
+
+
 def synthesize_external_termination_stderr(original_stderr: bytes) -> str:
     """Format the synthetic stderr returned by :func:`_run_git` on external kill.
 
@@ -1522,6 +1536,7 @@ def _is_external_committer_healthy(
             text=True,
             timeout=10,
             check=False,
+            **_subprocess_run_kwargs(),
         )
     except Exception as exc:  # noqa: BLE001
         _log.debug(
@@ -1545,6 +1560,7 @@ def _is_external_committer_healthy(
             text=True,
             timeout=10,
             check=False,
+            **_subprocess_run_kwargs(),
         )
     except Exception as exc:  # noqa: BLE001
         _log.debug(
@@ -1681,6 +1697,7 @@ def _git_log(vault_path: Path, n: int) -> str:
             capture_output=True,
             text=True,
             timeout=30,
+            **_subprocess_run_kwargs(),
         )
     except Exception:
         return ""
