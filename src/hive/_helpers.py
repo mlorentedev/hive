@@ -851,6 +851,24 @@ def _post_kill_drain() -> float:
     return settings.post_kill_drain_s
 
 
+def _commit_args(message: str) -> list[str]:
+    """Build the ``git commit`` argv, gated on ``git_commit_no_verify``.
+
+    Lazy read of ``settings.git_commit_no_verify`` (default True) so tests
+    can monkeypatch the settings object after import — same idiom as
+    :func:`_lock_timeout`. Hive's auto-commits skip the human-oriented
+    pre-commit hook chain (the slow vault hook hung writes ~60s until the
+    deadline killed them); scanning lives push-side/CI now. Env:
+    ``HIVE_GIT_COMMIT_NO_VERIFY`` (default True).
+    """
+    from hive.config import settings
+
+    args = ["commit", "-m", message]
+    if settings.git_commit_no_verify:
+        args.insert(1, "--no-verify")
+    return args
+
+
 def _acquire_with_telemetry(
     lock: threading.Lock,
     lock_name: str,
@@ -1420,7 +1438,7 @@ def _git_commit(
                         err.strip(),
                     )
                     return
-                rc, _, err = _run_git(["commit", "-m", safe_msg], vault_path)
+                rc, _, err = _run_git(_commit_args(safe_msg), vault_path)
                 if rc != 0:
                     cause = "external_termination" if rc == RC_EXTERNAL_TERMINATION else "git_error"
                     _log.warning(
@@ -1477,7 +1495,7 @@ def _git_commit_all(
                 rc, _, err = _run_git(["add", "-A"], vault_path)
                 if rc != 0:
                     return "error", f"git add -A rc={rc}: {err.strip() or '<empty>'}"
-                rc, _, err = _run_git(["commit", "-m", safe_msg], vault_path)
+                rc, _, err = _run_git(_commit_args(safe_msg), vault_path)
                 if rc != 0:
                     return "error", f"git commit rc={rc}: {err.strip() or '<empty>'}"
                 rc, rev_out, err = _run_git(["rev-parse", "HEAD"], vault_path)

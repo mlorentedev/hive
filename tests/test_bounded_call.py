@@ -300,8 +300,15 @@ async def test_windows_subprocess_terminated_reaches_descendants() -> None:
     registry: list[subprocess.Popen[bytes]] = []
 
     async def spawn_cmd_sleep() -> None:
+        # ``ping -n 61`` delays ~60s WITHOUT reading the console: unlike
+        # ``timeout``, it does not abort with "Input redirection is not
+        # supported" when stdin is redirected (as under pytest/CI). cmd.exe is
+        # still the CREATE_NEW_PROCESS_GROUP parent with ping.exe as its child,
+        # so the descendant-termination path under test is unchanged. Using
+        # ``timeout`` here made the process exit instantly in redirected-stdin
+        # environments, so bounded_call never hit its deadline (#212).
         proc = subprocess.Popen(  # noqa: S603
-            ["cmd", "/c", "timeout", "/t", "60", "/nobreak"],
+            ["cmd", "/c", "ping", "-n", "61", "127.0.0.1"],
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
