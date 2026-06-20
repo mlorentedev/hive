@@ -292,11 +292,7 @@ def daemon_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
     """
     vault = tmp_path / "vault"
     (vault / "10_projects").mkdir(parents=True)
-    base = {
-        k: v
-        for k, v in os.environ.items()
-        if not k.startswith("HIVE_") and k != "VAULT_PATH"
-    }
+    base = {k: v for k, v in os.environ.items() if not k.startswith("HIVE_") and k != "VAULT_PATH"}
     env = {
         **base,
         "HIVE_DB_PATH": str(tmp_path / "worker.db"),
