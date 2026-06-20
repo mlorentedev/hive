@@ -4,8 +4,7 @@ name: Add to bitácora
 # (GitHub Project #1). Pairs with bitacora-status.yml (which flips an assigned
 # issue to In Progress). Canonical copy for the OPS-002 (#258) multi-repo rollout.
 
-# Note: actions/add-to-project@v1 only supports issues, not PRs. We use it for
-# issues and fall back to gh project item-add for PRs.
+
 
 on:
   issues:
@@ -29,10 +28,21 @@ jobs:
           project-url: https://github.com/users/mlorentedev/projects/1
           github-token: ${{ secrets.BITACORA_PAT }}
 
-      # PRs: use gh CLI directly (the action doesn't support PRs)
+      # PRs: gh project item-add can't resolve owner type for user projects.
+      # Use the GraphQL API directly: resolve projectId → add item by node_id.
       - name: Add PR to project
         if: github.event_name == 'pull_request'
         run: |
-          gh project item-add 1 --owner mlorentedev --url "${{ github.event.pull_request.html_url }}"
+          PROJECT_ID=$(gh api graphql -f query='
+            { user(login: "mlorentedev") { projectV2(number: 1) { id } } }
+          ' --jq '.data.user.projectV2.id')
+          gh api graphql -f query='
+            mutation($pid: ID!, $cid: ID!) {
+              addProjectV2ItemById(input: { projectId: $pid, contentId: $cid }) {
+                item { id }
+              }
+            }
+          ' -f pid="$PROJECT_ID" -f cid="${{ github.event.pull_request.node_id }}"
+          echo "PR added to bitácora project"
         env:
           GH_TOKEN: ${{ secrets.BITACORA_PAT }}
