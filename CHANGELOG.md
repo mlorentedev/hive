@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.41.3](https://github.com/mlorentedev/hive/compare/v1.41.2...v1.41.3) (2026-06-20)
+
+
+### Bug Fixes
+
+* **ci:** add PRs to bitácora board via gh CLI ([#258](https://github.com/mlorentedev/hive/issues/258)) ([7037b09](https://github.com/mlorentedev/hive/commit/7037b098325edbb72cbc3cbad19957c65dfe19ee))
+* **write:** skip the vault pre-commit hook on Hive auto-commits ([#257](https://github.com/mlorentedev/hive/issues/257)) ([e1da6e4](https://github.com/mlorentedev/hive/commit/e1da6e42662ecca951f5676ba6af4241946692c9))
+
+
+### Documentation
+
+* **adr:** add ADR-016 cross-agent memory consolidation ([#253](https://github.com/mlorentedev/hive/issues/253)) ([6fc92be](https://github.com/mlorentedev/hive/commit/6fc92be2fb88cad646c3bed4dcfd822fcf98e370))
+
 ## [1.41.2](https://github.com/mlorentedev/hive/compare/v1.41.1...v1.41.2) (2026-06-14)
 
 
