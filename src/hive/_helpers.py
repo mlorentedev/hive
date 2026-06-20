@@ -43,7 +43,7 @@ _REJECT_MSG = "The host should handle this task directly."
 RC_EXTERNAL_TERMINATION: int = -1
 
 
-def _subprocess_run_kwargs() -> dict[str, object]:
+def _subprocess_run_kwargs() -> dict[str, int]:
     """Platform-specific kwargs for read-path ``subprocess.run`` calls.
 
     On Windows, adds ``CREATE_NO_WINDOW`` to suppress the console window
