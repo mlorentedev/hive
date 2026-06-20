@@ -11,6 +11,7 @@ import pytest
 from hive._helpers import (
     _default_scopes,
     _git_commit,
+    _git_commit_all,
     _match_and_replace,
     _resolve_project_dir,
     _strip_code,
@@ -525,3 +526,104 @@ class TestGitCommitCoalesce:
         _git_commit(tmp_path, [], "vault: noop")
 
         assert calls == [], f"expected no _run_git calls, got: {calls}"
+
+
+class TestGitCommitNoVerify:
+    """``git_commit_no_verify`` gates ``--no-verify`` on write-path commits.
+
+    Hive's auto-commits should skip the human-oriented pre-commit hook
+    chain (a slow vault hook hung writes ~60s until the deadline killed
+    them; scanning lives push-side/CI now). Default True; overridable via
+    ``HIVE_GIT_COMMIT_NO_VERIFY``. Both ``_git_commit`` and
+    ``_git_commit_all`` are exercised so neither write path regresses.
+    """
+
+    @staticmethod
+    def _capture_run_git(
+        monkeypatch: pytest.MonkeyPatch,
+        calls: list[list[str]],
+    ) -> None:
+        """Replace ``_run_git`` with a recorder that always succeeds."""
+
+        def fake_run_git(
+            args: list[str],
+            _vault: Path,
+            *,
+            registry: object = None,  # noqa: ARG001
+        ) -> tuple[int, str, str]:
+            calls.append(["git", *args])
+            # ``status`` must look dirty so ``_git_commit_all`` reaches commit;
+            # ``rev-parse`` must yield a SHA for its return path.
+            if args[:2] == ["status", "--porcelain"]:
+                return 0, " M a.md\n", ""
+            if args[:1] == ["rev-parse"]:
+                return 0, "0" * 40, ""
+            return 0, "", ""
+
+        monkeypatch.setattr("hive._helpers._run_git", fake_run_git)
+
+    def test_git_commit_includes_no_verify_by_default(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Default (``git_commit_no_verify=True``) → commit argv has --no-verify."""
+        from pathlib import Path as _Path
+
+        monkeypatch.setattr("hive.config.settings.git_commit_no_verify", True)
+        calls: list[list[str]] = []
+        self._capture_run_git(monkeypatch, calls)
+
+        _git_commit(tmp_path, [_Path("a.md")], "msg")
+
+        [commit] = [c for c in calls if c[:2] == ["git", "commit"]]
+        assert commit == ["git", "commit", "--no-verify", "-m", "msg"]
+
+    def test_git_commit_omits_no_verify_when_disabled(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``git_commit_no_verify=False`` → commit argv has no --no-verify."""
+        from pathlib import Path as _Path
+
+        monkeypatch.setattr("hive.config.settings.git_commit_no_verify", False)
+        calls: list[list[str]] = []
+        self._capture_run_git(monkeypatch, calls)
+
+        _git_commit(tmp_path, [_Path("a.md")], "msg")
+
+        [commit] = [c for c in calls if c[:2] == ["git", "commit"]]
+        assert commit == ["git", "commit", "-m", "msg"]
+        assert "--no-verify" not in commit
+
+    def test_git_commit_all_includes_no_verify_by_default(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``_git_commit_all`` also passes --no-verify by default."""
+        monkeypatch.setattr("hive.config.settings.git_commit_no_verify", True)
+        calls: list[list[str]] = []
+        self._capture_run_git(monkeypatch, calls)
+
+        _git_commit_all(tmp_path, "batch update")
+
+        [commit] = [c for c in calls if c[:2] == ["git", "commit"]]
+        assert commit == ["git", "commit", "--no-verify", "-m", "batch update"]
+
+    def test_git_commit_all_omits_no_verify_when_disabled(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``_git_commit_all`` omits --no-verify when the setting is False."""
+        monkeypatch.setattr("hive.config.settings.git_commit_no_verify", False)
+        calls: list[list[str]] = []
+        self._capture_run_git(monkeypatch, calls)
+
+        _git_commit_all(tmp_path, "batch update")
+
+        [commit] = [c for c in calls if c[:2] == ["git", "commit"]]
+        assert commit == ["git", "commit", "-m", "batch update"]
+        assert "--no-verify" not in commit
