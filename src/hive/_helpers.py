@@ -17,7 +17,7 @@ import time
 from collections import deque
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, date, datetime
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import filelock
 from mcp.types import ToolAnnotations
@@ -43,7 +43,7 @@ _REJECT_MSG = "The host should handle this task directly."
 RC_EXTERNAL_TERMINATION: int = -1
 
 
-def _subprocess_run_kwargs() -> dict[str, int]:
+def _subprocess_run_kwargs() -> dict[str, Any]:
     """Platform-specific kwargs for read-path ``subprocess.run`` calls.
 
     On Windows, adds ``CREATE_NO_WINDOW`` to suppress the console window
