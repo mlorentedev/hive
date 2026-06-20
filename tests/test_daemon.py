@@ -8,6 +8,7 @@ drives it with a thin `fastmcp.Client` — the production analogue of the spike.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import socket
 import stat
@@ -275,16 +276,35 @@ async def _session_calls(url: str, token: str, tool: str, args: dict[str, str], 
 
 @pytest.fixture
 def daemon_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
-    """Env pointing every DB + the vault + daemon state dir at a temp dir."""
+    """Env pointing every DB + the vault + daemon state dir at a temp dir.
+
+    The daemon/client subprocesses inherit a *scrubbed* copy of ``os.environ``:
+    every ambient ``HIVE_*`` / ``VAULT_PATH`` is stripped first, then only the
+    test's temp paths are set. Without the scrub a dev box that exports its real
+    ``HIVE_VAULT_PATH`` (which pydantic-settings' ``AliasChoices`` ranks ABOVE
+    the unprefixed ``VAULT_PATH``) would shadow the override below — the
+    subprocess would open the developer's real vault, where the seeded ``demo``
+    project does not exist, and every forwarded query would 404 ("Project 'demo'
+    not found"). This is the #212 class of "passes on clean CI, fails on a dev
+    box with real local state". Both vault aliases are set so neither precedence
+    order can leak. The autouse ``_isolate_hive_data_dir`` only fixes the parent
+    process; these subprocesses re-read the environment, so they need it here.
+    """
     vault = tmp_path / "vault"
     (vault / "10_projects").mkdir(parents=True)
+    base = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("HIVE_") and k != "VAULT_PATH"
+    }
     env = {
-        **os.environ,
+        **base,
         "HIVE_DB_PATH": str(tmp_path / "worker.db"),
         "HIVE_RELEVANCE_DB_PATH": str(tmp_path / "relevance.db"),
         "HIVE_LESSON_DB_PATH": str(tmp_path / "lesson.db"),
         "HIVE_LOG_PATH": str(tmp_path / "hive.log"),
         "VAULT_PATH": str(vault),
+        "HIVE_VAULT_PATH": str(vault),
     }
     return env, tmp_path
 
@@ -294,6 +314,35 @@ def _spawn_daemon(env: dict[str, str], port: int) -> subprocess.Popen[bytes]:
         [sys.executable, "-m", "hive.server", "serve", "--port", str(port)],
         env=env,
     )
+
+
+def _kill_tree(proc: subprocess.Popen[bytes], timeout_s: float = 10.0) -> None:
+    """Kill *proc* AND its descendants, then reap them all.
+
+    ``Popen.kill()`` terminates only the immediate process. On Windows the
+    daemon's ``uvicorn`` server runs the listening socket in a *child*
+    ``python.exe`` (confirmed via ``psutil.net_connections``: the LISTEN owner is
+    the child PID, not ``proc.pid``). Killing only the parent leaves that child
+    bound to the port, so a follow-up ``_wait_ready`` still connects and a
+    "daemon is gone" assertion flaps. ``psutil`` (a hard hive dependency) lets us
+    enumerate and kill the whole tree so the port is actually released. Falls
+    back to a plain ``proc.kill()`` if the process is already gone.
+    """
+    import psutil
+
+    try:
+        parent = psutil.Process(proc.pid)
+        victims = [*parent.children(recursive=True), parent]
+    except psutil.NoSuchProcess:
+        with contextlib.suppress(Exception):
+            proc.kill()
+        return
+    for victim in victims:
+        with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+            victim.kill()
+    psutil.wait_procs(victims, timeout=timeout_s)
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=timeout_s)
 
 
 def test_hive_serve_answers_tools_list(daemon_env: tuple[dict[str, str], Path]) -> None:
@@ -516,8 +565,9 @@ def test_client_reconnects_to_restarted_daemon_without_duplicate_write(
     def restart() -> None:
         nonlocal daemon_a, daemon_b
         assert daemon_a is not None
-        daemon_a.kill()
-        daemon_a.wait(timeout=10)
+        # Tree-kill so A's listening child (which also holds the singleton
+        # daemon.lock) dies — otherwise B cannot reacquire the lock and publish.
+        _kill_tree(daemon_a)
         daemon_a = None
         daemon_b = _spawn_daemon(env, port_b)
         assert _wait_published(state_dir, port_b), "daemon B never published its port"
@@ -568,11 +618,13 @@ def test_client_degrades_in_process_when_daemon_dies_mid_session(
     def kill() -> None:
         nonlocal daemon
         assert daemon is not None
-        daemon.kill()
-        daemon.wait(timeout=10)
+        # Kill the whole tree: on Windows the listening socket lives in a child
+        # python.exe, so a parent-only kill leaves the port bound (see
+        # _kill_tree). Tree-killing actually frees the port the probe below.
+        _kill_tree(daemon)
         # The shim's per-call factory TCP-probes the now-dead port; a refused
         # connect (loopback RST) flips it to in-process without a restart.
-        assert not _wait_ready(port, deadline_s=2.0), "daemon port still open"
+        assert not _wait_ready(port, deadline_s=5.0), "daemon port still open"
         daemon = None
 
     try:
