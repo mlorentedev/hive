@@ -79,6 +79,14 @@ class HiveSettings(BaseSettings):
     # version to detect an in-place upgrade (`uv tool upgrade`). On drift it
     # clean-stops and exits non-zero so the supervisor restarts into new code.
     upgrade_poll_s: float = Field(default=30.0, gt=0.0, le=3600.0)
+    # Pass ``--no-verify`` on every write-path ``git commit``. Hive is
+    # automation: its auto-commits should never fire the human-oriented
+    # pre-commit hook chain. A slow vault hook (gitleaks + a language:python
+    # local hook) takes ~9s warm and up to 60s cold/under concurrency, which
+    # hung vault_write/vault_patch/capture_lesson for ~60s until the deadline
+    # killed them. Secret scanning now lives push-side/CI on the vault, so
+    # skipping the hook here is safe. Override with HIVE_GIT_COMMIT_NO_VERIFY.
+    git_commit_no_verify: bool = True
 
     @field_validator("vault_scopes")
     @classmethod
