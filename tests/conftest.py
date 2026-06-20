@@ -197,6 +197,49 @@ def openrouter() -> OpenRouterClient:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_hive_data_dir(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Point hive's persistent DBs at a throwaway dir for every test.
+
+    ``create_server`` builds its worker/relevance/lesson DBs — and the
+    ``LockEvictionTracker`` / ``IdempotencyStore`` (both
+    ``db_path.parent / *.db``) — from the *module-level* ``settings`` singleton
+    (``hive.config.settings``), which pydantic-settings froze at import time.
+    Setting ``HIVE_*`` env vars after import therefore never reaches
+    ``create_server``: the singleton already holds the real
+    ``~/.local/share/hive`` paths. Tests then read and *write* the developer's
+    real data dir — eviction counts accumulate across runs, so
+    ``test_runtime_block_includes_lock_eviction`` ("fresh tracker → 0") fails on
+    any box with prior history while staying green on clean CI.
+
+    Fix: mutate the live singleton's path attributes (monkeypatch restores them)
+    so ``create_server`` resolves every DB under a per-test temp dir. The
+    ``HIVE_*`` env vars are *also* set, for any code path that constructs a
+    fresh ``HiveSettings()``. ``test_config``'s own ``_isolate_hive_env`` clears
+    these vars again so its default-value asserts still see the hardcoded
+    defaults (it reconstructs ``HiveSettings()`` and never reads this singleton).
+    """
+    from hive.config import settings
+
+    data = tmp_path_factory.mktemp("hive-data")
+    worker_db = data / "worker.db"
+    relevance_db = data / "relevance.db"
+    lesson_db = data / "lesson.db"
+    log_file = data / "hive.log"
+    monkeypatch.setenv("HIVE_DB_PATH", str(worker_db))
+    monkeypatch.setenv("HIVE_RELEVANCE_DB_PATH", str(relevance_db))
+    monkeypatch.setenv("HIVE_LESSON_DB_PATH", str(lesson_db))
+    monkeypatch.setenv("HIVE_LOG_PATH", str(log_file))
+    # The frozen singleton — not the env — is what create_server actually reads.
+    monkeypatch.setattr(settings, "db_path", str(worker_db))
+    monkeypatch.setattr(settings, "relevance_db_path", str(relevance_db))
+    monkeypatch.setattr(settings, "lesson_db_path", str(lesson_db))
+    monkeypatch.setattr(settings, "log_path", str(log_file))
+
+
+@pytest.fixture(autouse=True)
 def _reset_ghost_response_counter() -> Generator[None, None, None]:
     """Reset the module-level ghost-response counter around every test.
 
