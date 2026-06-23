@@ -1,24 +1,29 @@
 ---
 id: adr-016-cross-agent-memory-consolidation
 type: adr
-status: proposed
+status: accepted
 created: "2026-06-19"
 ---
 
 # ADR-016: Cross-Agent Memory Consolidation — One Store (Vault), One API (Hive)
 
-> **PROPOSED — ready for ratification; NOT merged.** Deliverable of a read-only architecture spike
+> **ACCEPTED (minimal reading) — ratified 2026-06-23 (dotfiles #540 architecture session).** Deliverable of a read-only architecture spike
 > (`mlorentedev/memory-arch-spike`). The open placement question (2a vs 2b) was **resolved on
 > 2026-06-19** by the daemon-regression diagnosis
 > (`~/.local/share/hive/analysis-daemon-regression-and-intelligence.md`) → **2a (embed in hive)**.
-> This ADR records the analysis and the resolved recommendation; final acceptance is by PR review.
-> No hive code was changed by the spike.
+> This ADR records the analysis and the resolved recommendation, **ratified in its minimal reading**
+> (see Status). No hive code was changed by the spike.
 
 ## Status
 
-Proposed — 2026-06-19 (open question resolved same day). Spike question: *how does the
-cross-agent memory system consolidate into ONE thing?* **Placement resolved to 2a (embed in hive)**
-by the daemon-regression diagnosis — see Decision §2. Awaiting PR ratification; not merged. Touches dotfiles
+**Accepted — ratified in its minimal reading 2026-06-23** (dotfiles #540 architecture session). The
+operative decision taken: **retire claude-mem and drop L0** (Q2 below) — rely on the cross-agent L1
+(handoffs) + L2 (lessons) already in the vault, accepting the loss of conversation-level recall. The
+engram-shaped **index is deferred** until measured need (hive#263 — FTS5 cold-rebuild first); placement
+**2a** stands but is not yet exercised. Execution: claude-mem retirement in dotfiles PR #544 (MEM-002).
+
+Spike question: *how does the cross-agent memory system consolidate into ONE thing?* **Placement resolved
+to 2a (embed in hive)** by the 2026-06-19 daemon-regression diagnosis — see Decision §2. Touches dotfiles
 [#117](https://github.com/mlorentedev/dotfiles/issues/117),
 [#439](https://github.com/mlorentedev/dotfiles/issues/439),
 [#410](https://github.com/mlorentedev/dotfiles/issues/410),
@@ -309,19 +314,24 @@ per GUARD-001. The live decision is the *placement* of the self-built indexed co
   robustness review (#450) and a suspected live locking regression; "remove the race, don't manage it"
   (ADR-014) argues for fixing the path *before* loading it.
 
-## Open questions (for the ratification discussion)
+## Open questions (ratified 2026-06-23)
 
 1. **Placement — RESOLVED → 2a (embed).** (Was: 2a vs 2b; the 2026-06-19 diagnosis refuted the
    structural case that justified 2b.) Residual: confirm **ADR-015** daemon supervision is tractable
-   on Windows; if not, reconsider 2b as the documented fallback.
-2. **L0 ownership.** Does hive absorb conversation-flow capture (replacing claude-mem cross-agent), or
-   does claude-mem stay as Claude-local L0 with hive owning L1+L2?
-3. **Index type.** Resume HIVE-211's *vector* RAG, add engram-style *FTS5* lexical, or both?
-   (HIVE-211 chose vector-only; engram is FTS5 — copying engram suggests reconsidering.)
-4. **Gate definition.** The write-path `--no-verify` fix and ADR-015 daemon supervision are proposed as
-   **separate hive issues** that Phase 1 / Phase 2 depend on (not folded into #450). Confirm that split.
-5. **Code-study signal.** What concrete signal from the engram code-study decides "this component is
-   worth copying" per piece (schema / upsert / FTS5 lifecycle)?
+   on Windows; if not, reconsider 2b as the documented fallback. *Not yet exercised — no index is built
+   yet (see Q3).*
+2. **L0 ownership — RESOLVED → retire claude-mem, drop L0.** Neither branch: L0 (conversation-flow
+   capture) is *dropped*, not unified. Rely on cross-agent L1 (handoffs) + L2 (lessons) in the vault;
+   accept the loss of conversation-level recall. Execution: dotfiles PR #544 / MEM-002. The unify-L0
+   direction (dotfiles #439) is **declined**.
+3. **Index type — DEFERRED (moot until an index is built).** When triggered (hive#263): **FTS5
+   cold-rebuild first** (no daemon, lowest complexity), vector (HIVE-211 / #228) only if FTS5 proves
+   insufficient.
+4. **Gate definition — N/A under the minimal reading.** No write-through is added now (a store is
+   *removed*, not loaded), so the write-path `--no-verify` fix and ADR-015 daemon gates apply only
+   if/when the deferred index (Q3) lands.
+5. **Code-study signal — DEFERRED with hive#263** (only relevant once copying engram's index shape is
+   on the table).
 
 ## References
 
