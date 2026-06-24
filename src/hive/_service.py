@@ -197,7 +197,13 @@ def _run(cmd: list[str]) -> int:
         print(f"hive: command not available: {cmd[0]}", file=sys.stderr)
         return 1
     if proc.returncode != 0:
-        _log.warning("hive.service %s rc=%s %s", cmd, proc.returncode, proc.stderr.strip())
+        stderr = proc.stderr.strip()
+        _log.warning("hive.service %s rc=%s %s", cmd, proc.returncode, stderr)
+        # Logging is unconfigured in the normal CLI path, so the warning above
+        # is invisible — surface the child's stderr so the user sees WHY it
+        # failed instead of a bare non-zero exit (#252).
+        if stderr:
+            print(stderr, file=sys.stderr)
     return proc.returncode
 
 
