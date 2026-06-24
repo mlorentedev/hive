@@ -15,21 +15,28 @@ created: "2026-06-24"
 
 ## Implementation
 
-> **FROZEN pending the A3-vs-A4 decision** (proposal.md → Risks, the blocking open
-> question). The implementation steps depend on which swap mechanism is chosen and
-> on whether the fix interposes inside uv's tool layout or installs a hive-owned
-> location behind a junction. Do not expand this section until that is resolved.
->
-> Sketch once decided (TDD order, one commit each):
->
-> - [ ] Write failing test for the swap primitive (atomic repoint / rename) on a
->       locked target — pure, OS-mocked like the existing `_service` renderer tests.
-> - [ ] Implement the swap primitive (A3 junction repoint **or** A4 MoveFileEx).
-> - [ ] Write failing test: a failed swap leaves the previous install intact.
-> - [ ] Implement the rollback / no-corruption guarantee + actionable error.
-> - [ ] Wire the swap into the upgrade path (`_service.py` / `_daemon.py`).
-> - [ ] Real-hardware validation on a non-admin Windows box (manual, recorded in
->       `verification.md`).
+> Mechanism = **A3 (versioned-dir + atomic junction swap)**, spike-gated per
+> ADR-015. TDD order, one commit each. The spike GATES the rest: if A3 proves too
+> invasive on real hardware, stop and fall back to A4→A2 (proposal.md → Risks).
+
+- [ ] **Spike (gating):** on a real non-admin Windows box, validate A3 with uv —
+      write a fresh `versions/<v>/` dir, create the `current` junction
+      (`mklink /J`, no admin), atomically repoint it **while the daemon runs**,
+      relaunch from `current`, confirm no locked-file / "Access is denied" error.
+      Record evidence in `verification.md`. **If this fails, do not proceed —
+      revisit the ladder.**
+- [ ] Write failing test for the junction-repoint primitive (pure, OS-mocked like
+      the existing `_service` renderer tests).
+- [ ] Implement the versioned-dir layout + `current` junction repoint helper.
+- [ ] Write failing test: a failed repoint leaves `current` pointing at the
+      previous version (no corruption, previous install intact).
+- [ ] Implement the rollback / no-corruption guarantee + actionable WHY/FIX error.
+- [ ] Wire the swap into the upgrade path (`_service.py` / `_daemon.py`); the
+      supervisor relaunches from `current`; GC the old dir once unreferenced.
+- [ ] Decouple from bare `uv tool install --upgrade` (hive-managed upgrade) —
+      companion dotfiles work, cross-repo, tracked separately.
+- [ ] Real-hardware re-validation: the #267 reproduction no longer reproduces
+      (manual, recorded in `verification.md`).
 
 ## Closing
 

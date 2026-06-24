@@ -13,9 +13,9 @@ template_version: "1.0"
 > **Naming**: file lives at `<repo>/specs/HIVE-267-upgrade-swap/proposal.md`.
 
 > `[AGENT-DRAFT — review before archive]` — this proposal was drafted from the
-> rich content of issue #267. Review every section; the **A3-vs-A4 decision in
-> Risks is a blocking open question for you to own** before any `tasks.md` is
-> frozen.
+> rich content of issue #267. The blocking mechanism decision is **RESOLVED**
+> (A3-first, see Risks); the remaining sections are drafted from the issue —
+> review them before archive.
 
 ## Why
 
@@ -59,20 +59,38 @@ working install intact rather than a half-removed directory.
 
 ## Risks / open questions
 
-> **BLOCKING — must be resolved before `tasks.md` is frozen.**
+> Mechanism decision **RESOLVED** (2026-06-24). Remaining items are spike-time
+> questions, not blockers on freezing `tasks.md`.
 
-- `[AGENT-DRAFT]` **A3 vs A4 — the core mechanism decision (Socratic, yours).**
-  - **A3 (ADR-015 recommended):** versioned install dir + a `current` junction;
-    install the new version beside the old, atomically repoint the junction
-    (`mklink /J`, no admin), GC the old dir once unreferenced.
-  - **A4:** rename-then-replace the locked target via `MoveFileEx`
-    (`MOVEFILE_REPLACE_EXISTING` / delay-until-reboot), moving the in-use dir
-    aside so the new one can take its place.
+- **RESOLVED — mechanism = A3-first, spike-gated (per ADR-015 §(A), maintainer's
+  call 2026-06-24).** Spike A3 on a real non-admin Windows box; if it proves too
+  invasive, fall back to A4 then A2 (documented below). A3 is the bullet-proof,
+  C7-safe target; its accepted cost is that **hive owns a Windows-specific
+  install layout fronted by a junction, decoupled from `uv tool upgrade`** — so
+  the dotfiles upgrade path must stop calling bare `uv tool install --upgrade`
+  (companion dotfiles work).
+  - **A3 (chosen target):** versioned install dir + a `current`
+    junction; write the new version beside the old, atomically repoint the
+    junction (`mklink /J`, no admin), GC the old dir. Bullet-proof against
+    native-dep upgrades, C7-safe. **Cost:** hive owns a Windows-specific
+    install/upgrade layout, decoupled from `uv tool upgrade` — a real
+    maintenance surface.
+  - **A4:** rename-then-replace each locked target via `MoveFileEx`. C7-safe,
+    less invasive than A3, but must enumerate exactly which files uv touches —
+    **fragile coupling to uv internals.**
+  - **A2 (cheapest):** tolerate-in-place — uv already updates pure-python
+    site-packages while running; treat the entrypoint-copy failure as non-fatal
+    (the launcher is a version-agnostic trampoline) and refresh it in the brief
+    unlocked window after exit 75. **Covers the observed #267 failure** (locked
+    `Scripts`/entrypoint) but **NOT** a release that bumps a loaded native module
+    (`.pyd`: pydantic-core, cryptography) → mixed-version venv. hive ships those
+    deps, so this risk is real, not theoretical.
 - `[AGENT-DRAFT]` **uv owns `%APPDATA%\uv\tools\hive-vault`.** Can we interpose a
   swap inside uv's managed layout, or must hive own a separate install location
   fronted by a junction that uv's `--upgrade` does not manage? This decides
   whether the fix lives in hive alone or needs the dotfiles upgrade path to stop
-  calling bare `uv tool install --upgrade`.
+  calling bare `uv tool install --upgrade`. (An upstream `uv` issue —
+  replace-while-running on Windows — is filed regardless, per ADR-015.)
 - `[AGENT-DRAFT]` **The supervisor holds the lock.** The swap must succeed while
   the Startup supervisor keeps `python.exe` running, or coordinate a bounded
   stop/restart (exit-75 contract) without a window where the MCP is dead.
