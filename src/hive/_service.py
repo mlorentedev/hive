@@ -172,16 +172,57 @@ def render_windows_task_xml(
       in session 0 — no console window — at logon, no stored password, no admin
       (the per-user analogue of ``systemd --user``).
     """
-    loop = (
-        f"while($true){{ & '{command}' {arguments}; "
-        f"if($LASTEXITCODE -eq 0){{break}} Start-Sleep -Seconds 1 }}"
+    ps_arguments = (
+        f"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden "
+        f'-Command "{_supervisor_ps_command(command, arguments)}"'
     )
-    ps_arguments = f'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "{loop}"'
     principal_user = f"      <UserId>{escape(user)}</UserId>\n" if user else ""
     return _WINDOWS_TASK_TEMPLATE.format(
         principal_user=principal_user,
         arguments=escape(ps_arguments),
     )
+
+
+def _supervisor_ps_command(command: str, arguments: str) -> str:
+    """The PowerShell relaunch loop shared by the Scheduled Task and the
+    Startup-folder fallback — a single SSOT for the restart contract: relaunch
+    ``<command> <arguments>`` while it exits non-zero, stop on a clean exit 0
+    (drift → 75 → relaunch onto new code; clean stop / singleton-decline → 0)."""
+    return (
+        f"while($true){{ & '{command}' {arguments}; "
+        f"if($LASTEXITCODE -eq 0){{break}} Start-Sleep -Seconds 1 }}"
+    )
+
+
+def render_startup_vbs(command: str, arguments: str = "serve") -> str:
+    """A windowless Startup-folder launcher for the daemon — the fallback used
+    when Task Scheduler is policy-locked for a non-admin/domain user (#252).
+
+    ``WScript.Shell.Run(cmd, 0, False)`` launches the PowerShell supervisor loop
+    with a hidden window (style 0) and does not block — the per-user analogue of
+    the S4U Scheduled Task, carrying the identical restart contract. It writes to
+    ``shell:startup`` only, which a standard user can write, so it needs neither
+    admin nor Task Scheduler.
+    """
+    ps = (
+        f"powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden "
+        f'-Command "{_supervisor_ps_command(command, arguments)}"'
+    )
+    # A double-quote inside a VBS string literal is escaped by doubling it.
+    vbs_arg = ps.replace('"', '""')
+    return f'Set sh = CreateObject("WScript.Shell")\r\nsh.Run "{vbs_arg}", 0, False\r\n'
+
+
+def _startup_dir() -> Path:
+    """The current user's Startup folder — writable without admin, unlike the
+    policy-lockable Task Scheduler (``shell:startup``)."""
+    appdata = os.environ.get("APPDATA", "")
+    return Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+
+
+def startup_vbs_path() -> Path:
+    """Path of the Startup-folder launcher used as the Task Scheduler fallback."""
+    return _startup_dir() / "hive-serve.vbs"
 
 
 # ── supervisor invocation (mocked in tests; real on the CI matrix) ───────
@@ -274,7 +315,36 @@ def _install_windows(*, enable: bool) -> int:
     rc = _schtasks_create(WINDOWS_TASK_NAME, xml=xml)
     if rc == 0:
         print(f"hive: registered scheduled task {WINDOWS_TASK_NAME}")
-    return rc
+        return 0
+    # Task Scheduler can be policy-locked for a non-admin/domain user; fall back
+    # to a per-user Startup launcher that needs no admin (#252).
+    return _install_windows_startup_fallback()
+
+
+def _install_windows_startup_fallback() -> int:
+    """Write a per-user Startup-folder launcher when Task Scheduler is locked.
+
+    Returns 0 on success; on a write failure it prints an actionable message and
+    returns non-zero — never a silent success that hides a broken install."""
+    exe = _resolve_exec()
+    path = startup_vbs_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(render_startup_vbs(exe), encoding="utf-8")
+    except OSError as exc:
+        print(
+            f"hive: Task Scheduler is unavailable and the Startup-folder fallback "
+            f"could not be written ({exc}). Launch `{exe} serve` at logon yourself, "
+            f"or retry `hive service install` as administrator.",
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        f"hive: Task Scheduler unavailable — installed a per-user Startup launcher "
+        f"at {path}. The daemon starts at your next logon; run `{exe} serve` now to "
+        f"start it this session.",
+    )
+    return 0
 
 
 def install_service(*, enable: bool = True) -> int:
@@ -303,8 +373,28 @@ def uninstall_service() -> int:
         print("hive: service removed")
         return rc if rc == 0 else 0
     if plat == "windows":
-        return _run(["schtasks", "/Delete", "/TN", WINDOWS_TASK_NAME, "/F"])
+        rc = _run(["schtasks", "/Delete", "/TN", WINDOWS_TASK_NAME, "/F"])
+        # Also remove the Startup-folder fallback — it may be the only mechanism
+        # installed (Task Scheduler was locked), so a failed task delete is fine.
+        removed_fallback = _remove_startup_fallback()
+        if rc == 0 or removed_fallback:
+            print("hive: service removed")
+            return 0
+        return rc
     return _unsupported("uninstall")
+
+
+def _remove_startup_fallback() -> bool:
+    """Remove the Startup-folder launcher if present; True if it was removed."""
+    path = startup_vbs_path()
+    if not path.exists():
+        return False
+    try:
+        path.unlink()
+    except OSError as exc:
+        _log.warning("hive.service could not remove %s: %s", path, exc)
+        return False
+    return True
 
 
 def service_status() -> int:
