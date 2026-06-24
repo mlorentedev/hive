@@ -85,12 +85,17 @@ working install intact rather than a half-removed directory.
     `Scripts`/entrypoint) but **NOT** a release that bumps a loaded native module
     (`.pyd`: pydantic-core, cryptography) → mixed-version venv. hive ships those
     deps, so this risk is real, not theoretical.
-- `[AGENT-DRAFT]` **uv owns `%APPDATA%\uv\tools\hive-vault`.** Can we interpose a
-  swap inside uv's managed layout, or must hive own a separate install location
-  fronted by a junction that uv's `--upgrade` does not manage? This decides
-  whether the fix lives in hive alone or needs the dotfiles upgrade path to stop
-  calling bare `uv tool install --upgrade`. (An upstream `uv` issue —
-  replace-while-running on Windows — is filed regardless, per ADR-015.)
+- **RESOLVED — interposition = hive owns the versioned layout (2026-06-24).**
+  `uv tool` has no per-version dir (it always rewrites the same dir), so hive
+  manages its own root: `%LOCALAPPDATA%\hive\runtime\versions\<v>\` (each a full
+  venv built fresh by `uv venv` + `uv pip install hive-vault==<v>` — uv/pip still
+  does the heavy lifting), a `current` junction → the active version, and a
+  launcher that resolves through `current`. The dotfiles upgrade trigger calls a
+  new `hive self-upgrade` instead of bare `uv tool install --upgrade`.
+  **Consequence (accepted):** on Windows hive is no longer a plain `uv tool` —
+  `uv tool list` shows a stale/unmanaged entry; documented as expected. (An
+  upstream `uv` issue — replace-while-running on Windows — is filed regardless,
+  per ADR-015.)
 - `[AGENT-DRAFT]` **The supervisor holds the lock.** The swap must succeed while
   the Startup supervisor keeps `python.exe` running, or coordinate a bounded
   stop/restart (exit-75 contract) without a window where the MCP is dead.

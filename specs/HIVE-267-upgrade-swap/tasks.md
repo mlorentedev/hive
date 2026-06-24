@@ -24,16 +24,27 @@ created: "2026-06-24"
       1.41.5 was locked — no "Access is denied"; old-version GC deferred then
       succeeded on release. Evidence in `verification.md`. **A3 confirmed feasible
       — proceed; no fallback to A4/A2 needed.**
+> Interposition = **hive owns the layout** (`%LOCALAPPDATA%\hive\runtime\versions\<v>`
+> + `current` junction + own launcher; versions built via `uv venv` + `uv pip
+> install`; dotfiles upgrade calls `hive self-upgrade`). Likely a new
+> `src/hive/_runtime.py` (layout/junction/GC) + a `hive self-upgrade` subcommand.
+
 - [ ] Write failing test for the junction-repoint primitive (pure, OS-mocked like
       the existing `_service` renderer tests).
-- [ ] Implement the versioned-dir layout + `current` junction repoint helper.
-- [ ] Write failing test: a failed repoint leaves `current` pointing at the
-      previous version (no corruption, previous install intact).
+- [ ] Implement the repoint primitive + versioned-layout paths
+      (`runtime_root()`, `versions_dir()`, `current_link()`, `repoint(current, v)`).
+- [ ] Write failing test: a failed repoint leaves `current` at the previous
+      version (no corruption, previous install intact).
 - [ ] Implement the rollback / no-corruption guarantee + actionable WHY/FIX error.
-- [ ] Wire the swap into the upgrade path (`_service.py` / `_daemon.py`); the
-      supervisor relaunches from `current`; GC the old dir once unreferenced.
-- [ ] Decouple from bare `uv tool install --upgrade` (hive-managed upgrade) —
-      companion dotfiles work, cross-repo, tracked separately.
+- [ ] Implement "build a version into a fresh dir" (`uv venv` + `uv pip install
+      hive-vault==<v>`), never touching the in-use one; GC old versions once
+      unreferenced.
+- [ ] Add the `hive self-upgrade [<version>]` subcommand wiring the above; the
+      launcher (`~/.local/bin`) + supervisor resolve through `current`.
+- [ ] **Companion (dotfiles, cross-repo):** replace the bare `uv tool install
+      --upgrade` trigger (`setup-windows.ps1` timer / `mcp-servers.json`
+      `prerequisite_command`) with `hive self-upgrade`. Document the
+      "no-longer-a-uv-tool on Windows" consequence.
 - [ ] Real-hardware re-validation: the #267 reproduction no longer reproduces
       (manual, recorded in `verification.md`).
 
