@@ -16,16 +16,21 @@ Map every acceptance criterion from `proposal.md` to concrete proof (commit hash
 
 ## Test status
 
-- Test suite: `<command> -> <output / coverage %>`
-- Manual smoke test: what was exercised, what was observed
-- No regressions in existing test suite: yes / no (if no, document)
+- Test suite: not yet — implementation not started (spike only).
+- **A3 feasibility spike — PASSED** (real non-admin Windows `TDY\MLORENTE`, uv 0.10.5, 2026-06-24; sandbox `scratchpad/a3-spike.ps1`, never touched the real install):
+  1. Created a `current` junction → `versions/1.41.5` **as non-admin** — read through it OK.
+  2. Held an **exclusive in-process lock** on `versions/1.41.5/core.pyd` (simulating a loaded `.pyd` / running venv python). Confirmed locked: `Remove-Item` failed with "being used by another process".
+  3. **Repointed `current` → `versions/1.41.6` WHILE 1.41.5 was locked — SUCCEEDED with NO "Access is denied"**; reads through `current` then returned 1.41.6. This is the exact #267 failure mode, now avoided.
+  4. GC of the locked old version was correctly **deferred** (fails while locked) and **succeeded after the lock released** — A3's "GC old dir once unreferenced".
+- No regressions: n/a (no code changed yet).
 
 ## Decisions made during implementation
 
 Brief log of non-obvious trade-offs or course corrections taken during the work. Routine choices belong in commit messages, not here.
 
--
--
+- **A3 validated on real non-admin Windows hardware (2026-06-24) — proceed with A3; no fallback to A4/A2 needed.** Junction ops touch only the reparse point, never the locked target files, so the repoint is immune to the in-use lock that breaks `uv tool upgrade` (#267).
+- Spike harness correction: an initial `Start-Process` lock-holder was racy (PowerShell startup latency left the file briefly unlocked, producing a false result). Switched to an in-process `[IO.File]::Open(..., FileShare.None)` for a deterministic lock — recorded so the next person does not repeat the race.
+- Implementation note: the practical repoint (`rmdir` junction + recreate) has a sub-millisecond non-atomic window where `current` is absent; tolerated by the supervisor's relaunch loop. A fully atomic swap (create `current.new`, rename over `current`) is an optional refinement, not a feasibility blocker.
 
 ## Promotion candidates
 

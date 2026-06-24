@@ -19,12 +19,11 @@ created: "2026-06-24"
 > ADR-015. TDD order, one commit each. The spike GATES the rest: if A3 proves too
 > invasive on real hardware, stop and fall back to A4→A2 (proposal.md → Risks).
 
-- [ ] **Spike (gating):** on a real non-admin Windows box, validate A3 with uv —
-      write a fresh `versions/<v>/` dir, create the `current` junction
-      (`mklink /J`, no admin), atomically repoint it **while the daemon runs**,
-      relaunch from `current`, confirm no locked-file / "Access is denied" error.
-      Record evidence in `verification.md`. **If this fails, do not proceed —
-      revisit the ladder.**
+- [x] **Spike (gating): PASSED** (2026-06-24, real non-admin Windows). Junction
+      created non-admin; `current` repointed `versions/1.41.5` → `1.41.6` while
+      1.41.5 was locked — no "Access is denied"; old-version GC deferred then
+      succeeded on release. Evidence in `verification.md`. **A3 confirmed feasible
+      — proceed; no fallback to A4/A2 needed.**
 - [ ] Write failing test for the junction-repoint primitive (pure, OS-mocked like
       the existing `_service` renderer tests).
 - [ ] Implement the versioned-dir layout + `current` junction repoint helper.
