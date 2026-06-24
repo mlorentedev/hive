@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, Mock
@@ -110,6 +111,23 @@ class TestVaultNotFound:
     async def test_vault_health(self, missing_vault_mcp: FastMCP) -> None:
         result = await missing_vault_mcp.call_tool("vault_health", {})
         assert "Vault not found" in _text(result)
+
+    def test_startup_logs_warning_for_missing_vault(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """create_server emits a loud WHY/FIX warning when the vault path is
+        missing, so a dead path is visible at startup — not only once a tool is
+        called (#246)."""
+        missing = tmp_path / "nonexistent"
+        with caplog.at_level(logging.WARNING, logger="hive"):
+            mcp = create_server(vault_path=missing)
+        _close_server(mcp)
+        messages = [r.getMessage() for r in caplog.records]
+        assert any(
+            "does not exist" in m and "FIX" in m and str(missing) in m for m in messages
+        )
 
     async def test_capture_lesson(self, missing_vault_mcp: FastMCP) -> None:
         result = await missing_vault_mcp.call_tool(
