@@ -193,3 +193,50 @@ def test_cli_service_status_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("hive._service.service_status", lambda: 3)
     assert server._run_service(["status"]) == 3
+
+
+# ── _run surfaces failures to the user (#252 bug 1) ──────────────────────
+
+
+def test_run_prints_child_stderr_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """On a non-zero exit, _run prints the child's stderr to sys.stderr so the
+    CLI user sees WHY it failed. Logging is unconfigured in the normal CLI case,
+    so the _log.warning alone left `hive service install` exiting 1 with zero
+    output (#252)."""
+    import subprocess
+
+    import hive._service as svc
+
+    def _fake_run(*_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=["schtasks"],
+            returncode=1,
+            stdout="",
+            stderr="ERROR: Access is denied.\n",
+        )
+
+    monkeypatch.setattr(svc.subprocess, "run", _fake_run)
+    rc = svc._run(["schtasks", "/Create"])
+    assert rc == 1
+    assert "Access is denied" in capsys.readouterr().err
+
+
+def test_run_is_quiet_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A successful command prints nothing — no spurious stderr noise."""
+    import subprocess
+
+    import hive._service as svc
+
+    def _fake_run(*_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=["schtasks"], returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(svc.subprocess, "run", _fake_run)
+    rc = svc._run(["schtasks", "/Query"])
+    assert rc == 0
+    assert capsys.readouterr().err == ""
