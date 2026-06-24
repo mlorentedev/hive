@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.41.7](https://github.com/mlorentedev/hive/compare/v1.41.6...v1.41.7) (2026-06-24)
+
+
+### Documentation
+
+* **lessons:** CI runs ruff format --check, not just ruff check ([#279](https://github.com/mlorentedev/hive/issues/279)) ([24d1361](https://github.com/mlorentedev/hive/commit/24d1361ec117e822932ddded002ede40f82f48b6))
+
 ## [1.41.6](https://github.com/mlorentedev/hive/compare/v1.41.5...v1.41.6) (2026-06-24)
 
 
