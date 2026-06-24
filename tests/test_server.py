@@ -125,9 +125,7 @@ class TestVaultNotFound:
             mcp = create_server(vault_path=missing)
         _close_server(mcp)
         messages = [r.getMessage() for r in caplog.records]
-        assert any(
-            "does not exist" in m and "FIX" in m and str(missing) in m for m in messages
-        )
+        assert any("does not exist" in m and "FIX" in m and str(missing) in m for m in messages)
 
     async def test_capture_lesson(self, missing_vault_mcp: FastMCP) -> None:
         result = await missing_vault_mcp.call_tool(
