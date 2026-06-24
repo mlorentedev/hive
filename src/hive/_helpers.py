@@ -17,7 +17,7 @@ import time
 from collections import deque
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, date, datetime
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import filelock
 from mcp.types import ToolAnnotations
