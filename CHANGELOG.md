@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.41.5](https://github.com/mlorentedev/hive/compare/v1.41.4...v1.41.5) (2026-06-24)
+
+
+### Bug Fixes
+
+* **vault:** accept slash-form project ids in resolution ([#269](https://github.com/mlorentedev/hive/issues/269)) ([1b815e4](https://github.com/mlorentedev/hive/commit/1b815e48199f2fe8bf90373335de18b126f09075))
+
+
+### Documentation
+
+* make AGENTS.md the cross-agent SSOT; slim CLAUDE.md to an overlay ([#270](https://github.com/mlorentedev/hive/issues/270)) ([2089de0](https://github.com/mlorentedev/hive/commit/2089de02d70b165ab40a1491ce4138417015d8d3))
+
 ## [1.41.4](https://github.com/mlorentedev/hive/compare/v1.41.3...v1.41.4) (2026-06-23)
 
 
