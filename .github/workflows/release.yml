@@ -44,7 +44,7 @@ jobs:
 
       - name: Check out release-please PR branch
         if: steps.release.outputs.pr
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.PR_BRANCH }}
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
@@ -79,7 +79,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v8.2.0
 
@@ -105,7 +105,7 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install mcp-publisher
         run: |
