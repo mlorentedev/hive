@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.41.4](https://github.com/mlorentedev/hive/compare/v1.41.3...v1.41.4) (2026-06-23)
+
+
+### Documentation
+
+* **adr:** ratify ADR-016 minimal reading — retire claude-mem, defer index ([#264](https://github.com/mlorentedev/hive/issues/264)) ([fc3f799](https://github.com/mlorentedev/hive/commit/fc3f799a2e37826b1ca2867243df000edefa28e1))
+
 ## [1.41.3](https://github.com/mlorentedev/hive/compare/v1.41.2...v1.41.3) (2026-06-20)
 
 

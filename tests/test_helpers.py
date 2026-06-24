@@ -339,6 +339,47 @@ class TestResolveProjectDir:
         assert result[0] == mock_vault / "00_meta"
         assert result[1] == "meta"
 
+    # ── slash-form round-trip (#235) ──
+
+    def test_slash_form_scope_qualified_resolves(self, tmp_path: Path) -> None:
+        """The slash form `vault_list` advertises (`agents/Hermes-NaN`) round-trips:
+        a leading segment that names a scope is treated as `scope:slug` (#235)."""
+        (tmp_path / "80_agents" / "Hermes-NaN").mkdir(parents=True)
+        scopes = {"projects": "10_projects", "agents": "80_agents"}
+        result = _resolve_project_dir(tmp_path, "agents/Hermes-NaN", scopes)
+        assert result is not None
+        assert result[0] == tmp_path / "80_agents" / "Hermes-NaN"
+        assert result[1] == "agents"
+
+    def test_slash_form_matches_colon_form(self, tmp_path: Path) -> None:
+        """The slash and colon forms resolve identically for a scope-qualified id."""
+        (tmp_path / "10_projects" / "testproject").mkdir(parents=True)
+        scopes = {"projects": "10_projects"}
+        slash = _resolve_project_dir(tmp_path, "projects/testproject", scopes)
+        colon = _resolve_project_dir(tmp_path, "projects:testproject", scopes)
+        assert slash is not None
+        assert slash == colon
+
+    def test_slash_form_nested_path_round_trips(self, tmp_path: Path) -> None:
+        """A full slash form `<scope>/<category>/<entity>` resolves like the colon
+        form `<scope>:<category>/<entity>` — only the first `/` is the scope."""
+        (tmp_path / "50_work" / "20-products" / "hydra3d-plus").mkdir(parents=True)
+        scopes = {"work": "50_work"}
+        result = _resolve_project_dir(tmp_path, "work/20-products/hydra3d-plus", scopes)
+        assert result is not None
+        assert result[0] == tmp_path / "50_work" / "20-products" / "hydra3d-plus"
+        assert result[1] == "work"
+
+    def test_slash_relative_path_non_scope_head_unaffected(self, tmp_path: Path) -> None:
+        """Regression: a `/` form whose head is NOT a scope key keeps its literal
+        relative-path meaning in auto-scan (the existing `_search_scope` feature)."""
+        (tmp_path / "50_work" / "20-products" / "hydra3d-plus").mkdir(parents=True)
+        scopes = {"projects": "10_projects", "work": "50_work"}
+        result = _resolve_project_dir(tmp_path, "20-products/hydra3d-plus", scopes)
+        assert result is not None
+        assert result[0] == tmp_path / "50_work" / "20-products" / "hydra3d-plus"
+        assert result[1] == "work"
+
 
 class TestStripCode:
     """Tests for _strip_code — relocated from _vault_health (HIVE-97)."""
