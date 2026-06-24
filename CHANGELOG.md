@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.41.6](https://github.com/mlorentedev/hive/compare/v1.41.5...v1.41.6) (2026-06-24)
+
+
+### Bug Fixes
+
+* **server:** warn loudly at startup when the vault path is missing ([#272](https://github.com/mlorentedev/hive/issues/272)) ([f6836b1](https://github.com/mlorentedev/hive/commit/f6836b1b9ea91964a4c08e11abf776419b129614))
+* **service:** fall back to a Startup-folder launcher when Task Scheduler is locked ([#276](https://github.com/mlorentedev/hive/issues/276)) ([3d4aa9c](https://github.com/mlorentedev/hive/commit/3d4aa9c215ce41c4a4547f39449c4fcf0ffea36f)), closes [#252](https://github.com/mlorentedev/hive/issues/252)
+* **service:** surface the child's stderr when a service command fails ([#274](https://github.com/mlorentedev/hive/issues/274)) ([8f5295d](https://github.com/mlorentedev/hive/commit/8f5295d1a4f2b987b595a7b7e97b732e62a7e9a0))
+* suppress console window flash on Windows git invocations ([#251](https://github.com/mlorentedev/hive/issues/251)) ([4dceadb](https://github.com/mlorentedev/hive/commit/4dceadbac1e9468a8e51d137dd5fc4aa6fef6696))
+
+
+### Documentation
+
+* **spec:** HIVE-267 upgrade-swap — scaffold + A3-first decision ([#277](https://github.com/mlorentedev/hive/issues/277)) ([e1a6523](https://github.com/mlorentedev/hive/commit/e1a65230b5f9dda06a9f8a2ded14c90bd870d0d2))
+* **spec:** resolve interposition (hive-owned layout) for HIVE-267 ([#278](https://github.com/mlorentedev/hive/issues/278)) ([87a383c](https://github.com/mlorentedev/hive/commit/87a383c47ee6a98c3e3b9cce59558b7d6d24b26c)), closes [#267](https://github.com/mlorentedev/hive/issues/267)
+
 ## [1.41.5](https://github.com/mlorentedev/hive/compare/v1.41.4...v1.41.5) (2026-06-24)
 
 
