@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+import os
 import sys
 import time
 from datetime import UTC, datetime
@@ -31,6 +32,7 @@ from hive._helpers import (  # noqa: E402
     _safe_read,
     _truncate,
     register_lock_eviction_tracker,
+    vault_startup_warning,
 )
 from hive._idempotency import IdempotencyStore  # noqa: E402
 from hive._lesson_reinforcement import LessonReinforcementTracker  # noqa: E402
@@ -120,6 +122,13 @@ def create_server(
     the loopback HTTP port is owner-gated (ADR-011 §2).
     """
     resolved_path = vault_path or settings.vault_path
+    # Surface a dead vault path at startup, not only when a tool is later
+    # called (#246). _vault_guard still guides per-call; this makes the
+    # outage visible in the log the moment the server comes up.
+    _env_set = bool(os.environ.get("HIVE_VAULT_PATH") or os.environ.get("VAULT_PATH"))
+    _startup_warning = vault_startup_warning(resolved_path, env_set=_env_set)
+    if _startup_warning:
+        logging.getLogger("hive").warning(_startup_warning)
     # The single boundary where the default scope mapping is applied (#159):
     # _resolve_project_dir requires an explicit scopes arg, so no other code
     # path carries an internal default that could drift untested.
@@ -564,7 +573,6 @@ def _setup_file_logging() -> None:
     directory is taken; the stem and suffix are kept; the PID is
     appended before the suffix.
     """
-    import os
     from pathlib import Path as _Path
 
     template = _Path(settings.log_path)

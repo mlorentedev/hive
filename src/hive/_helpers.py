@@ -301,6 +301,38 @@ def _vault_guard(ctx: ServerContext) -> str:
     return _VAULT_NOT_FOUND_MSG.format(path=ctx.vault)
 
 
+_VAULT_STALE_PATH_MSG = (
+    "Vault path {path} does not exist, but HIVE_VAULT_PATH (alias VAULT_PATH) "
+    "is set to it.\n"
+    "WHY: the configured vault path is stale — the vault was moved or the env "
+    "var points at the wrong location.\n"
+    "FIX: point HIVE_VAULT_PATH at your vault root, or unset it to fall back to "
+    "the default. Hive will start, but every vault tool fails until this is fixed."
+)
+_VAULT_MISSING_DEFAULT_MSG = (
+    "Vault path {path} does not exist and HIVE_VAULT_PATH is unset.\n"
+    "WHY: Hive fell back to the default vault path, which is missing.\n"
+    "FIX: set HIVE_VAULT_PATH (alias VAULT_PATH) to your Obsidian vault root. "
+    "Hive will start, but every vault tool fails until this is set."
+)
+
+
+def vault_startup_warning(resolved: Path, *, env_set: bool) -> str:
+    """Return a loud, actionable warning if the resolved vault path is missing
+    at startup, or an empty string when it exists.
+
+    Distinct from :func:`_vault_guard`, which only fires once a vault tool is
+    called: this runs at ``create_server`` time so a dead path surfaces in the
+    log immediately rather than as an opaque outage (#246). The two failure
+    modes are distinguished — an explicitly set but stale ``HIVE_VAULT_PATH``
+    is a different (and more actionable) signal than a missing default.
+    """
+    if resolved.is_dir():
+        return ""
+    template = _VAULT_STALE_PATH_MSG if env_set else _VAULT_MISSING_DEFAULT_MSG
+    return template.format(path=resolved)
+
+
 _SUMMARIZE_THRESHOLD = 50
 
 _STATUS_WEIGHTS: dict[str, float] = {
