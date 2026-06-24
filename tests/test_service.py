@@ -65,6 +65,40 @@ def test_render_windows_task_xml_uses_s4u_principal_and_supervisor_loop() -> Non
     assert "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>" in xml
 
 
+def test_render_startup_vbs_launches_supervisor_windowless() -> None:
+    """The Startup-folder fallback (#252) launches the daemon with no window:
+    WScript.Shell.Run(..., 0, False) → hidden, non-blocking. It carries the same
+    supervisor loop as the Scheduled Task and needs no admin (shell:startup)."""
+    from hive._service import render_startup_vbs
+
+    vbs = render_startup_vbs(r"C:\Users\u\hive.exe")
+
+    assert 'CreateObject("WScript.Shell")' in vbs
+    assert ".Run " in vbs
+    assert ", 0, False" in vbs  # window style 0 (hidden), no wait
+    assert "-WindowStyle Hidden" in vbs
+    assert r"'C:\Users\u\hive.exe' serve" in vbs
+    assert "while($true)" in vbs
+    assert "if($LASTEXITCODE -eq 0){break}" in vbs  # clean exit 0 → stop
+
+
+def test_supervisor_loop_is_shared_by_task_and_startup_vbs() -> None:
+    """The relaunch loop is a single SSOT — the Scheduled Task XML and the
+    Startup-folder VBS render the identical supervisor command (no duplication)."""
+    from xml.sax.saxutils import escape
+
+    from hive._service import (
+        _supervisor_ps_command,
+        render_startup_vbs,
+        render_windows_task_xml,
+    )
+
+    loop = _supervisor_ps_command(r"C:\hive.exe", "serve")
+    assert loop in render_startup_vbs(r"C:\hive.exe")
+    # The task XML XML-escapes its arguments, so compare the escaped form.
+    assert escape(loop) in render_windows_task_xml(r"C:\hive.exe")
+
+
 # ── platform-dispatching install / uninstall / status ────────────────────
 
 
@@ -131,6 +165,72 @@ def test_install_windows_registers_scheduled_task(
     assert "<LogonTrigger>" in str(recorded["xml"])
     assert "<LogonType>S4U</LogonType>" in str(recorded["xml"])
     assert "while($true)" in str(recorded["xml"])
+
+
+def test_install_windows_falls_back_to_startup_when_schtasks_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When Task Scheduler is policy-locked (schtasks fails), install falls back
+    to a per-user Startup-folder launcher and reports success (#252 bug 2)."""
+    import hive._service as svc
+
+    vbs_path = tmp_path / "Startup" / "hive-serve.vbs"
+    monkeypatch.setattr(svc, "_platform", lambda: "windows")
+    monkeypatch.setattr(svc, "_resolve_exec", lambda: r"C:\hive.exe")
+    monkeypatch.setattr(svc, "_schtasks_create", lambda *a, **k: 1)  # policy-locked
+    monkeypatch.setattr(svc, "startup_vbs_path", lambda: vbs_path)
+
+    rc = svc.install_service(enable=True)
+
+    assert rc == 0
+    assert vbs_path.exists()
+    assert "serve" in vbs_path.read_text(encoding="utf-8")
+
+
+def test_install_windows_fallback_failure_is_not_silent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """If the Startup fallback can't be written either, install returns non-zero
+    with an actionable message — never a silent success (the #246 lesson)."""
+    import hive._service as svc
+
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a dir")  # mkdir under a file raises OSError
+    vbs_path = blocker / "sub" / "hive-serve.vbs"
+    monkeypatch.setattr(svc, "_platform", lambda: "windows")
+    monkeypatch.setattr(svc, "_resolve_exec", lambda: r"C:\hive.exe")
+    monkeypatch.setattr(svc, "_schtasks_create", lambda *a, **k: 1)
+    monkeypatch.setattr(svc, "startup_vbs_path", lambda: vbs_path)
+
+    rc = svc.install_service(enable=True)
+
+    assert rc != 0
+    assert not vbs_path.exists()
+    assert "hive" in capsys.readouterr().err.lower()
+
+
+def test_uninstall_windows_removes_startup_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Uninstall removes the Startup-folder launcher even when no Scheduled Task
+    exists (only the fallback was installed) and still reports success."""
+    import hive._service as svc
+
+    vbs_path = tmp_path / "Startup" / "hive-serve.vbs"
+    vbs_path.parent.mkdir(parents=True)
+    vbs_path.write_text("stub", encoding="utf-8")
+    monkeypatch.setattr(svc, "_platform", lambda: "windows")
+    monkeypatch.setattr(svc, "startup_vbs_path", lambda: vbs_path)
+    monkeypatch.setattr(svc, "_run", lambda *a, **k: 1)  # no Scheduled Task to delete
+
+    rc = svc.uninstall_service()
+
+    assert rc == 0
+    assert not vbs_path.exists()
 
 
 def test_install_macos_is_a_clear_stub(monkeypatch: pytest.MonkeyPatch) -> None:
