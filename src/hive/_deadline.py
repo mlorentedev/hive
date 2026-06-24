@@ -60,17 +60,21 @@ def popen_creation_kwargs() -> dict[str, Any]:
     reaches descendants (relevant for git invocations that fork helpers
     like ``git-pack-objects``).
 
-    On Windows, ``creationflags=CREATE_NEW_PROCESS_GROUP`` lets
-    ``TerminateProcess`` reach the child process tree.
+    On Windows, ``creationflags=CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW``
+    lets ``TerminateProcess`` reach the child process tree while suppressing
+    the console window flash on each git spawn.
 
     Return type is ``dict[str, Any]`` because mypy cannot unify the two
     branches against ``subprocess.Popen``'s overloaded signatures; this
     is the canonical "platform-specific kwargs bundle" trade-off.
     """
     if IS_WINDOWS:
-        # CREATE_NEW_PROCESS_GROUP only exists on Windows; mypy on POSIX
-        # cannot resolve the symbol, so dereference via getattr.
-        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+        # CREATE_NEW_PROCESS_GROUP / CREATE_NO_WINDOW only exist on Windows;
+        # mypy on POSIX cannot resolve the symbols, so dereference via getattr.
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
+            subprocess, "CREATE_NO_WINDOW", 0
+        )
+        return {"creationflags": flags}
     return {"start_new_session": True}
 
 
