@@ -371,6 +371,15 @@ def _resolve_project_dir(
 
     explicit_scope, slug = _parse_project_ref(project)
 
+    # Postel's law (#235): accept the slash form that ``vault_list`` advertises
+    # (``<scope>/<project>``), not just the colon form. Only when the leading
+    # segment names a known scope — otherwise ``/`` keeps its literal
+    # relative-path meaning within a scope (e.g. ``20-products/hydra3d-plus``).
+    if explicit_scope is None and "/" in project:
+        head, _, rest = project.partition("/")
+        if rest and head in scopes:
+            explicit_scope, slug = head, rest
+
     if explicit_scope is not None:
         dir_name = scopes.get(explicit_scope)
         if dir_name is None:
