@@ -18,6 +18,7 @@ from hive._helpers import (
     _vault_guard,
     find_lesson_heading,
     tool_span,
+    vault_startup_warning,
 )
 
 if TYPE_CHECKING:
@@ -163,6 +164,45 @@ class TestVaultGuard:
         result = _vault_guard(ctx)
         assert "HIVE_VAULT_PATH" in result
         assert "env:" in result
+
+
+class TestVaultStartupWarning:
+    """Tests for vault_startup_warning — a startup-time check distinct from
+    _vault_guard, which only fires once a vault tool is actually called (#246)."""
+
+    def test_existing_dir_no_warning(self, tmp_path: Path) -> None:
+        """An existing vault dir produces no warning, regardless of env origin."""
+        assert vault_startup_warning(tmp_path, env_set=True) == ""
+        assert vault_startup_warning(tmp_path, env_set=False) == ""
+
+    def test_missing_with_env_set_flags_stale(self, tmp_path: Path) -> None:
+        """HIVE_VAULT_PATH set but pointing nowhere -> loud 'stale' WHY/FIX."""
+        missing = tmp_path / "gone"
+        msg = vault_startup_warning(missing, env_set=True)
+        assert msg
+        assert str(missing) in msg
+        assert "HIVE_VAULT_PATH" in msg
+        assert "stale" in msg.lower()
+        assert "WHY" in msg
+        assert "FIX" in msg
+
+    def test_missing_without_env_flags_default(self, tmp_path: Path) -> None:
+        """No env var set and the default path is missing -> loud 'default' WHY/FIX."""
+        missing = tmp_path / "gone"
+        msg = vault_startup_warning(missing, env_set=False)
+        assert msg
+        assert str(missing) in msg
+        assert "HIVE_VAULT_PATH" in msg
+        assert "default" in msg.lower()
+        assert "WHY" in msg
+        assert "FIX" in msg
+
+    def test_stale_and_default_messages_differ(self, tmp_path: Path) -> None:
+        """The two failure modes are distinguishable, not one generic string."""
+        missing = tmp_path / "gone"
+        assert vault_startup_warning(missing, env_set=True) != vault_startup_warning(
+            missing, env_set=False
+        )
 
 
 class TestToolSpan:
