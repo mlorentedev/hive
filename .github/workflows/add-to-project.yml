@@ -3,6 +3,12 @@ name: Add to bitácora
 # Puts every opened/reopened issue and PR onto the cross-repo bitácora board
 # (GitHub Project #1). Pairs with bitacora-status.yml (which flips an assigned
 # issue to In Progress). Canonical copy for the OPS-002 (#258) multi-repo rollout.
+#
+# Dependabot PRs are deliberately excluded (board hygiene): a version bump is not
+# work to triage — its record lives in CHANGELOG + git history. This also avoids
+# needing a duplicate BITACORA_PAT in the Dependabot secret store: GitHub isolates
+# Dependabot secrets from Actions secrets, so excluding the trigger means only the
+# Actions secret is required (halves the rotation surface across repos).
 
 
 
@@ -17,7 +23,8 @@ jobs:
     # Fork PRs run without repository secrets — BITACORA_PAT would be empty and the
     # job would fail (Codex review on kubelab#237). Skip them; fork PRs reach the
     # board via the rollout backfill or a manual item-add.
-    if: github.event_name == 'issues' || github.event.pull_request.head.repo.fork == false
+    # Dependabot PRs are excluded from the board (see header comment for rationale).
+    if: github.event_name == 'issues' || (github.event.pull_request.head.repo.fork == false && github.event.pull_request.user.login != 'dependabot[bot]')
     runs-on: ubuntu-latest
     steps:
       # Issues: use the official action (works fine for issues)
