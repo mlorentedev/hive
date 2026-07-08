@@ -141,3 +141,130 @@ def test_repoint_rejects_a_version_that_is_not_installed(
     with pytest.raises(RuntimeError) as excinfo:
         _runtime.repoint("9.9.9")
     assert "9.9.9" in str(excinfo.value)
+
+
+# ── version build + GC (uv mocked; real uv validated by the CI matrix) ────
+
+
+def test_build_version_runs_uv_venv_then_a_pinned_pip_install(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """A version is built into its OWN dir with uv exactly as the manual path
+    would: ``uv venv <dir>`` then ``uv pip install --python <dir> pkg==<v>``. uv
+    does the heavy lifting; hive only owns *where* it lands so the swap is a
+    junction repoint (A3), never an in-place rewrite that corrupts a locked
+    install (#267)."""
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    from hive import _runtime
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(_runtime, "_run_uv", lambda args: calls.append(args))
+
+    result = _runtime.build_version("1.41.6")
+
+    assert result == _runtime.version_path("1.41.6")
+    # 1) a venv in the version's own dir — never the in-use one.
+    assert calls[0][0] == "venv"
+    assert str(_runtime.version_path("1.41.6")) in calls[0]
+    # 2) the pinned package installed into THAT venv.
+    assert calls[1][:2] == ["pip", "install"]
+    assert "--python" in calls[1]
+    assert "hive-vault==1.41.6" in calls[1]
+
+
+def test_build_version_cleans_up_a_partial_dir_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """If the install fails part-way, the half-built dir must NOT survive to be
+    repointed-at — a corrupt version dir is exactly the #267 failure mode. The
+    error names the version and states the in-use install is untouched."""
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    from hive import _runtime
+
+    def _uv(args: list[str]) -> None:
+        if args[0] == "venv":
+            _runtime.version_path("1.41.6").mkdir(parents=True)  # venv created
+            return
+        raise RuntimeError("uv pip install failed: no network")  # install fails
+
+    monkeypatch.setattr(_runtime, "_run_uv", _uv)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _runtime.build_version("1.41.6")
+
+    assert not _runtime.version_path("1.41.6").exists()
+    assert "1.41.6" in str(excinfo.value)
+
+
+def test_current_version_reads_the_active_junction(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """``current_version()`` reports which version the junction selects (or
+    ``None`` before anything is linked) — the GC read-side of the layout."""
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    from hive import _runtime
+
+    _seed_version(_runtime, "1.41.6")
+    assert _runtime.current_version() is None  # nothing linked yet
+
+    _runtime.repoint("1.41.6")
+    assert _runtime.current_version() == "1.41.6"
+
+
+def test_remove_version_refuses_the_active_version(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """GC must never delete the version the junction currently points at — that
+    would pull the running install out from under the daemon."""
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    from hive import _runtime
+
+    _seed_version(_runtime, "1.41.6")
+    _runtime.repoint("1.41.6")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _runtime.remove_version("1.41.6")
+    assert "1.41.6" in str(excinfo.value)
+    assert _runtime.version_path("1.41.6").is_dir()  # still there
+
+
+def test_remove_version_drops_an_unreferenced_version(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """An old, no-longer-current version is GC'd once unreferenced."""
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    from hive import _runtime
+
+    _seed_version(_runtime, "1.41.5")
+    _seed_version(_runtime, "1.41.6")
+    _runtime.repoint("1.41.6")
+
+    assert _runtime.remove_version("1.41.5") is True
+    assert not _runtime.version_path("1.41.5").exists()
+
+
+def test_remove_version_defers_when_the_dir_is_locked(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """A still-locked old version (its python.exe not yet released) is a DEFERRED
+    GC, not a crash — return False so the caller can retry after the lock drops,
+    exactly as the spike's 'GC old dir once unreferenced' step observed."""
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    from hive import _runtime
+
+    _seed_version(_runtime, "1.41.5")
+    _seed_version(_runtime, "1.41.6")
+    _runtime.repoint("1.41.6")
+
+    def _locked(_path) -> None:
+        raise OSError("The process cannot access the file: it is being used")
+
+    monkeypatch.setattr(_runtime.shutil, "rmtree", _locked)
+
+    assert _runtime.remove_version("1.41.5") is False

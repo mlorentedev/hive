@@ -42,9 +42,11 @@ created: "2026-06-24"
 - [x] Implement the rollback / no-corruption guarantee (stage-then-flip: the
       fallible `_make_junction` runs before `current` is disturbed) + actionable
       WHY/FIX `RuntimeError`.
-- [ ] Implement "build a version into a fresh dir" (`uv venv` + `uv pip install
+- [x] Implement "build a version into a fresh dir" (`uv venv` + `uv pip install
       hive-vault==<v>`), never touching the in-use one; GC old versions once
-      unreferenced.
+      unreferenced. `_runtime.build_version()` (cleans a half-built dir on
+      failure), `current_version()`, `remove_version()` (refuses the active
+      version; defers a locked dir instead of crashing).
 - [ ] Add the `hive self-upgrade [<version>]` subcommand wiring the above; the
       launcher (`~/.local/bin`) + supervisor resolve through `current`.
 - [ ] **Companion (dotfiles, cross-repo):** replace the bare `uv tool install
