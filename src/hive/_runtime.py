@@ -20,6 +20,7 @@ primitive (``mklink /J``) is validated by real hardware — mirroring how
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -174,3 +175,99 @@ def repoint(version: str) -> None:
     # done, so this tail effectively never fails.
     _remove_link(current_link())
     os.rename(staging, current_link())
+
+
+# ── version lifecycle: build a fresh dir + GC unreferenced ones ──────────
+
+
+def _venv_python(venv_dir: Path) -> Path:
+    """The interpreter inside a uv-built venv, for ``uv pip install --python``."""
+    if sys.platform == "win32":
+        return venv_dir / "Scripts" / "python.exe"
+    return venv_dir / "bin" / "python"
+
+
+def _run_uv(args: list[str]) -> None:
+    """Run ``uv <args>``, raising an actionable ``RuntimeError`` on failure.
+
+    The single ``uv`` seam (mocked in unit tests; the real tool validated by the
+    CI matrix), mirroring how ``_service`` treats schtasks/systemctl."""
+    try:
+        proc = subprocess.run(  # noqa: S603
+            ["uv", *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            **_subprocess_run_kwargs(),
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "hive self-upgrade: `uv` is not on PATH — install uv (astral.sh/uv) "
+            "or run the upgrade manually.",
+        ) from exc
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"`uv {' '.join(args)}` failed (rc={proc.returncode}): {proc.stderr.strip()}",
+        )
+
+
+def build_version(version: str, *, package: str = "hive-vault") -> Path:
+    """Build *version* into its own dir under ``versions/``, never touching the
+    in-use install; return the new version dir.
+
+    Uses uv exactly as the manual path would — ``uv venv <dir>`` then
+    ``uv pip install --python <dir> <package>==<version>`` — so uv/pip do the
+    heavy lifting and hive only owns *where* the version lands. A build that
+    fails part-way is cleaned up: a half-built dir must never survive to be
+    repointed-at (that corrupt-dir state is the #267 failure mode)."""
+    target = version_path(version)
+    if target.exists():
+        raise RuntimeError(
+            f"hive self-upgrade: version {version} is already built at {target}; "
+            f"remove it before rebuilding.",
+        )
+    versions_dir().mkdir(parents=True, exist_ok=True)
+    try:
+        _run_uv(["venv", str(target)])
+        _run_uv(["pip", "install", "--python", str(_venv_python(target)), f"{package}=={version}"])
+    except RuntimeError as exc:
+        shutil.rmtree(target, ignore_errors=True)
+        raise RuntimeError(
+            f"hive self-upgrade: could not build version {version} into {target} "
+            f"({exc}). The in-use install is untouched.",
+        ) from exc
+    return target
+
+
+def current_version() -> str | None:
+    """The version the ``current`` junction selects, or ``None`` if unset.
+
+    Resolves through the reparse point and returns the target dir's name (the
+    version string) — the read side GC uses to avoid deleting the active one."""
+    link = current_link()
+    if not (link.is_symlink() or link.is_junction()):
+        return None
+    return link.resolve().name
+
+
+def remove_version(version: str) -> bool:
+    """GC an installed *version* dir; return whether it was actually removed.
+
+    Refuses to remove the active version (that would pull the running install
+    out from under the daemon). A still-locked dir — the old version whose
+    ``python.exe`` the supervisor has not yet released — is a DEFERRED GC, not a
+    crash: return ``False`` so the caller retries after the lock drops (the
+    spike's 'GC old dir once unreferenced' step)."""
+    if version == current_version():
+        raise RuntimeError(
+            f"hive self-upgrade: refusing to remove the active version {version}; "
+            f"repoint to another version first.",
+        )
+    target = version_path(version)
+    if not target.exists():
+        return False
+    try:
+        shutil.rmtree(target)
+    except OSError:
+        return False  # locked / in use — deferred, retried once the lock releases
+    return True
