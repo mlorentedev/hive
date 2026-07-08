@@ -1,0 +1,30 @@
+[
+  {
+    "id": "HIVE-267-upgrade-swap-f1",
+    "behavior": "An upgrade applied while the daemon is running leaves a valid, resolvable install: current points at the new version (repoint primitive).",
+    "verification": "python -m pytest tests/test_runtime.py::test_repoint_points_current_at_the_target_version tests/test_runtime.py::test_repoint_replaces_an_existing_current -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-267-upgrade-swap-f3",
+    "behavior": "A swap that cannot complete leaves the previous working install intact and surfaces an actionable WHY/FIX error, never a corrupted/dead MCP.",
+    "verification": "python -m pytest tests/test_runtime.py::test_failed_repoint_leaves_the_previous_current_intact -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-267-upgrade-swap-f2",
+    "behavior": "The documented #267 reproduction (uv tool install --upgrade against a running daemon) no longer fails on in-use files.",
+    "verification": "manual: real non-admin Windows re-validation. Pending the `hive self-upgrade` PR that builds each version into its own dir and wires repoint() to the upgrade trigger.",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-267-upgrade-swap-f4",
+    "behavior": "Validated on a real non-admin Windows box (ADR-015 hardware-validation discipline), not only the CI matrix.",
+    "verification": "manual: recorded in specs/HIVE-267-upgrade-swap/verification.md. Pending end-to-end wiring (self-upgrade subcommand + dotfiles trigger swap).",
+    "state": "pending",
+    "evidence": ""
+  }
+]
