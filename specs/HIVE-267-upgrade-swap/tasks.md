@@ -9,7 +9,7 @@ created: "2026-06-24"
 
 ## Setup
 
-- [ ] Branch created from main: `feat/HIVE-267-upgrade-swap`
+- [x] Branch created from main: `feat/HIVE-267-upgrade-swap`
 - [ ] `proposal.md` is complete and acceptance criteria are testable
 - [ ] No open questions left in `proposal.md` "Risks / open questions"
 
@@ -29,16 +29,24 @@ created: "2026-06-24"
 > install`; dotfiles upgrade calls `hive self-upgrade`). Likely a new
 > `src/hive/_runtime.py` (layout/junction/GC) + a `hive self-upgrade` subcommand.
 
-- [ ] Write failing test for the junction-repoint primitive (pure, OS-mocked like
-      the existing `_service` renderer tests).
-- [ ] Implement the repoint primitive + versioned-layout paths
-      (`runtime_root()`, `versions_dir()`, `current_link()`, `repoint(current, v)`).
-- [ ] Write failing test: a failed repoint leaves `current` at the previous
-      version (no corruption, previous install intact).
-- [ ] Implement the rollback / no-corruption guarantee + actionable WHY/FIX error.
-- [ ] Implement "build a version into a fresh dir" (`uv venv` + `uv pip install
+- [x] Write failing test for the junction-repoint primitive. Renderer (`mklink /J`
+      argv) asserted as a string like the `_service` renderers; the repoint
+      orchestration runs a **real** symlink on POSIX CI / a real junction on
+      Windows (single OS seam `_make_junction`), so criterion 3 is exercised, not
+      only mocked. `tests/test_runtime.py`.
+- [x] Implement the repoint primitive + versioned-layout paths
+      (`runtime_root()`, `versions_dir()`, `version_path()`, `current_link()`,
+      `repoint(version)`) in `src/hive/_runtime.py`.
+- [x] Write failing test: a failed repoint leaves `current` at the previous
+      version (`test_failed_repoint_leaves_the_previous_current_intact`).
+- [x] Implement the rollback / no-corruption guarantee (stage-then-flip: the
+      fallible `_make_junction` runs before `current` is disturbed) + actionable
+      WHY/FIX `RuntimeError`.
+- [x] Implement "build a version into a fresh dir" (`uv venv` + `uv pip install
       hive-vault==<v>`), never touching the in-use one; GC old versions once
-      unreferenced.
+      unreferenced. `_runtime.build_version()` (cleans a half-built dir on
+      failure), `current_version()`, `remove_version()` (refuses the active
+      version; defers a locked dir instead of crashing).
 - [ ] Add the `hive self-upgrade [<version>]` subcommand wiring the above; the
       launcher (`~/.local/bin`) + supervisor resolve through `current`.
 - [ ] **Companion (dotfiles, cross-repo):** replace the bare `uv tool install
