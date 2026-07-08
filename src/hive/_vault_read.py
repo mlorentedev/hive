@@ -10,6 +10,7 @@ from hive._helpers import (
     _READ_ONLY,
     META_SCOPE,
     SECTION_SHORTCUTS,
+    _bounded_sync_call,
     _format_metadata,
     _git_log,
     _git_recent,
@@ -31,11 +32,19 @@ from hive._helpers import (
 from hive.frontmatter import extract_body, parse_date, parse_frontmatter
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from fastmcp import FastMCP
 
     from hive._context import ServerContext
+
+# RelevanceTracker's methods share one un-timed threading.Lock (relevance.py);
+# a stall inside it (SQLite lock contention, a slow disk) must not drag the
+# whole briefing past the outer tool deadline — see #282 and the 2026-03-13
+# lesson. Every relevance touch below is bounded to this and degrades to
+# "skip it" rather than hang.
+_RELEVANCE_TIMEOUT_S = 3.0
 
 
 def _vault_search_by_rank(
@@ -664,8 +673,28 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             return track(ctx, "session_briefing", project_not_found(project), project)
         project_dir, _ = resolved
 
-        # Decay stale relevance scores at session start
-        ctx.relevance.apply_decay()
+        relevance_degraded = False
+
+        def _relevance[T](fn: Callable[[], T], label: str) -> T | None:
+            """Bounded ``ctx.relevance`` touch (#282).
+
+            Short-circuits once any prior touch this call has already
+            timed out: every ``RelevanceTracker`` method serializes on the
+            same lock, so once one is stuck the rest would just queue
+            behind it — skip them outright instead of paying the timeout
+            again for a call that cannot succeed either.
+            """
+            nonlocal relevance_degraded
+            if relevance_degraded:
+                return None
+            ok, result = _bounded_sync_call(fn, _RELEVANCE_TIMEOUT_S, label=label)
+            if not ok:
+                relevance_degraded = True
+                return None
+            return result
+
+        # Decay stale relevance scores at session start.
+        _relevance(ctx.relevance.apply_decay, "apply_decay")
 
         # Build sections as keyed blocks
         sections: dict[str, str] = {}
@@ -675,7 +704,10 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         if not isinstance(task_result, str):
             task_content = _safe_read(task_result)
             if task_content is not None:
-                ctx.relevance.record_access(project, "tasks")
+                _relevance(
+                    lambda: ctx.relevance.record_access(project, "tasks"),
+                    "record_access_tasks",
+                )
                 task_body = _truncate(extract_body(task_content), 50)
                 sections["tasks"] = f"## Active Tasks\n{task_body}"
 
@@ -690,7 +722,10 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         if not isinstance(lessons_result, str):
             lessons_content = _safe_read(lessons_result)
             if lessons_content is not None:
-                ctx.relevance.record_access(project, "lessons")
+                _relevance(
+                    lambda: ctx.relevance.record_access(project, "lessons"),
+                    "record_access_lessons",
+                )
                 lesson_lines = extract_body(lessons_content).splitlines()
                 tail = lesson_lines[-30:] if len(lesson_lines) > 30 else lesson_lines
                 sections["lessons"] = "## Recent Lessons\n" + "\n".join(tail)
@@ -715,9 +750,9 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             health_lines.append(f"- Stale: {stale_count}")
         health_block = "## Project Health\n" + "\n".join(health_lines)
 
-        # Order rankable sections by relevance (adaptive)
+        # Order rankable sections by relevance (adaptive).
         default_order = ["tasks", "lessons"]
-        scores = ctx.relevance.get_scores(project)
+        scores = _relevance(lambda: ctx.relevance.get_scores(project), "get_scores")
         if scores:
             ranked_sections = sorted(
                 sections.keys(),
@@ -735,5 +770,11 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
         parts.append(git_block)
         parts.append("")
         parts.append(health_block)
+        if relevance_degraded:
+            parts.append("")
+            parts.append(
+                "_(relevance tracking degraded — timed out after "
+                f"{_RELEVANCE_TIMEOUT_S:.0f}s; showing default section order)_"
+            )
 
         return track(ctx, "session_briefing", "\n".join(parts), project)

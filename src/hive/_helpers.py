@@ -985,6 +985,56 @@ def _filelock_with_telemetry(
         raise
 
 
+def _bounded_sync_call[T](
+    fn: Callable[[], T],
+    timeout_s: float,
+    *,
+    label: str,
+) -> tuple[bool, T | None]:
+    """Run a zero-arg sync callable with a wall-clock deadline.
+
+    ``asyncio.timeout`` only cancels at ``await`` points and cannot
+    interrupt a thread already blocked inside ``fn`` (2026-03-13 lesson:
+    "asyncio.timeout cannot interrupt threads — use lock timeouts for
+    sync code"); there is no forcible-kill primitive for a stuck native
+    thread. This runs ``fn`` on a daemon thread and stops waiting after
+    *timeout_s* so the caller can degrade gracefully instead of hanging
+    for the full outer tool deadline (#282).
+
+    The abandoned thread keeps running in the background on timeout; its
+    eventual result is discarded. Only safe for callables whose side
+    effects the caller does not need to confirm landed (e.g. a cache/score
+    update) — not for writes the caller must know completed.
+
+    Returns ``(completed, result)``; ``result`` is ``None`` on timeout. If
+    ``fn`` raises before the deadline, the exception propagates to the
+    caller unchanged (this helper only bounds *hangs*, it does not
+    swallow errors — a raise is not a timeout).
+    """
+    box: list[T] = []
+    errors: list[BaseException] = []
+
+    def runner() -> None:
+        try:
+            box.append(fn())
+        except BaseException as exc:  # noqa: BLE001 - re-raised below, on the caller's thread
+            errors.append(exc)
+
+    thread = threading.Thread(target=runner, name=f"hive-bounded-{label}", daemon=True)
+    thread.start()
+    thread.join(timeout_s)
+    if thread.is_alive():
+        _log.warning(
+            "mcp.bounded_sync_call.timeout label=%s timeout_s=%.1f",
+            label,
+            timeout_s,
+        )
+        return False, None
+    if errors:
+        raise errors[0]
+    return True, (box[0] if box else None)
+
+
 class WriteLockTimeout(Exception):  # noqa: N818  # mirrors stdlib TimeoutError naming
     """Either the intra-process or inter-process write lock timed out."""
 

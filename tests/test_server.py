@@ -2060,6 +2060,54 @@ class TestDecayOnBriefing:
         assert score_after < score_before
 
 
+class TestBriefingRelevanceTimeout:
+    """Regression for #282: session_briefing hangs ~60s when a call into
+    RelevanceTracker stalls, because asyncio.timeout cannot interrupt the
+    worker thread once it is blocked inside the tracker's shared lock/SQLite
+    call. Every relevance touch in session_briefing must be bounded well
+    under the outer tool deadline and degrade gracefully instead.
+    """
+
+    async def test_briefing_degrades_gracefully_when_relevance_stalls(
+        self,
+        git_vault: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import time
+
+        from hive.relevance import RelevanceTracker
+
+        monkeypatch.setattr("hive._vault_read._RELEVANCE_TIMEOUT_S", 0.05)
+
+        class StuckRelevanceTracker(RelevanceTracker):
+            def apply_decay(self) -> None:
+                # Model the real #282 stall: held *while holding the lock*
+                # (e.g. a slow disk under the SQLite write), not before it —
+                # a stall taken before acquiring would leave the lock free
+                # for every other relevance call and understate the bug.
+                with self._lock:
+                    time.sleep(0.5)
+
+        relevance = StuckRelevanceTracker()
+        mcp = create_server(vault_path=git_vault, relevance_tracker=relevance)
+
+        start = time.monotonic()
+        result = await mcp.call_tool("session_briefing", {"project": "testproject"})
+        elapsed = time.monotonic() - start
+
+        text = _text(result)
+        # Only the first touch (apply_decay) pays the timeout; the
+        # short-circuit skips the remaining relevance calls once degraded.
+        # Bound generously above real git-subprocess/fs overhead (unrelated
+        # to this fix) — the point is "nowhere near the 60s outer deadline",
+        # not a tight micro-benchmark.
+        assert elapsed < 2.0, f"session_briefing should degrade fast, took {elapsed:.2f}s"
+        assert "relevance tracking degraded" in text
+        assert "Task one" in text
+        assert "## Recent Vault Activity" in text
+        assert "Files:" in text
+
+
 # ── vault_search (recent) ────────────────────────────────────────────
 
 

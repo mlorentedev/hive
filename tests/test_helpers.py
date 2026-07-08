@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from hive._helpers import (
+    _bounded_sync_call,
     _default_scopes,
     _git_commit,
     _git_commit_all,
@@ -228,6 +229,51 @@ class TestToolSpan:
             async with tool_span("slow_tool", 0.05):
                 await asyncio.sleep(999)
         assert any("slow_tool" in r.message and "timed out" in r.message for r in caplog.records)
+
+
+class TestBoundedSyncCall:
+    """Tests for _bounded_sync_call — the sync-side counterpart to tool_span.
+
+    2026-03-13 lesson: asyncio.timeout cannot interrupt a thread already
+    blocked inside a sync call, so sync blocking points (a Lock.acquire,
+    a SQLite call) need their own thread+join deadline (#282).
+    """
+
+    def test_returns_result_within_timeout(self) -> None:
+        completed, result = _bounded_sync_call(lambda: 42, 5.0, label="fast")
+        assert completed is True
+        assert result == 42
+
+    def test_times_out_on_a_stuck_callable(self) -> None:
+        import threading
+
+        release = threading.Event()
+
+        def stuck() -> int:
+            release.wait(5.0)
+            return 1
+
+        completed, result = _bounded_sync_call(stuck, 0.05, label="stuck")
+        assert completed is False
+        assert result is None
+        release.set()  # let the leaked thread finish so it doesn't outlive the test
+
+    def test_timeout_is_logged(self, caplog: pytest.LogCaptureFixture) -> None:
+        import threading
+
+        release = threading.Event()
+        _bounded_sync_call(lambda: release.wait(5.0), 0.05, label="slow_call")
+        release.set()
+        assert any("slow_call" in r.message and "timeout" in r.message for r in caplog.records)
+
+    def test_reraises_exception_from_fn(self) -> None:
+        """A raise is not a timeout — it must propagate, not report success-with-None."""
+
+        def boom() -> int:
+            raise ValueError("boom")
+
+        with pytest.raises(ValueError, match="boom"):
+            _bounded_sync_call(boom, 5.0, label="raising")
 
 
 class TestResolveProjectDir:
