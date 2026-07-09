@@ -46,8 +46,6 @@ _log = logging.getLogger(__name__)
 _DEFAULT_GRACE_S = 2.0
 _DRAIN_TIMEOUT_S = 0.5
 
-IS_WINDOWS = sys.platform == "win32"
-
 
 # ── Cross-OS Popen creation helpers ─────────────────────────────────────
 
@@ -68,7 +66,7 @@ def popen_creation_kwargs() -> dict[str, Any]:
     branches against ``subprocess.Popen``'s overloaded signatures; this
     is the canonical "platform-specific kwargs bundle" trade-off.
     """
-    if IS_WINDOWS:
+    if sys.platform == "win32":
         # CREATE_NEW_PROCESS_GROUP / CREATE_NO_WINDOW only exist on Windows;
         # mypy on POSIX cannot resolve the symbols, so dereference via getattr.
         flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
@@ -86,7 +84,7 @@ def _send_terminate(proc: subprocess.Popen[bytes]) -> bool:
     if proc.poll() is not None:
         return False
     try:
-        if IS_WINDOWS:
+        if sys.platform == "win32":
             proc.terminate()
             return True
         # POSIX: reach the process group if start_new_session was set
@@ -107,7 +105,7 @@ def _send_kill(proc: subprocess.Popen[bytes]) -> None:
     if proc.poll() is not None:
         return
     try:
-        if IS_WINDOWS:
+        if sys.platform == "win32":
             # No graceful kill exists on Windows; re-fire TerminateProcess
             # so descendant processes in the new group drop on retry.
             proc.terminate()
