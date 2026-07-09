@@ -29,6 +29,11 @@ Map every acceptance criterion from `proposal.md` to concrete proof (commit hash
 Brief log of non-obvious trade-offs or course corrections taken during the work. Routine choices belong in commit messages, not here.
 
 - **A3 validated on real non-admin Windows hardware (2026-06-24) — proceed with A3; no fallback to A4/A2 needed.** Junction ops touch only the reparse point, never the locked target files, so the repoint is immune to the in-use lock that breaks `uv tool upgrade` (#267).
+- **`self_upgrade` orchestration decisions (2026-07-09, successor issue #292):**
+  - **Version-resolution contract = explicit `<version>` REQUIRED.** Deterministic and network-free (tests need no PyPI); auto-`latest` is deferred to the dotfiles-trigger follow-up so it lands with the network seam it actually needs.
+  - **`self_upgrade` does NOT restart the daemon.** It only builds + repoints + GCs; the supervisor's existing exit-75 restart-on-upgrade contract relaunches `hive serve` through the freshly repointed `current`. Keeping restart out of the swap keeps this PR scoped to the mechanism (no scope creep).
+  - **GC retention = remove every non-current version; locked ones defer.** A still-locked old version (the supervisor holding its `python.exe`) returns `False` from `remove_version` and survives to the next run — no rollback-retention policy yet (out of scope; the acceptance criteria don't require keeping N previous versions).
+  - **Idempotent + retry-safe.** No-op when already on the target (the unattended trigger can fire repeatedly); an already-built dir from a crashed prior run is reused rather than rebuilt (a rebuild would hit `build_version`'s 'already built' guard).
 - Spike harness correction: an initial `Start-Process` lock-holder was racy (PowerShell startup latency left the file briefly unlocked, producing a false result). Switched to an in-process `[IO.File]::Open(..., FileShare.None)` for a deterministic lock — recorded so the next person does not repeat the race.
 - Implementation note: the practical repoint (`rmdir` junction + recreate) has a sub-millisecond non-atomic window where `current` is absent; tolerated by the supervisor's relaunch loop. A fully atomic swap (create `current.new`, rename over `current`) is an optional refinement, not a feasibility blocker.
 

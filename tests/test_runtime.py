@@ -268,3 +268,207 @@ def test_remove_version_defers_when_the_dir_is_locked(
     monkeypatch.setattr(_runtime.shutil, "rmtree", _locked)
 
     assert _runtime.remove_version("1.41.5") is False
+
+
+# ── self_upgrade orchestration: build → repoint → GC (HIVE-267 / #292) ────
+
+
+def test_self_upgrade_builds_repoints_then_gcs_the_old_version(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """The end-to-end swap: build the new version beside the running one, flip
+    ``current`` to it, then GC the now-unreferenced old version. Returns the
+    PREVIOUS version so the CLI can report the transition."""
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    from hive import _runtime
+
+    _seed_version(_runtime, "1.41.5")
+    _runtime.repoint("1.41.5")  # currently running 1.41.5
+
+    built: list[str] = []
+
+    def _fake_build(version: str, *, package: str = "hive-vault"):
+        _seed_version(_runtime, version)  # uv stands in — just land the dir
+        built.append(version)
+        return _runtime.version_path(version)
+
+    monkeypatch.setattr(_runtime, "build_version", _fake_build)
+
+    previous = _runtime.self_upgrade("1.41.6")
+
+    assert previous == "1.41.5"
+    assert built == ["1.41.6"]  # the new version was built, once
+    assert _runtime.current_version() == "1.41.6"  # `current` flipped
+    assert not _runtime.version_path("1.41.5").exists()  # old version GC'd
+
+
+def test_self_upgrade_is_a_noop_when_already_on_the_target(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Re-running the upgrade for the version already selected must not rebuild
+    or repoint — it is idempotent, so the unattended dotfiles trigger can fire
+    it repeatedly without churn."""
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    from hive import _runtime
+
+    _seed_version(_runtime, "1.41.6")
+    _runtime.repoint("1.41.6")
+
+    def _must_not_build(*_a: object, **_k: object):
+        raise AssertionError("must not build when already on the target version")
+
+    monkeypatch.setattr(_runtime, "build_version", _must_not_build)
+
+    assert _runtime.self_upgrade("1.41.6") == "1.41.6"
+    assert _runtime.current_version() == "1.41.6"
+
+
+def test_self_upgrade_skips_build_when_the_version_is_already_built(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """A prior run that built the version but crashed before the flip must be
+    retry-safe: the existing dir is reused (rebuilding would hit
+    ``build_version``'s 'already built' guard and fail the retry)."""
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    from hive import _runtime
+
+    _seed_version(_runtime, "1.41.5")
+    _runtime.repoint("1.41.5")
+    _seed_version(_runtime, "1.41.6")  # already built by a crashed prior run
+
+    def _must_not_build(*_a: object, **_k: object):
+        raise AssertionError("must not rebuild an already-built version dir")
+
+    monkeypatch.setattr(_runtime, "build_version", _must_not_build)
+
+    assert _runtime.self_upgrade("1.41.6") == "1.41.5"
+    assert _runtime.current_version() == "1.41.6"
+
+
+def test_self_upgrade_leaves_current_intact_when_the_build_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """A build failure (no network, bad version) must never touch the running
+    install: ``current`` still resolves to the previous version and the error
+    propagates for the CLI to surface as a non-zero exit (criterion 3)."""
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    from hive import _runtime
+
+    _seed_version(_runtime, "1.41.5")
+    _runtime.repoint("1.41.5")
+
+    def _boom(*_a: object, **_k: object):
+        raise RuntimeError("could not build version 1.41.6: no network")
+
+    monkeypatch.setattr(_runtime, "build_version", _boom)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _runtime.self_upgrade("1.41.6")
+
+    assert "1.41.6" in str(excinfo.value)
+    assert _runtime.current_version() == "1.41.5"  # untouched
+
+
+def test_self_upgrade_defers_gc_of_a_locked_old_version(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """The old version is exactly the one still locked (the supervisor has not
+    released its ``python.exe``). Its GC must DEFER — the swap still succeeds and
+    the locked dir survives to be cleaned by the next run, never crashing the
+    upgrade."""
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    from hive import _runtime
+
+    _seed_version(_runtime, "1.41.5")
+    _runtime.repoint("1.41.5")
+
+    def _fake_build(version: str, *, package: str = "hive-vault"):
+        _seed_version(_runtime, version)
+        return _runtime.version_path(version)
+
+    monkeypatch.setattr(_runtime, "build_version", _fake_build)
+
+    real_rmtree = _runtime.shutil.rmtree
+
+    def _locked_rmtree(path, *a: object, **k: object) -> None:
+        if path == _runtime.version_path("1.41.5"):
+            raise OSError("being used by another process")
+        real_rmtree(path, *a, **k)
+
+    monkeypatch.setattr(_runtime.shutil, "rmtree", _locked_rmtree)
+
+    previous = _runtime.self_upgrade("1.41.6")
+
+    assert previous == "1.41.5"
+    assert _runtime.current_version() == "1.41.6"  # swap still succeeded
+    assert _runtime.version_path("1.41.5").exists()  # GC deferred, not crashed
+
+
+# ── CLI wrapper: `hive self-upgrade <version>` ───────────────────────────
+
+
+def test_cli_self_upgrade_requires_an_explicit_version() -> None:
+    """The version-resolution contract (2026-07-09): an explicit ``<version>`` is
+    REQUIRED — deterministic and network-free. A missing version is an argparse
+    usage error (exit 2), never a silent no-op or an implicit 'latest'."""
+    from hive import server
+
+    with pytest.raises(SystemExit) as excinfo:
+        server._run_self_upgrade([])
+    assert excinfo.value.code == 2
+
+
+def test_cli_self_upgrade_dispatches_the_version_to_the_orchestrator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``hive self-upgrade 1.41.6`` reaches ``_runtime.self_upgrade('1.41.6')``
+    and returns exit 0 on success."""
+    from hive import server
+
+    seen: dict[str, object] = {}
+
+    def _fake(version: str) -> str:
+        seen["version"] = version
+        return "1.41.5"
+
+    monkeypatch.setattr("hive._runtime.self_upgrade", _fake)
+    assert server._run_self_upgrade(["1.41.6"]) == 0
+    assert seen["version"] == "1.41.6"
+
+
+def test_cli_self_upgrade_surfaces_failure_as_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An orchestration failure is surfaced to the CLI user: the actionable
+    error prints to stderr and the command exits non-zero (never a silent
+    success — the #246/#252 lesson), so the dotfiles trigger sees the failure."""
+    from hive import server
+
+    def _boom(version: str) -> str:
+        raise RuntimeError("could not build version 1.41.6: no network")
+
+    monkeypatch.setattr("hive._runtime.self_upgrade", _boom)
+    rc = server._run_self_upgrade(["1.41.6"])
+
+    assert rc == 1
+    assert "1.41.6" in capsys.readouterr().err
+
+
+def test_cli_dispatch_routes_self_upgrade(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``hive self-upgrade …`` is wired into the top-level dispatcher, not just
+    reachable via the private helper."""
+    from hive import server
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(
+        "hive._runtime.self_upgrade",
+        lambda version: seen.setdefault("version", version),
+    )
+    assert server._dispatch(["self-upgrade", "1.41.7"]) == 0
+    assert seen["version"] == "1.41.7"

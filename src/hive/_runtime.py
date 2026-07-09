@@ -271,3 +271,58 @@ def remove_version(version: str) -> bool:
     except OSError:
         return False  # locked / in use — deferred, retried once the lock releases
     return True
+
+
+# ── the end-to-end upgrade: build → repoint → GC (HIVE-267 / #292) ───────
+
+
+def _gc_other_versions(keep: str) -> list[str]:
+    """GC every installed version except *keep*; return the ones whose GC was
+    DEFERRED because they were still locked.
+
+    The old version is exactly the one whose ``python.exe`` the supervisor has
+    not yet released, so its ``remove_version`` returns ``False`` (deferred, not
+    a crash). The leftover is cleaned by the next ``self_upgrade`` once the lock
+    drops — the spike's 'GC old dir once unreferenced'. A missing/empty
+    ``versions`` dir yields nothing to do."""
+    root = versions_dir()
+    if not root.is_dir():
+        return []
+    deferred: list[str] = []
+    for child in sorted(root.iterdir()):
+        if not child.is_dir() or child.name == keep:
+            continue
+        if not remove_version(child.name):
+            deferred.append(child.name)
+    return deferred
+
+
+def self_upgrade(version: str) -> str | None:
+    """Upgrade the install to *version* without ever touching in-use files
+    (HIVE-267 / ADR-015 mechanism A3); return the PREVIOUS version (``None`` on a
+    first install), so the CLI can report the transition.
+
+    Three steps, ordered so a failure never corrupts the running install:
+
+    1. **build** *version* into its own dir beside the running one — skipped when
+       the dir already exists, making a retry after a crashed prior run
+       idempotent (a rebuild would hit ``build_version``'s 'already built' guard);
+    2. **repoint** ``current`` at it (stage-then-flip: a failure here leaves the
+       previous install pointed-to, criterion 3);
+    3. **GC** the now-unreferenced old versions (a still-locked one defers).
+
+    A no-op when *version* is already ``current``, so the unattended dotfiles
+    trigger can fire repeatedly without churn. Does NOT restart the running
+    daemon: the supervisor's exit-75 restart-on-upgrade contract relaunches
+    ``hive serve`` through the freshly repointed ``current`` (see ``_service`` /
+    ``_daemon``). ``build_version`` / ``repoint`` raise an actionable
+    ``RuntimeError`` on failure; the CLI wrapper turns that into a non-zero exit.
+    """
+    previous = current_version()
+    if version == previous:
+        return previous  # already selected — idempotent no-op
+    if not version_path(version).is_dir():
+        build_version(version)  # raises RuntimeError on failure — current untouched
+    repoint(version)  # stage-then-flip — raises on failure — previous stays pointed-to
+    _gc_other_versions(keep=version)
+    return previous
