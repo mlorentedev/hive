@@ -47,8 +47,14 @@ created: "2026-06-24"
       unreferenced. `_runtime.build_version()` (cleans a half-built dir on
       failure), `current_version()`, `remove_version()` (refuses the active
       version; defers a locked dir instead of crashing).
-- [ ] Add the `hive self-upgrade [<version>]` subcommand wiring the above; the
-      launcher (`~/.local/bin`) + supervisor resolve through `current`.
+- [x] Add the `hive self-upgrade <version>` subcommand wiring the above
+      (`_runtime.self_upgrade`: build → repoint → GC; `server._run_self_upgrade`
+      CLI wrapper + `_dispatch` branch). Version-resolution contract
+      **RESOLVED (2026-07-09): explicit `<version>` REQUIRED** — deterministic,
+      network-free; auto-latest-from-PyPI is a follow-up scoped to the dotfiles
+      trigger. The launcher (`~/.local/bin`) + supervisor already resolve through
+      `current` (repoint primitive). Tracked as successor issue #292. Tests in
+      `tests/test_runtime.py` (`self_upgrade` orchestration + CLI wrapper).
 - [ ] **Companion (dotfiles, cross-repo):** replace the bare `uv tool install
       --upgrade` trigger (`setup-windows.ps1` timer / `mcp-servers.json`
       `prerequisite_command`) with `hive self-upgrade`. Document the

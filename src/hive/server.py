@@ -650,6 +650,39 @@ def _run_service(argv: list[str]) -> int:
     return service_status()
 
 
+def _run_self_upgrade(argv: list[str]) -> int:
+    """``hive self-upgrade <version>`` — build the given hive-vault version beside
+    the running install and atomically repoint ``current`` at it (HIVE-267 /
+    ADR-015 mechanism A3), so an upgrade applied while the daemon is running
+    never corrupts the in-use install (#267). Returns a process exit code for
+    the caller (the dotfiles upgrade trigger).
+
+    The version is a REQUIRED explicit argument — deterministic and network-free;
+    resolving 'latest from PyPI' when omitted is a deliberate follow-up scoped to
+    the unattended trigger (#292)."""
+    import argparse
+
+    from hive._runtime import self_upgrade
+
+    parser = argparse.ArgumentParser(prog="hive self-upgrade")
+    parser.add_argument(
+        "version",
+        help="the hive-vault version to install and switch to, e.g. 1.41.8",
+    )
+    opts = parser.parse_args(argv)
+    try:
+        previous = self_upgrade(opts.version)
+    except RuntimeError as exc:
+        # Actionable WHY/FIX from _runtime — surface it, never a silent success.
+        print(str(exc), file=sys.stderr)
+        return 1
+    if previous == opts.version:
+        print(f"hive self-upgrade: already on {opts.version}; nothing to do.")
+    else:
+        print(f"hive self-upgrade: switched {previous or 'none'} -> {opts.version}.")
+    return 0
+
+
 _USAGE = """\
 usage: hive [COMMAND]
 
@@ -658,6 +691,7 @@ Commands:
   serve                                run the single-owner daemon (ADR-011)
   client                               run the thin stdio shim that proxies to the daemon
   service {install,uninstall,status}   manage the daemon as a per-user OS service
+  self-upgrade <version>               build + atomically swap to a hive-vault version (ADR-015 A3)
 
 Options:
   -V, --version                        print the installed hive-vault version and exit
@@ -697,6 +731,8 @@ def _dispatch(argv: list[str]) -> int:
         return _run_serve(argv[1:])
     if cmd == "service":
         return _run_service(argv[1:])
+    if cmd == "self-upgrade":
+        return _run_self_upgrade(argv[1:])
     if cmd == "client":
         _run_client(argv[1:])
         return 0

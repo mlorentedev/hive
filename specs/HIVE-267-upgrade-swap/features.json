@@ -16,14 +16,21 @@
   {
     "id": "HIVE-267-upgrade-swap-f2",
     "behavior": "The documented #267 reproduction (uv tool install --upgrade against a running daemon) no longer fails on in-use files.",
-    "verification": "manual: real non-admin Windows re-validation. Pending the `hive self-upgrade` PR that builds each version into its own dir and wires repoint() to the upgrade trigger.",
+    "verification": "manual: real non-admin Windows re-validation. CLI wiring landed (`hive self-upgrade <version>`, #292); the remaining gap is running the reproduction on real hardware AND swapping the dotfiles trigger to it.",
     "state": "pending",
     "evidence": ""
   },
   {
     "id": "HIVE-267-upgrade-swap-f4",
     "behavior": "Validated on a real non-admin Windows box (ADR-015 hardware-validation discipline), not only the CI matrix.",
-    "verification": "manual: recorded in specs/HIVE-267-upgrade-swap/verification.md. Pending end-to-end wiring (self-upgrade subcommand + dotfiles trigger swap).",
+    "verification": "manual: recorded in specs/HIVE-267-upgrade-swap/verification.md. Subcommand wiring landed (#292); still pending the dotfiles trigger swap + the real-hardware re-validation.",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-267-upgrade-swap-f5",
+    "behavior": "`hive self-upgrade <version>` builds the version into its own dir, atomically repoints `current`, and GCs unreferenced versions end-to-end: idempotent no-op when already current, retry-safe when a prior build survived, a build failure leaves `current` intact, and a locked old version defers its GC instead of crashing.",
+    "verification": "python -m pytest tests/test_runtime.py -k self_upgrade -q",
     "state": "pending",
     "evidence": ""
   }
