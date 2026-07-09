@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.42.1](https://github.com/mlorentedev/hive/compare/v1.42.0...v1.42.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* **deadline:** use sys.platform so mypy narrows the POSIX branch ([#299](https://github.com/mlorentedev/hive/issues/299)) ([5642db2](https://github.com/mlorentedev/hive/commit/5642db23c3484c999af5c4ba8f2282609fa7fcaf))
+
 ## [1.42.0](https://github.com/mlorentedev/hive/compare/v1.41.7...v1.42.0) (2026-07-09)
 
 
