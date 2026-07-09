@@ -1,4 +1,4 @@
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 RUN pip install --no-cache-dir uv
 
@@ -10,7 +10,7 @@ COPY src/ src/
 RUN uv pip install --no-cache-dir --no-deps . --python .venv/bin/python
 
 
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 RUN useradd --create-home --shell /bin/bash hive
 WORKDIR /app
