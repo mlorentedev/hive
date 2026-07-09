@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.42.0](https://github.com/mlorentedev/hive/compare/v1.41.7...v1.42.0) (2026-07-09)
+
+
+### Features
+
+* **runtime:** hive self-upgrade subcommand — end-to-end build/repoint/GC ([#294](https://github.com/mlorentedev/hive/issues/294)) ([6c41c8b](https://github.com/mlorentedev/hive/commit/6c41c8b767e96072a4f7023f13e970a838908a14))
+* **runtime:** versioned install layout + junction repoint (HIVE-267) ([#290](https://github.com/mlorentedev/hive/issues/290)) ([8355b9f](https://github.com/mlorentedev/hive/commit/8355b9f6799c69212daf2ce0c95ccda72180b4b2))
+
+
+### Bug Fixes
+
+* **ci:** exclude dependabot PRs from the bitácora board ([#286](https://github.com/mlorentedev/hive/issues/286)) ([8b43810](https://github.com/mlorentedev/hive/commit/8b43810248d2246a6685101b0ad2417f05258477))
+* **server:** bound session_briefing's relevance calls to stop 60s hangs ([#287](https://github.com/mlorentedev/hive/issues/287)) ([e6e195a](https://github.com/mlorentedev/hive/commit/e6e195ad0964a9a5eb06294f92009c2908417d63))
+
 ## [1.41.7](https://github.com/mlorentedev/hive/compare/v1.41.6...v1.41.7) (2026-06-24)
 
 
