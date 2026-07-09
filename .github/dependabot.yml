@@ -14,6 +14,10 @@
 #   on supported runners + action versions.
 # - site/ has its own package.json (Astro + Starlight); covered as a
 #   separate npm ecosystem so its bumps don't mix into the Python PR.
+# - The Dockerfile base image (python:3.12-slim) is tracked via the
+#   docker ecosystem so base-image security patches AND Python version
+#   bumps (e.g. 3.13-slim) surface as reviewable PRs instead of a stale
+#   pin. Left unfiltered on purpose — a base-image jump is worth a look.
 
 version: 2
 
@@ -87,3 +91,22 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+  # ── Docker base image (Dockerfile) ────────────────────────────
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "America/Denver"
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"
+    labels:
+      - "dependencies"
+    groups:
+      docker-all:
+        patterns:
+          - "*"
