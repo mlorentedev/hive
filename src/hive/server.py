@@ -651,35 +651,40 @@ def _run_service(argv: list[str]) -> int:
 
 
 def _run_self_upgrade(argv: list[str]) -> int:
-    """``hive self-upgrade <version>`` — build the given hive-vault version beside
+    """``hive self-upgrade [version]`` — build the target hive-vault version beside
     the running install and atomically repoint ``current`` at it (HIVE-267 /
     ADR-015 mechanism A3), so an upgrade applied while the daemon is running
     never corrupts the in-use install (#267). Returns a process exit code for
     the caller (the dotfiles upgrade trigger).
 
-    The version is a REQUIRED explicit argument — deterministic and network-free;
-    resolving 'latest from PyPI' when omitted is a deliberate follow-up scoped to
-    the unattended trigger (#292)."""
+    An explicit ``<version>`` is deterministic and network-free. Omitting it
+    resolves the latest release from PyPI (``_runtime.latest_version``) so the
+    unattended trigger can fire a bare ``hive self-upgrade`` (#292); a PyPI
+    failure surfaces as a non-zero exit, never an implicit no-op."""
     import argparse
 
-    from hive._runtime import self_upgrade
+    from hive import _runtime
 
     parser = argparse.ArgumentParser(prog="hive self-upgrade")
     parser.add_argument(
         "version",
-        help="the hive-vault version to install and switch to, e.g. 1.41.8",
+        nargs="?",
+        default="",
+        help="the hive-vault version to install and switch to, e.g. 1.41.8; "
+        "omit to resolve the latest release from PyPI",
     )
     opts = parser.parse_args(argv)
     try:
-        previous = self_upgrade(opts.version)
+        version = opts.version or _runtime.latest_version()
+        previous = _runtime.self_upgrade(version)
     except RuntimeError as exc:
         # Actionable WHY/FIX from _runtime — surface it, never a silent success.
         print(str(exc), file=sys.stderr)
         return 1
-    if previous == opts.version:
-        print(f"hive self-upgrade: already on {opts.version}; nothing to do.")
+    if previous == version:
+        print(f"hive self-upgrade: already on {version}; nothing to do.")
     else:
-        print(f"hive self-upgrade: switched {previous or 'none'} -> {opts.version}.")
+        print(f"hive self-upgrade: switched {previous or 'none'} -> {version}.")
     return 0
 
 
@@ -691,7 +696,7 @@ Commands:
   serve                                run the single-owner daemon (ADR-011)
   client                               run the thin stdio shim that proxies to the daemon
   service {install,uninstall,status}   manage the daemon as a per-user OS service
-  self-upgrade <version>               build + atomically swap to a hive-vault version (ADR-015 A3)
+  self-upgrade [version]               build + swap to a hive-vault version (PyPI latest if omitted)
 
 Options:
   -V, --version                        print the installed hive-vault version and exit

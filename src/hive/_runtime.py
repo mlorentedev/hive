@@ -25,10 +25,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+import httpx
+
 from hive._helpers import _subprocess_run_kwargs
 
 CURRENT_LINK_NAME = "current"
 _STAGING_LINK_NAME = ".current.staging"
+
+# PyPI's per-project JSON API — ``info.version`` is the newest published release.
+# Bounded so a wedged/slow PyPI fails fast instead of hanging the trigger; the
+# caller always has the explicit-version escape hatch.
+_PYPI_JSON_URL = "https://pypi.org/pypi/{package}/json"
+_PYPI_TIMEOUT_S = 10.0
 
 
 # ── layout paths (env-overridable, host-independent) ─────────────────────
@@ -271,6 +279,57 @@ def remove_version(version: str) -> bool:
     except OSError:
         return False  # locked / in use — deferred, retried once the lock releases
     return True
+
+
+# ── resolve the target version from PyPI (the auto-latest path, #292) ─────
+
+
+def latest_version(package: str = "hive-vault") -> str:
+    """The newest *package* release published to PyPI (``info.version``).
+
+    Lets the unattended dotfiles trigger call a bare ``hive self-upgrade`` without
+    hard-coding a version number — the auto-latest follow-up to the explicit
+    ``<version>`` contract (#292). The single network seam in this module (mocked
+    in unit tests; real PyPI exercised only by the trigger), bounded by
+    ``_PYPI_TIMEOUT_S`` so a wedged PyPI fails fast rather than hanging the
+    timer. Every failure — timeout, network/HTTP error, or an unexpected payload
+    shape — raises an actionable ``RuntimeError`` (``pattern-agent-oriented-errors``)
+    that names the escape hatch (``hive self-upgrade <version>``), never a bare
+    httpx traceback nor a bogus/empty version string that would repoint ``current``
+    at nothing."""
+    url = _PYPI_JSON_URL.format(package=package)
+    try:
+        response = httpx.get(url, timeout=_PYPI_TIMEOUT_S, follow_redirects=True)
+        response.raise_for_status()
+    except httpx.TimeoutException as exc:
+        # Umbrella class (AGENTS.md load-bearing rule): a slow PyPI surfaces as
+        # ReadTimeout, which ConnectTimeout alone would miss.
+        raise RuntimeError(
+            f"hive self-upgrade: timed out reaching PyPI to resolve the latest "
+            f"{package} version ({exc}). Retry, or pin one: "
+            f"`hive self-upgrade <version>`.",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise RuntimeError(
+            f"hive self-upgrade: could not reach PyPI to resolve the latest "
+            f"{package} version ({exc}). Check the network, or pin one: "
+            f"`hive self-upgrade <version>`.",
+        ) from exc
+    try:
+        version = response.json()["info"]["version"]
+    except (ValueError, KeyError, TypeError) as exc:
+        # ValueError covers a non-JSON body (json.JSONDecodeError); KeyError /
+        # TypeError cover a renamed field or a non-dict payload.
+        raise RuntimeError(
+            f"hive self-upgrade: PyPI returned an unexpected payload for {package} "
+            f"({exc}). Pin a version instead: `hive self-upgrade <version>`.",
+        ) from exc
+    if not version or not isinstance(version, str):
+        raise RuntimeError(
+            f"hive self-upgrade: PyPI reported no usable version for {package} "
+            f"(got {version!r}). Pin one: `hive self-upgrade <version>`.",
+        )
+    return version
 
 
 # ── the end-to-end upgrade: build → repoint → GC (HIVE-267 / #292) ───────
