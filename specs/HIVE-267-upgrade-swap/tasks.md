@@ -55,10 +55,17 @@ created: "2026-06-24"
       trigger. The launcher (`~/.local/bin`) + supervisor already resolve through
       `current` (repoint primitive). Tracked as successor issue #292. Tests in
       `tests/test_runtime.py` (`self_upgrade` orchestration + CLI wrapper).
+- [x] **Auto-latest resolution (#292):** make `hive self-upgrade`'s version
+      argument optional — omitted, it resolves the newest `hive-vault` release
+      from PyPI's JSON API (`_runtime.latest_version`, the module's single
+      network seam, bounded timeout, actionable WHY/FIX on failure) so the
+      unattended trigger can fire a bare `hive self-upgrade`. An explicit version
+      stays deterministic and network-free. Tests in `tests/test_runtime.py`
+      (`latest_version` happy/timeout/bad-payload + CLI omitted-vs-explicit).
 - [ ] **Companion (dotfiles, cross-repo):** replace the bare `uv tool install
       --upgrade` trigger (`setup-windows.ps1` timer / `mcp-servers.json`
-      `prerequisite_command`) with `hive self-upgrade`. Document the
-      "no-longer-a-uv-tool on Windows" consequence.
+      `prerequisite_command`) with `hive self-upgrade` (now bare — auto-latest
+      landed above). Document the "no-longer-a-uv-tool on Windows" consequence.
 - [ ] Real-hardware re-validation: the #267 reproduction no longer reproduces
       (manual, recorded in `verification.md`).
 

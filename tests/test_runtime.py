@@ -409,18 +409,127 @@ def test_self_upgrade_defers_gc_of_a_locked_old_version(
     assert _runtime.version_path("1.41.5").exists()  # GC deferred, not crashed
 
 
-# ── CLI wrapper: `hive self-upgrade <version>` ───────────────────────────
+# ── latest-version resolution from PyPI (httpx mocked; real PyPI never hit) ──
 
 
-def test_cli_self_upgrade_requires_an_explicit_version() -> None:
-    """The version-resolution contract (2026-07-09): an explicit ``<version>`` is
-    REQUIRED — deterministic and network-free. A missing version is an argparse
-    usage error (exit 2), never a silent no-op or an implicit 'latest'."""
+class _FakePyPIResponse:
+    """Stand-in for ``httpx.Response``: just enough for ``latest_version()``."""
+
+    def __init__(self, payload: object) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> object:
+        return self._payload
+
+
+def test_latest_version_reads_info_version_from_pypis_json_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``hive self-upgrade`` with no version resolves the newest published release
+    from PyPI's JSON API (``info.version``) so the unattended dotfiles trigger
+    need not know the number — the point of the auto-latest follow-up (#292). The
+    query is bounded by a timeout (never an unbounded network wait)."""
+    from hive import _runtime
+
+    seen: dict[str, object] = {}
+
+    def _fake_get(url: str, **kwargs: object) -> _FakePyPIResponse:
+        seen["url"] = url
+        seen["timeout"] = kwargs.get("timeout")
+        return _FakePyPIResponse({"info": {"version": "1.42.1"}})
+
+    monkeypatch.setattr(_runtime.httpx, "get", _fake_get)
+
+    assert _runtime.latest_version() == "1.42.1"
+    assert "hive-vault" in str(seen["url"])  # queried the right distribution
+    assert seen["timeout"]  # bounded — no unbounded hang on a wedged PyPI
+
+
+def test_latest_version_raises_actionable_error_on_network_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A PyPI outage/timeout must NOT escape as a bare httpx traceback: raise an
+    actionable ``RuntimeError`` pointing at the explicit-version escape hatch —
+    the same WHY/FIX contract as the rest of self-upgrade. Catching the
+    ``TimeoutException`` umbrella (not ``ConnectTimeout`` alone) is a load-bearing
+    rule (AGENTS.md): a slow PyPI surfaces as ``ReadTimeout``."""
+    import httpx
+
+    from hive import _runtime
+
+    def _timeout(url: str, **kwargs: object) -> object:
+        raise httpx.ReadTimeout("timed out")  # subclass of TimeoutException
+
+    monkeypatch.setattr(_runtime.httpx, "get", _timeout)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _runtime.latest_version()
+    message = str(excinfo.value)
+    assert "PyPI" in message
+    assert "hive self-upgrade <version>" in message  # the explicit-version fallback
+
+
+def test_latest_version_raises_actionable_error_on_unexpected_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PyPI reachable but the JSON shape is not what we expect (renamed field, an
+    HTML error page decoded as JSON, an empty version) — surface an actionable
+    error rather than repointing ``current`` at a bogus/empty version string."""
+    from hive import _runtime
+
+    def _weird(url: str, **kwargs: object) -> _FakePyPIResponse:
+        return _FakePyPIResponse({"info": {}})  # no 'version' key
+
+    monkeypatch.setattr(_runtime.httpx, "get", _weird)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _runtime.latest_version()
+    assert "hive-vault" in str(excinfo.value)
+
+
+# ── CLI wrapper: `hive self-upgrade [version]` ───────────────────────────
+
+
+def test_cli_self_upgrade_resolves_latest_from_pypi_when_version_omitted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The version-resolution contract, updated (#292): an omitted version is NO
+    LONGER a usage error — it resolves the latest release from PyPI and upgrades
+    to it, so the unattended dotfiles trigger can call a bare ``hive
+    self-upgrade``. An explicit version still wins (next test)."""
     from hive import server
 
-    with pytest.raises(SystemExit) as excinfo:
-        server._run_self_upgrade([])
-    assert excinfo.value.code == 2
+    seen: dict[str, object] = {}
+    monkeypatch.setattr("hive._runtime.latest_version", lambda: "1.42.1")
+
+    def _fake(version: str) -> str:
+        seen["version"] = version
+        return "1.41.9"
+
+    monkeypatch.setattr("hive._runtime.self_upgrade", _fake)
+
+    assert server._run_self_upgrade([]) == 0
+    assert seen["version"] == "1.42.1"  # resolved-latest flowed into the upgrade
+
+
+def test_cli_self_upgrade_with_explicit_version_never_touches_pypi(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pinned ``hive self-upgrade 1.41.6`` stays deterministic and network-free:
+    ``latest_version()`` must not be called when the caller already named a
+    version (auto-latest is strictly the omitted-arg path)."""
+    from hive import server
+
+    def _must_not_resolve() -> str:
+        raise AssertionError("explicit version must not hit PyPI")
+
+    monkeypatch.setattr("hive._runtime.latest_version", _must_not_resolve)
+    monkeypatch.setattr("hive._runtime.self_upgrade", lambda version: "1.41.5")
+
+    assert server._run_self_upgrade(["1.41.6"]) == 0
 
 
 def test_cli_self_upgrade_dispatches_the_version_to_the_orchestrator(
