@@ -276,6 +276,36 @@ class TestBoundedSyncCall:
             _bounded_sync_call(boom, 5.0, label="raising")
 
 
+# ── shared vault-layout constants + helper for TestResolveProjectDir (#268) ──
+# The scope dir-name literals these tests pin as the SPEC. Centralised so a
+# canonical rename is a one-line edit — but kept as explicit test-module
+# constants, deliberately NOT read from settings.vault_scopes / _default_scopes():
+# coupling the tests to the production SSOT would make a config typo (e.g.
+# "80_agnets") silently pass (#268 non-goal — DAMP > DRY for algorithm tests).
+_PROJECTS_DIR = "10_projects"
+_WORK_DIR = "50_work"
+_AGENTS_DIR = "80_agents"
+
+# Scope maps the resolver takes as input, composed from the names above.
+# _resolve_project_dir only reads them (.get/.items — never mutates), so sharing
+# module-level dicts is safe; insertion order is preserved because auto-scan is
+# first-match-wins and two tests below depend on projects-before-agents order.
+_PROJECTS_SCOPES = {"projects": _PROJECTS_DIR}
+_WORK_SCOPES = {"work": _WORK_DIR}
+_AGENTS_SCOPES = {"agents": _AGENTS_DIR}
+_PROJECTS_WORK_SCOPES = {"projects": _PROJECTS_DIR, "work": _WORK_DIR}
+_PROJECTS_AGENTS_SCOPES = {"projects": _PROJECTS_DIR, "agents": _AGENTS_DIR}
+
+
+def _make_scope_dir(base: Path, *parts: str) -> Path:
+    """Create a nested vault-layout dir under *base* and return it, replacing the
+    repeated ``(base / a / b).mkdir(parents=True)`` boilerplate. Returning the
+    created path lets a test assert against it directly (no duplicated literal)."""
+    directory = base.joinpath(*parts)
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
 class TestResolveProjectDir:
     """Tests for _resolve_project_dir with hierarchical scopes."""
 
@@ -283,111 +313,96 @@ class TestResolveProjectDir:
         """Standard flat scope: 10_projects/testproject resolves."""
         result = _resolve_project_dir(mock_vault, "testproject", _default_scopes())
         assert result is not None
-        assert result[0] == mock_vault / "10_projects" / "testproject"
+        assert result[0] == mock_vault / _PROJECTS_DIR / "testproject"
         assert result[1] == "projects"
 
     def test_explicit_scope_flat(self, mock_vault: Path) -> None:
         """Explicit scope:slug resolves for flat scopes."""
-        result = _resolve_project_dir(
-            mock_vault,
-            "projects:testproject",
-            _default_scopes(),
-        )
+        result = _resolve_project_dir(mock_vault, "projects:testproject", _default_scopes())
         assert result is not None
-        assert result[0] == mock_vault / "10_projects" / "testproject"
+        assert result[0] == mock_vault / _PROJECTS_DIR / "testproject"
 
     def test_hierarchical_scope_resolves_nested(self, tmp_path: Path) -> None:
         """BFS finds entity nested under a category in a hierarchical scope."""
-        (tmp_path / "50_work" / "20-products" / "hydra3d-plus").mkdir(parents=True)
-        scopes = {"work": "50_work"}
-        result = _resolve_project_dir(tmp_path, "work:hydra3d-plus", scopes)
+        entity = _make_scope_dir(tmp_path, _WORK_DIR, "20-products", "hydra3d-plus")
+        result = _resolve_project_dir(tmp_path, "work:hydra3d-plus", _WORK_SCOPES)
         assert result is not None
-        assert result[0] == tmp_path / "50_work" / "20-products" / "hydra3d-plus"
+        assert result[0] == entity
         assert result[1] == "work"
 
     def test_hierarchical_bfs_shallowest_wins(self, tmp_path: Path) -> None:
         """When same name exists at multiple depths, shallowest wins (BFS)."""
-        (tmp_path / "50_work" / "agents").mkdir(parents=True)
-        (tmp_path / "50_work" / "30-clients" / "acme" / "agents").mkdir(parents=True)
-        scopes = {"work": "50_work"}
-        result = _resolve_project_dir(tmp_path, "work:agents", scopes)
+        shallow = _make_scope_dir(tmp_path, _WORK_DIR, "agents")
+        _make_scope_dir(tmp_path, _WORK_DIR, "30-clients", "acme", "agents")
+        result = _resolve_project_dir(tmp_path, "work:agents", _WORK_SCOPES)
         assert result is not None
-        assert result[0] == tmp_path / "50_work" / "agents"
+        assert result[0] == shallow
 
     def test_hierarchical_category_itself_resolves(self, tmp_path: Path) -> None:
         """Category directories (e.g. 12-tickets) are valid targets."""
-        (tmp_path / "50_work" / "12-tickets" / "active").mkdir(parents=True)
-        scopes = {"work": "50_work"}
-        result = _resolve_project_dir(tmp_path, "work:12-tickets", scopes)
+        _make_scope_dir(tmp_path, _WORK_DIR, "12-tickets", "active")
+        result = _resolve_project_dir(tmp_path, "work:12-tickets", _WORK_SCOPES)
         assert result is not None
-        assert result[0] == tmp_path / "50_work" / "12-tickets"
+        assert result[0] == tmp_path / _WORK_DIR / "12-tickets"
 
     def test_hierarchical_explicit_path_with_slash(self, tmp_path: Path) -> None:
         """Explicit category/entity path resolves directly."""
-        (tmp_path / "50_work" / "20-products" / "hydra3d-plus").mkdir(parents=True)
-        scopes = {"work": "50_work"}
-        result = _resolve_project_dir(tmp_path, "work:20-products/hydra3d-plus", scopes)
+        entity = _make_scope_dir(tmp_path, _WORK_DIR, "20-products", "hydra3d-plus")
+        result = _resolve_project_dir(tmp_path, "work:20-products/hydra3d-plus", _WORK_SCOPES)
         assert result is not None
-        assert result[0] == tmp_path / "50_work" / "20-products" / "hydra3d-plus"
+        assert result[0] == entity
 
     def test_auto_scan_finds_in_hierarchical_scope(self, tmp_path: Path) -> None:
         """Auto-scan (no explicit scope) searches hierarchical scopes too."""
-        (tmp_path / "10_projects").mkdir()
-        (tmp_path / "50_work" / "20-products" / "hydra3d-plus").mkdir(parents=True)
-        scopes = {"projects": "10_projects", "work": "50_work"}
-        result = _resolve_project_dir(tmp_path, "hydra3d-plus", scopes)
+        _make_scope_dir(tmp_path, _PROJECTS_DIR)
+        entity = _make_scope_dir(tmp_path, _WORK_DIR, "20-products", "hydra3d-plus")
+        result = _resolve_project_dir(tmp_path, "hydra3d-plus", _PROJECTS_WORK_SCOPES)
         assert result is not None
-        assert result[0] == tmp_path / "50_work" / "20-products" / "hydra3d-plus"
+        assert result[0] == entity
         assert result[1] == "work"
 
     def test_not_found_returns_none(self, tmp_path: Path) -> None:
         """Non-existent slug returns None."""
-        (tmp_path / "50_work").mkdir()
-        scopes = {"work": "50_work"}
-        result = _resolve_project_dir(tmp_path, "work:nonexistent", scopes)
+        _make_scope_dir(tmp_path, _WORK_DIR)
+        result = _resolve_project_dir(tmp_path, "work:nonexistent", _WORK_SCOPES)
         assert result is None
 
     def test_boundary_escape_blocked(self, tmp_path: Path) -> None:
         """Path traversal in slug is blocked."""
-        (tmp_path / "50_work").mkdir()
-        scopes = {"work": "50_work"}
-        result = _resolve_project_dir(tmp_path, "work:../../etc", scopes)
+        _make_scope_dir(tmp_path, _WORK_DIR)
+        result = _resolve_project_dir(tmp_path, "work:../../etc", _WORK_SCOPES)
         assert result is None
 
     # ── agents scope (HIVE-120) ──
 
     def test_agents_scope_explicit_resolves(self, tmp_path: Path) -> None:
         """agents:Hermes-NaN resolves like any other flat scope."""
-        (tmp_path / "80_agents" / "Hermes-NaN").mkdir(parents=True)
-        scopes = {"agents": "80_agents"}
-        result = _resolve_project_dir(tmp_path, "agents:Hermes-NaN", scopes)
+        entity = _make_scope_dir(tmp_path, _AGENTS_DIR, "Hermes-NaN")
+        result = _resolve_project_dir(tmp_path, "agents:Hermes-NaN", _AGENTS_SCOPES)
         assert result is not None
-        assert result[0] == tmp_path / "80_agents" / "Hermes-NaN"
+        assert result[0] == entity
         assert result[1] == "agents"
 
     def test_agents_scope_auto_scan_resolves(self, tmp_path: Path) -> None:
         """A plain agent name auto-scans into the agents scope."""
-        (tmp_path / "10_projects").mkdir()
-        (tmp_path / "80_agents" / "Hermes-NaN").mkdir(parents=True)
-        scopes = {"projects": "10_projects", "agents": "80_agents"}
-        result = _resolve_project_dir(tmp_path, "Hermes-NaN", scopes)
+        _make_scope_dir(tmp_path, _PROJECTS_DIR)
+        entity = _make_scope_dir(tmp_path, _AGENTS_DIR, "Hermes-NaN")
+        result = _resolve_project_dir(tmp_path, "Hermes-NaN", _PROJECTS_AGENTS_SCOPES)
         assert result is not None
-        assert result[0] == tmp_path / "80_agents" / "Hermes-NaN"
+        assert result[0] == entity
         assert result[1] == "agents"
 
     def test_agents_in_default_scopes(self, tmp_path: Path) -> None:
         """``_default_scopes()`` reads settings.vault_scopes (the SSOT) — which
         includes the agents scope — lazily, not from a stale literal. Callers
-        pass it explicitly now that the resolver requires a scopes mapping."""
+        pass it explicitly now that the resolver requires a scopes mapping.
+        Deliberately keeps _default_scopes() (not the module constants): this is
+        the one wiring test pinning that production config maps agents→80_agents."""
         assert "agents" in _default_scopes()
-        (tmp_path / "80_agents" / "Hermes-NaN").mkdir(parents=True)
-        result = _resolve_project_dir(
-            tmp_path,
-            "agents:Hermes-NaN",
-            _default_scopes(),
-        )
+        entity = _make_scope_dir(tmp_path, _AGENTS_DIR, "Hermes-NaN")
+        result = _resolve_project_dir(tmp_path, "agents:Hermes-NaN", _default_scopes())
         assert result is not None
-        assert result[0] == tmp_path / "80_agents" / "Hermes-NaN"
+        assert result[0] == entity
         assert result[1] == "agents"
 
     def test_scopes_argument_is_required(self, tmp_path: Path) -> None:
@@ -401,8 +416,8 @@ class TestResolveProjectDir:
         """A name present in BOTH projects and agents resolves to projects:
         agents is appended last, so first-match auto-scan keeps prior
         behaviour (req #6, no regression)."""
-        (tmp_path / "10_projects" / "shared").mkdir(parents=True)
-        (tmp_path / "80_agents" / "shared").mkdir(parents=True)
+        _make_scope_dir(tmp_path, _PROJECTS_DIR, "shared")
+        _make_scope_dir(tmp_path, _AGENTS_DIR, "shared")
         result = _resolve_project_dir(tmp_path, "shared", _default_scopes())
         assert result is not None
         assert result[1] == "projects"
@@ -410,12 +425,11 @@ class TestResolveProjectDir:
     def test_agents_name_is_arbitrary(self, tmp_path: Path) -> None:
         """Agent names carry no format constraint — any valid dir name (mixed
         case, digits, hyphens, underscores, dots) resolves like any project."""
-        scopes = {"agents": "80_agents"}
         for name in ("weather-bot", "local_runner", "Athena.v2", "GPT5x"):
-            (tmp_path / "80_agents" / name).mkdir(parents=True)
-            result = _resolve_project_dir(tmp_path, f"agents:{name}", scopes)
+            entity = _make_scope_dir(tmp_path, _AGENTS_DIR, name)
+            result = _resolve_project_dir(tmp_path, f"agents:{name}", _AGENTS_SCOPES)
             assert result is not None, name
-            assert result[0] == tmp_path / "80_agents" / name
+            assert result[0] == entity
             assert result[1] == "agents"
 
     def test_meta_unchanged(self, mock_vault: Path) -> None:
@@ -430,40 +444,36 @@ class TestResolveProjectDir:
     def test_slash_form_scope_qualified_resolves(self, tmp_path: Path) -> None:
         """The slash form `vault_list` advertises (`agents/Hermes-NaN`) round-trips:
         a leading segment that names a scope is treated as `scope:slug` (#235)."""
-        (tmp_path / "80_agents" / "Hermes-NaN").mkdir(parents=True)
-        scopes = {"projects": "10_projects", "agents": "80_agents"}
-        result = _resolve_project_dir(tmp_path, "agents/Hermes-NaN", scopes)
+        entity = _make_scope_dir(tmp_path, _AGENTS_DIR, "Hermes-NaN")
+        result = _resolve_project_dir(tmp_path, "agents/Hermes-NaN", _PROJECTS_AGENTS_SCOPES)
         assert result is not None
-        assert result[0] == tmp_path / "80_agents" / "Hermes-NaN"
+        assert result[0] == entity
         assert result[1] == "agents"
 
     def test_slash_form_matches_colon_form(self, tmp_path: Path) -> None:
         """The slash and colon forms resolve identically for a scope-qualified id."""
-        (tmp_path / "10_projects" / "testproject").mkdir(parents=True)
-        scopes = {"projects": "10_projects"}
-        slash = _resolve_project_dir(tmp_path, "projects/testproject", scopes)
-        colon = _resolve_project_dir(tmp_path, "projects:testproject", scopes)
+        _make_scope_dir(tmp_path, _PROJECTS_DIR, "testproject")
+        slash = _resolve_project_dir(tmp_path, "projects/testproject", _PROJECTS_SCOPES)
+        colon = _resolve_project_dir(tmp_path, "projects:testproject", _PROJECTS_SCOPES)
         assert slash is not None
         assert slash == colon
 
     def test_slash_form_nested_path_round_trips(self, tmp_path: Path) -> None:
         """A full slash form `<scope>/<category>/<entity>` resolves like the colon
         form `<scope>:<category>/<entity>` — only the first `/` is the scope."""
-        (tmp_path / "50_work" / "20-products" / "hydra3d-plus").mkdir(parents=True)
-        scopes = {"work": "50_work"}
-        result = _resolve_project_dir(tmp_path, "work/20-products/hydra3d-plus", scopes)
+        entity = _make_scope_dir(tmp_path, _WORK_DIR, "20-products", "hydra3d-plus")
+        result = _resolve_project_dir(tmp_path, "work/20-products/hydra3d-plus", _WORK_SCOPES)
         assert result is not None
-        assert result[0] == tmp_path / "50_work" / "20-products" / "hydra3d-plus"
+        assert result[0] == entity
         assert result[1] == "work"
 
     def test_slash_relative_path_non_scope_head_unaffected(self, tmp_path: Path) -> None:
         """Regression: a `/` form whose head is NOT a scope key keeps its literal
         relative-path meaning in auto-scan (the existing `_search_scope` feature)."""
-        (tmp_path / "50_work" / "20-products" / "hydra3d-plus").mkdir(parents=True)
-        scopes = {"projects": "10_projects", "work": "50_work"}
-        result = _resolve_project_dir(tmp_path, "20-products/hydra3d-plus", scopes)
+        entity = _make_scope_dir(tmp_path, _WORK_DIR, "20-products", "hydra3d-plus")
+        result = _resolve_project_dir(tmp_path, "20-products/hydra3d-plus", _PROJECTS_WORK_SCOPES)
         assert result is not None
-        assert result[0] == tmp_path / "50_work" / "20-products" / "hydra3d-plus"
+        assert result[0] == entity
         assert result[1] == "work"
 
 
