@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.43.0](https://github.com/mlorentedev/hive/compare/v1.42.1...v1.43.0) (2026-07-10)
+
+
+### Features
+
+* **runtime:** resolve latest hive-vault from PyPI when self-upgrade version omitted ([#302](https://github.com/mlorentedev/hive/issues/302)) ([e0001f9](https://github.com/mlorentedev/hive/commit/e0001f97dc8bce273085f8300530e43f0ba3360e))
+
 ## [1.42.1](https://github.com/mlorentedev/hive/compare/v1.42.0...v1.42.1) (2026-07-09)
 
 
