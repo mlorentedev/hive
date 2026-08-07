@@ -340,3 +340,133 @@ def test_run_is_quiet_on_success(
     rc = svc._run(["schtasks", "/Query"])
     assert rc == 0
     assert capsys.readouterr().err == ""
+
+
+# ── _resolve_exec: what the supervisor is actually registered against (#328) ──
+
+
+def _seed_layout(root: Path, version: str = "1.43.0", *, with_launcher: bool = True) -> Path:
+    """Build a minimal A3 layout under *root* and return the launcher path.
+
+    Uses `_runtime._make_junction` rather than `Path.symlink_to`: on Windows a
+    symlink needs SeCreateSymbolicLinkPrivilege (WinError 1314) while a junction
+    does not, which is the whole reason A3 uses `mklink /J`. Reusing the
+    production seam keeps the fixture honest on both OSes.
+    """
+    import sys
+
+    from hive import _runtime
+
+    target = root / "versions" / version
+    bindir = target / ("Scripts" if sys.platform == "win32" else "bin")
+    bindir.mkdir(parents=True)
+    launcher = bindir / ("hive.exe" if sys.platform == "win32" else "hive")
+    if with_launcher:
+        launcher.write_text("", encoding="utf-8")
+    _runtime._make_junction(root / "current", target)
+    return launcher
+
+
+def test_resolve_exec_prefers_the_a3_layout_over_an_arbitrary_path_hit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The versioned layout is the install hive owns; a stray PATH hit is not.
+    Resolving through `current` also means an upgrade repoints the junction and
+    the registered command keeps working without being rewritten (#328)."""
+    import hive._service as svc
+
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    _seed_layout(tmp_path)
+    monkeypatch.setattr(svc.shutil, "which", lambda _: "/somewhere/else/hive")
+
+    resolved = svc._resolve_exec()
+
+    # Through `current`, NOT the concrete versions/<v> dir: that indirection is
+    # what lets an upgrade repoint the junction without rewriting the unit/task.
+    assert str(tmp_path / "current") in resolved
+    assert "versions" not in resolved
+    assert "somewhere/else" not in resolved
+
+
+def test_resolve_exec_rejects_a_path_hit_that_cannot_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An orphaned uv trampoline is present-but-dead: `which` finds it, running it
+    fails. Registering it would give the supervisor a command that can never
+    start — the #791 failure. It must fall through, not be selected."""
+    import hive._service as svc
+
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path / "absent"))
+    dead = tmp_path / "hive.exe"
+    dead.write_text("", encoding="utf-8")
+    monkeypatch.setattr(svc.shutil, "which", lambda _: str(dead))
+    monkeypatch.setattr(svc, "_executes", lambda _: False)
+
+    resolved = svc._resolve_exec()
+
+    assert str(dead) not in resolved
+    assert "-m hive.server" in resolved
+
+
+def test_resolve_exec_accepts_a_path_hit_that_starts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A healthy console script on PATH stays the answer when there is no layout."""
+    import hive._service as svc
+
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path / "absent"))
+    good = tmp_path / "hive"
+    good.write_text("", encoding="utf-8")
+    monkeypatch.setattr(svc.shutil, "which", lambda _: str(good))
+    monkeypatch.setattr(svc, "_executes", lambda _: True)
+
+    assert svc._resolve_exec() == str(good)
+
+
+def test_resolve_exec_falls_back_to_module_invocation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No layout and nothing on PATH: the module invocation always works because
+    the interpreter running this code has hive importable."""
+    import hive._service as svc
+
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path / "absent"))
+    monkeypatch.setattr(svc.shutil, "which", lambda _: None)
+
+    assert "-m hive.server" in svc._resolve_exec()
+
+
+def test_executes_treats_any_probe_failure_as_not_runnable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AGENTS.md load-bearing rule: subprocess invocations catch broad Exception —
+    on Windows a broken launcher raises OSError variants, not CalledProcessError.
+    The probe must answer False, never propagate."""
+    import hive._service as svc
+
+    def _boom(*_a: object, **_k: object) -> None:
+        raise OSError("the process cannot be accessed")
+
+    monkeypatch.setattr(svc.subprocess, "run", _boom)
+
+    assert svc._executes(str(tmp_path / "hive")) is False
+
+
+def test_resolve_exec_ignores_a_layout_whose_launcher_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A `current` junction pointing at a half-built version must not win — the
+    layout is only preferable when it actually contains a launcher."""
+    import hive._service as svc
+
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    _seed_layout(tmp_path, with_launcher=False)
+    monkeypatch.setattr(svc.shutil, "which", lambda _: None)
+
+    assert "-m hive.server" in svc._resolve_exec()

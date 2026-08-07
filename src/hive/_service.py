@@ -28,12 +28,17 @@ import tempfile
 from pathlib import Path
 from xml.sax.saxutils import escape
 
+from hive._helpers import _subprocess_run_kwargs
 from hive.config import settings
 
 _log = logging.getLogger(__name__)
 
 SYSTEMD_UNIT_FILENAME = "hive.service"
 WINDOWS_TASK_NAME = "HiveVaultDaemon"
+
+# Bounded so a wedged launcher cannot hang `hive service install`; a healthy
+# `--version` returns in milliseconds.
+_PROBE_TIMEOUT_S = 10.0
 
 
 # ── platform + path helpers (all overridable in tests) ───────────────────
@@ -59,14 +64,61 @@ def systemd_unit_path() -> Path:
     return _config_root() / "systemd" / "user" / SYSTEMD_UNIT_FILENAME
 
 
+def _current_layout_exec() -> str | None:
+    """The launcher inside the A3 versioned layout, or ``None`` when absent.
+
+    Resolving through the ``current`` junction rather than a concrete version
+    dir is the property A3 exists for (HIVE-267): an upgrade repoints the
+    junction and the registered command keeps working, unrewritten.
+    """
+    from hive import _runtime
+
+    subdir, name = ("Scripts", "hive.exe") if sys.platform == "win32" else ("bin", "hive")
+    launcher = _runtime.current_link() / subdir / name
+    return str(launcher) if launcher.exists() else None
+
+
+def _executes(command: str) -> bool:
+    """Whether *command* actually starts.
+
+    ``shutil.which`` only proves a file sits on PATH. An orphaned uv trampoline
+    is present but dead (``failed to canonicalize script path``), and a
+    present-but-broken binary is indistinguishable from a healthy one at the
+    ``which`` level — registering it hands the supervisor a command that can
+    never start (#328, observed in dotfiles#791).
+
+    Broad ``Exception`` per AGENTS.md: on Windows a broken launcher surfaces as
+    ``OSError`` variants, not ``CalledProcessError``. A probe that cannot answer
+    means "not runnable", never a raised exception into the install path.
+    """
+    try:
+        proc = subprocess.run(  # noqa: S603
+            [command, "--version"],
+            check=False,
+            capture_output=True,
+            timeout=_PROBE_TIMEOUT_S,
+            **_subprocess_run_kwargs(),
+        )
+    except Exception:  # noqa: BLE001 — any failure to probe means "do not use it"
+        return False
+    return proc.returncode == 0
+
+
 def _resolve_exec() -> str:
     """Absolute command the supervisor runs (the unit/task appends ``serve``).
 
-    Prefers the installed ``hive`` console script; falls back to
-    ``<python> -m hive.server`` when it is not on PATH.
+    Resolution order, most-owned first:
+
+    1. the A3 versioned layout, when hive owns one — it follows upgrades;
+    2. a ``hive`` on PATH, but only once verified to start;
+    3. ``<python> -m hive.server``, which works because this interpreter has
+       hive importable by construction.
     """
+    layout = _current_layout_exec()
+    if layout:
+        return layout
     found = shutil.which("hive")
-    if found:
+    if found and _executes(found):
         return found
     return f"{sys.executable} -m hive.server"
 
