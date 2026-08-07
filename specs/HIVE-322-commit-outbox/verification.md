@@ -40,6 +40,10 @@ Threads in one process (the daemon regime this spec targets):
 
 Throughput is flat at ~30-33 writes/s in both regimes: the daemon fixes tail *fairness* (max 1390 ms -> 418 ms at 10 writers) but not the ceiling, because a git commit against one repo is serial. This is the number the spec must move.
 
+Reproduce with `spike/commit_contention.py` (see `spike/README.md`). The tables above are **one observed run**; absolute throughput varies by tens of percent between runs, so compare shapes and ratios rather than individual cells. The spike asserts the two things that hold regardless of noise: every expected commit actually landed, and throughput is sublinear in writer count (~1.5x observed for 12x the writers).
+
+Coalescing raises the ceiling to ~85-100 writes/s and **holds it across the ladder** — it hits the serialized commit less often without removing the serialization. An earlier single-run reading suggested coalesced throughput degraded with N; repeated runs do not support that, and the claim is withdrawn.
+
 ## Test status
 
 - Test suite: `<command> -> <output / coverage %>`
