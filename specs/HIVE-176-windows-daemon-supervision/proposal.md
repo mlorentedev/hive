@@ -1,3 +1,13 @@
+---
+id: "HIVE-176-windows-daemon-supervision"
+type: spec
+status: implementing # draft | implementing | verifying | archived
+created: "2026-06-05"
+issue: "hive#176"   # repo#NNN — GitHub issue / Project item that tracks this spec
+tags: [spec, proposal]
+template_version: "1.0"
+---
+
 # HIVE-176 — Windows daemon supervision & auto-upgrade
 
 > **Why (upstream):** [ADR-015](../../docs/adr/adr-015-windows-daemon-supervision-upgrade.md) — amends ADR-011 §4. The first real Windows rollout validation (#176) proved the daemon's restart-on-upgrade is broken on Windows in three ways (A upgrade-swap, B restart trigger, C console window). This spec implements the per-OS divergent Windows mechanism.

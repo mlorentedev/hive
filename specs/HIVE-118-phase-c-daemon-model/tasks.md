@@ -13,7 +13,7 @@ created: "2026-05-29"
 
 - [ ] Branch created from main: `feat/HIVE-118-phase-c-daemon-model`
 - [ ] `proposal.md` completed via `/spec fill` (Socratic pass — currently agent-scaffolded from vault context)
-- [ ] **ADR-011 authored + merged** (daemon decision, transport choice, fallback contract, supersession of ADR-005) — gating
+- [x] **ADR-011 authored + merged** (daemon decision, transport choice, fallback contract, supersession of ADR-005) — gating; accepted 2026-05-31
 - [x] Open questions in `proposal.md` "Risks" resolved (cross-OS transport decided; SPOF/lifecycle strategy decided) — done in ADR-011 (2026-05-31); only the Windows transport spike remains
 
 ## Implementation (provisional skeleton — refine after fill + ADR-011)
@@ -71,7 +71,7 @@ created: "2026-05-29"
 - [ ] Lint passes (ruff)
 - [ ] No unrelated changes in the diff (no scope creep)
 - [ ] `verification.md` filled in
-- [ ] ADR-011 merged + ADR-005 amended to point at it
+- [x] ADR-011 merged + ADR-005 amended to point at it
 - [ ] PR opened referencing this spec folder
 
 ## Machine-readable features
