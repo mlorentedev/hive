@@ -1,7 +1,7 @@
 ---
 id: adr-005-transport-and-scale
 type: adr
-status: proposed
+status: superseded
 created: "2026-05-18"
 owner: manu
 tags: [architecture, scalability, mcp, transport, concurrency]
@@ -10,6 +10,8 @@ tags: [architecture, scalability, mcp, transport, concurrency]
 # ADR-005: Transport Model and Multi-Process Scalability
 
 ## Status
+**Superseded by [ADR-011](adr-011-phase-c-daemon-model.md) (accepted 2026-05-31)** for its "Stay on Option A" recommendation — the supersession condition stated in the 2026-05-30 note below has been met. The analysis and the Option A/B comparison remain valid as context.
+
 Proposed (2026-05-18) — written after diagnosing inter-process hangs (see [lessons.md](../lessons.md), "Multi-process MCP server contention surfaces").
 
 > **2026-05-30 — Option B escalated.** This ADR's Option B (single `hive serve` daemon) is being adopted in [adr-011-phase-c-daemon-model.md](adr-011-phase-c-daemon-model.md) (status: proposed) — **on operating-model grounds, not the latency triggers below** (the latency trigger did not fire; HIVE-115/116 neutralised the contention class). When ADR-011 is accepted, this ADR's "Stay on Option A" recommendation is superseded.

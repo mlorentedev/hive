@@ -24,7 +24,16 @@ jobs:
     # job would fail (Codex review on kubelab#237). Skip them; fork PRs reach the
     # board via the rollout backfill or a manual item-add.
     # Dependabot PRs are excluded from the board (see header comment for rationale).
-    if: github.event_name == 'issues' || (github.event.pull_request.head.repo.fork == false && github.event.pull_request.user.login != 'dependabot[bot]')
+    # The bot exclusion applies to BOTH event types. Previously `issues` short-
+    # circuited the whole condition, so a bot-authored issue would have been
+    # added regardless — latent today (Dependabot opens no issues by default)
+    # but live the moment Dependabot security alerts are configured to file
+    # them, or any other bot starts opening issues here.
+    if: >-
+      github.event.sender.login != 'dependabot[bot]' &&
+      (github.event_name == 'issues' ||
+       (github.event.pull_request.head.repo.fork == false &&
+        github.event.pull_request.user.login != 'dependabot[bot]'))
     runs-on: ubuntu-latest
     steps:
       # Issues: use the official action (works fine for issues)
