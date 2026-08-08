@@ -21,7 +21,7 @@ A3 (HIVE-267 / ADR-015) made hive own its install layout: `self_upgrade` builds 
 1. `_resolve_exec()` resolves in an order that reflects ownership: the A3 `current` layout first (it follows upgrades, so the registered command survives a version swap unrewritten), then a `hive` on PATH **but only once verified to actually start**, then `<python> -m hive.server`. A present-but-broken binary falls through instead of being selected.
 2. `self_upgrade` (and a first install) installs a launcher into **`%LOCALAPPDATA%\hive\bin`** that resolves **through `current`**, so an upgrade needs no launcher rewrite, and prepends that directory to the User `PATH`. Hive never writes to `~/.local/bin`; it only probes it and warns.
 
-Part 1 shipped in PR1 ([#330](https://github.com/mlorentedev/hive/pull/330)). Part 2's blocking design decision is **resolved** by [ADR-019](../../docs/adr/adr-019-launcher-ownership.md) — see Risks below; PR2 is gated only on that ADR's acceptance.
+Part 1 shipped in PR1 ([#330](https://github.com/mlorentedev/hive/pull/330)). Part 2's blocking design decision is **resolved** by [ADR-019](../../docs/adr/adr-019-launcher-ownership.md), accepted 2026-08-07 — see Risks below; PR2 has no gate left.
 
 ## Out of scope
 
@@ -31,7 +31,7 @@ Part 1 shipped in PR1 ([#330](https://github.com/mlorentedev/hive/pull/330)). Pa
 
 ## Risks / open questions
 
-**RESOLVED 2026-08-07 — [ADR-019](../../docs/adr/adr-019-launcher-ownership.md), which now gates PR2.** Hive owns `%LOCALAPPDATA%\hive\bin` (option B), prepends it to the User PATH, and never writes to or deletes from `~/.local/bin`.
+**RESOLVED 2026-08-07 — [ADR-019](../../docs/adr/adr-019-launcher-ownership.md), accepted the same day.** Hive owns `%LOCALAPPDATA%\hive\bin` (option B), prepends it to the User PATH, and never writes to or deletes from `~/.local/bin`.
 
 The question was which directory owns the launcher. `~/.local/bin` is already on PATH on the affected machine, but uv put the trampoline there; and on Windows `PATHEXT` resolves `.COM;.EXE;.BAT;.CMD`, so a `hive.cmd` hive writes **loses to a leftover `hive.exe` sitting beside it**. Three candidates were weighed — (A) joint ownership of `~/.local/bin`, (B) a hive-owned directory, (C) writing to `~/.local/bin` but only replacing a `hive*` that fails the `_executes` probe.
 
@@ -54,7 +54,7 @@ Non-blocking, decided:
 - [x] **AC4** — With neither a layout nor a PATH hit, `<python> -m hive.server` is returned.
 - [x] **AC5** — The probe answers `False` on any subprocess failure and never propagates (AGENTS.md broad-`Exception` rule; Windows raises `OSError` variants here, not `CalledProcessError`).
 - [x] **AC6** — A `current` junction pointing at a half-built version (no launcher inside) does not win.
-- [ ] **AC7** *(PR2, gated on ADR-019 acceptance)* — After `hive self-upgrade` on a machine with no prior install, `hive --version` works from a **fresh** shell (an already-open shell is out of contract — see ADR-019 Consequences).
+- [ ] **AC7** *(PR2)* — After `hive self-upgrade` on a machine with no prior install, `hive --version` works from a **fresh** shell (an already-open shell is out of contract — see ADR-019 Consequences).
 - [ ] **AC8** *(PR2)* — An upgrade repoints `current` and requires no launcher rewrite; launcher installation is idempotent, and repeated upgrades add no duplicate `PATH` entries.
 - [ ] **AC9** *(PR2)* — Hive never writes to or deletes from `~/.local/bin`. Asserted explicitly, because the rejected option C did exactly that and the boundary is the decision.
 - [ ] **AC10** *(PR2)* — With a `hive*` on `PATH` that fails `_executes()`, install reports it and names `dotf doctor --fix`, without modifying it.
