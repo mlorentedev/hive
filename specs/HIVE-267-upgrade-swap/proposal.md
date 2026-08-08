@@ -1,7 +1,7 @@
 ---
 id: "HIVE-267-upgrade-swap"
 type: spec
-status: draft # draft | implementing | verifying | archived
+status: verifying # draft | implementing | verifying | archived
 created: "2026-06-24"
 issue: "hive#267"   # repo#NNN — GitHub issue / Project item that tracks this spec
 tags: [spec, proposal]
@@ -12,10 +12,24 @@ template_version: "1.0"
 
 > **Naming**: file lives at `<repo>/specs/HIVE-267-upgrade-swap/proposal.md`.
 
-> `[AGENT-DRAFT — review before archive]` — this proposal was drafted from the
-> rich content of issue #267. The blocking mechanism decision is **RESOLVED**
-> (A3-first, see Risks); the remaining sections are drafted from the issue —
-> review them before archive.
+> **Reviewed 2026-08-07 (#333); all draft markers resolved.** The A3 mechanism
+> shipped in #290, #294 and #302 (`src/hive/_runtime.py`, 25 tests in
+> `tests/test_runtime.py`) and is depended on in production by
+> `_service._current_layout_exec()` and [ADR-019](../../docs/adr/adr-019-launcher-ownership.md).
+>
+> **Status is `verifying`, not `archived`, for two concrete reasons** — see
+> Acceptance criteria:
+>
+> 1. **AC1/AC2 cannot be verified end-to-end yet.** They require `hive --version`
+>    to report the new version from a shell, and no launcher is on `PATH` — this
+>    spec's `tasks.md` promised "+ own launcher" and it was never built. That gap
+>    is [#328](https://github.com/mlorentedev/hive/issues/328); its PR1 shipped
+>    (#330) and ADR-019 settled the ownership question, but PR2 (the launcher
+>    itself) has not landed.
+> 2. **AC4 (real non-admin Windows re-validation) has not been performed.** The
+>    A3 *feasibility spike* passed on real hardware 2026-06-24, but the shipped
+>    implementation was never re-validated there, and that box is currently in the
+>    orphaned-trampoline failure state (dotfiles#791).
 
 ## Why
 
@@ -34,16 +48,36 @@ primary vault-access surface.
 
 ## What
 
-`[AGENT-DRAFT]` A swap mechanism in hive that lets the install be replaced
-**without ever touching in-use files**, so an upgrade applied while the daemon is
-running leaves a valid install instead of a locked, malformed one. After this
-change, an upgrade-while-running ends with the `hive` entrypoint present and
-`hive --version` reporting the new version; a failed swap leaves the previous
-working install intact rather than a half-removed directory.
+A swap mechanism in hive that lets the install be replaced **without ever
+touching in-use files**, so an upgrade applied while the daemon is running leaves
+a valid install instead of a locked, malformed one. After this change, an
+upgrade-while-running ends with the `hive` entrypoint present and `hive --version`
+reporting the new version; a failed swap leaves the previous working install
+intact rather than a half-removed directory.
+
+**Shipped** as `src/hive/_runtime.py` — `runtime_root()`, `versions_dir()`,
+`version_path()`, `current_link()`, `_make_junction()`, `repoint()`,
+`build_version()`, `current_version()`, `remove_version()`, `latest_version()`,
+`_gc_other_versions()`, `self_upgrade()` — plus the `hive self-upgrade [version]`
+subcommand (`server._run_self_upgrade`). PRs #290, #294, #302.
+
+**One clause of the "After this change" sentence is still unmet:** `hive
+--version` cannot be invoked from a shell, because nothing installs a launcher on
+`PATH`. The layout is correct and `current` resolves to a working venv; it is
+simply unreachable by name. Tracked as [#328](https://github.com/mlorentedev/hive/issues/328).
 
 ## Out of scope
 
-`[AGENT-DRAFT]` — confirm the boundary, especially the cross-repo split.
+**Boundary confirmed 2026-08-07.** The cross-repo split held up in practice: the
+hive side shipped independently, and the dotfiles side is tracked separately as
+AI-028 (dotfiles#791). One item has since been carved out into its own hive spec
+rather than staying here:
+
+- **The PATH launcher** — promised by this spec's `tasks.md` ("hive owns the layout
+  … **+ own launcher**") but never built. Now owned by
+  `specs/HIVE-328-runtime-launcher/` and decided by
+  [ADR-019](../../docs/adr/adr-019-launcher-ownership.md). Keeping it here would
+  have left two specs claiming the same deliverable.
 
 - The **dotfiles rollout** that triggers the upgrade (`setup-windows.ps1`
   supervision/upgrade block, `tests/hive-upgrade-timer.bats`, `mcp-servers.json`
@@ -96,26 +130,60 @@ working install intact rather than a half-removed directory.
   `uv tool list` shows a stale/unmanaged entry; documented as expected. (An
   upstream `uv` issue — replace-while-running on Windows — is filed regardless,
   per ADR-015.)
-- `[AGENT-DRAFT]` **The supervisor holds the lock.** The swap must succeed while
-  the Startup supervisor keeps `python.exe` running, or coordinate a bounded
-  stop/restart (exit-75 contract) without a window where the MCP is dead.
-- `[AGENT-DRAFT]` **Windows-only, hardware-gated.** Like the other ADR-015
-  mechanisms, this needs validation on a real non-admin Windows box, not just CI.
+- **RESOLVED — the supervisor holding the lock is a non-issue for A3 (spike,
+  2026-06-24; design confirmed at implementation).** This was the risk A3 was
+  chosen to dissolve rather than manage: junction operations touch only the reparse
+  point, never the locked target files, so the repoint succeeds *while* the
+  supervisor keeps `python.exe` running. The spike proved it directly — `current`
+  was repointed from `versions/1.41.5` to `1.41.6` while an exclusive
+  `FileShare.None` lock was held on `1.41.5/core.pyd`, with no "Access is denied".
+  No bounded stop/restart is needed, so there is no window where the MCP is dead.
+  `self_upgrade` deliberately does **not** restart the daemon; the supervisor's
+  pre-existing exit-75 restart-on-upgrade contract relaunches `hive serve` through
+  the freshly repointed `current`. GC of a still-locked old version returns `False`
+  and defers to the next run rather than failing the upgrade.
+- **RESOLVED as scoping, NOT as validation — Windows-only is confirmed; the
+  hardware re-validation is still owed.** Windows-only is settled and no longer
+  open: A3 exists solely to work around Windows' in-use-file lock, and POSIX has no
+  such constraint, so **Linux keeps `uv tool`** (dotfiles AI-028 AC6). ADR-019
+  reaches the same conclusion for the launcher.
+  **But the hardware gate itself is unmet.** What passed on real hardware was the
+  A3 *feasibility spike*, before any code existed; the shipped `_runtime.py` has
+  only ever run on CI (Linux/Windows runners) and this Linux dev box. See AC4 — it
+  is one of the two reasons this spec is `verifying` rather than `archived`, and it
+  is blocked in practice because the target machine is in the orphaned-trampoline
+  state (dotfiles#791).
 
 ## Acceptance criteria
 
-`[AGENT-DRAFT]` Observable outcomes. Each must be testable.
+Observable outcomes. Each must be testable. Status reviewed 2026-08-07 — marked
+against evidence, not against intent.
 
-- [ ] An upgrade applied **while the daemon is running** leaves a valid install:
-      the `hive` entrypoint is present and `hive --version` reports the new
-      version — no malformed/locked state.
-- [ ] The documented #267 reproduction (`uv tool install --upgrade` against a
-      running daemon) no longer fails with "Access is denied / failed to remove
-      directory" on in-use files.
-- [ ] A swap that cannot complete leaves the **previous** working install intact
-      and surfaces an actionable error — never a silently corrupted, dead MCP.
-- [ ] Validated on a real non-admin Windows box (ADR-015 hardware-validation
-      discipline), not only the CI matrix.
+- [~] **AC1 — an upgrade applied while the daemon is running leaves a valid
+      install:** the `hive` entrypoint is present and `hive --version` reports the
+      new version, with no malformed/locked state. **Partially met.** The layout
+      half holds: `build_version()` writes beside the in-use dir and `repoint()`
+      flips the junction, so the entrypoint exists at
+      `current/Scripts/hive.exe` — asserted by `tests/test_runtime.py`. The
+      `hive --version` half **cannot be verified**, because no launcher is on
+      `PATH` ([#328](https://github.com/mlorentedev/hive/issues/328)).
+- [~] **AC2 — the documented #267 reproduction no longer fails on in-use files.**
+      **Met in mechanism, unverified in the field.** The spike reproduced the exact
+      failure mode and showed the repoint succeeding under an exclusive lock
+      (`verification.md`). Not re-run against the shipped code on real hardware —
+      same gap as AC4.
+- [x] **AC3 — a failed swap leaves the previous working install intact and
+      surfaces an actionable error.** **Met.** Stage-then-flip: the fallible
+      `_make_junction` runs before `current` is disturbed, and failure raises a
+      WHY/FIX `RuntimeError`. `build_version()` cleans a half-built dir on failure;
+      `remove_version()` refuses the active version. Test:
+      `test_failed_repoint_leaves_the_previous_current_intact`.
+- [ ] **AC4 — validated on a real non-admin Windows box** (ADR-015
+      hardware-validation discipline), not only the CI matrix. **NOT met.** The
+      2026-06-24 real-hardware pass was the *feasibility spike*, before any code
+      existed. The shipped implementation has run only on CI and a Linux dev box.
+      Blocked in practice: the target machine is in the orphaned-trampoline state
+      (dotfiles#791).
 
 ## References
 
