@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.43.1](https://github.com/mlorentedev/hive/compare/v1.43.0...v1.43.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* **deps:** bound fastmcp to &gt;=3.3.1,&lt;4 ([#320](https://github.com/mlorentedev/hive/issues/320)) ([17af8d8](https://github.com/mlorentedev/hive/commit/17af8d8c41205016cc1b2cfc20c27a8bf7fc6962))
+* **deps:** let major bumps reach pip and npm, and clear the cryptography advisory ([#338](https://github.com/mlorentedev/hive/issues/338)) ([7676ad7](https://github.com/mlorentedev/hive/commit/7676ad75f3645c1f8c60fc78cf36206d163db353))
+* **deps:** re-narrow the mcp cap to &lt;2.0 and correct its rationale ([#345](https://github.com/mlorentedev/hive/issues/345)) ([b20ce16](https://github.com/mlorentedev/hive/commit/b20ce16e2cea5ac891d457ff5e9daf2d9fea2d29))
+* **logging:** collect stale per-process debug logs ([#335](https://github.com/mlorentedev/hive/issues/335)) ([85b8cb0](https://github.com/mlorentedev/hive/commit/85b8cb034757a80e75310a074fd9341861231ba2))
+* **service:** never register the daemon against a binary that cannot start ([#330](https://github.com/mlorentedev/hive/issues/330)) ([36e00f4](https://github.com/mlorentedev/hive/commit/36e00f4312b4095bbdeca13057a783032d9d646f))
+
+
+### Documentation
+
+* ADR-018 asynchronous commit queue + HIVE-322 spec scaffold ([#324](https://github.com/mlorentedev/hive/issues/324)) ([0e316a7](https://github.com/mlorentedev/hive/commit/0e316a78354a27577ce4b43c5f67996cb8dae8a6))
+* **adr:** accept ADR-018 and ADR-019 ([#341](https://github.com/mlorentedev/hive/issues/341)) ([9edc1b4](https://github.com/mlorentedev/hive/commit/9edc1b43b0abc791ed248493459d70cbbbbb84dd))
+* **adr:** ADR-019 launcher ownership on Windows ([#332](https://github.com/mlorentedev/hive/issues/332)) ([27f56ef](https://github.com/mlorentedev/hive/commit/27f56ef3f94a3b2c9522232b894aa622cad7204b))
+* **adr:** rescope ADR-018 to an in-process reconciler and split recovery ([#331](https://github.com/mlorentedev/hive/issues/331)) ([34f780c](https://github.com/mlorentedev/hive/commit/34f780cb6375b8468978a43f48a9f1e3b5dd7081))
+* correct the compat-shim description in AGENTS.md ([#336](https://github.com/mlorentedev/hive/issues/336)) ([81b0821](https://github.com/mlorentedev/hive/commit/81b0821580aa0ec7e7779bcbfbd1871e45d46a5b))
+* **lessons:** a group filter that excludes rather than batches ([#340](https://github.com/mlorentedev/hive/issues/340)) ([981c932](https://github.com/mlorentedev/hive/commit/981c9329c57e3fb6ecb8e2b0d7519009420d70a5))
+* **lessons:** capture the HIVE-319 packaging diagnosis and HIVE-322 measurement discipline ([#326](https://github.com/mlorentedev/hive/issues/326)) ([aed705c](https://github.com/mlorentedev/hive/commit/aed705c953b60c59080ad2396eac209ed4104513))
+* **lessons:** capture three lessons from the ADR-018 rescope session ([#337](https://github.com/mlorentedev/hive/issues/337)) ([935786e](https://github.com/mlorentedev/hive/commit/935786e13e9d433aeb7244bd7bb05184ff220f28))
+* **lessons:** capture two undocumented diagnoses from this window ([#347](https://github.com/mlorentedev/hive/issues/347)) ([83f6be4](https://github.com/mlorentedev/hive/commit/83f6be41c594942282ba06b1963079a849f13e38))
+
 ## [1.43.0](https://github.com/mlorentedev/hive/compare/v1.42.1...v1.43.0) (2026-07-10)
 
 
