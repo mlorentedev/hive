@@ -7,13 +7,13 @@ created: "2026-08-07"
 
 > TDD order. One task = one focused commit. Tick as you go. Reorder freely while spec is in `draft` state; freeze once you start `implementing`.
 >
-> **NOT FROZEN — one gate left.** All design questions are closed, including the daemon-recovery provenance question review reopened on 2026-08-07 (resolved: recovery reports, never commits, in either regime — ADR-018 §3). The only remaining gate is **ADR-018 acceptance**; it is still `proposed`. Freeze this file the moment the ADR is accepted.
+> **FROZEN (2026-08-07).** ADR-018 is `accepted`, which was this spec's only remaining gate. All design questions are closed, including the daemon-recovery provenance question review reopened on 2026-08-07 (resolved: recovery reports, never commits, in either regime — ADR-018 §3). Reorder no further: from here the list changes only by ticking items, and any design change needs an ADR amendment first.
 
 ## Setup
 
 - [ ] Branch created from main: `feat/HIVE-322-commit-outbox` — not yet created; the docs-only rescope shipped on `docs/adr-018-in-process-reconciler`
-- [ ] **ADR-018 accepted** — **gating**. Authored 2026-08-07, revised the same day to drop the daemon-only scoping (§Decision), split recovery by regime (§3), and make deferral the default (§4).
-- [x] `proposal.md` is complete and acceptance criteria are testable — AC1-AC13 (AC9 pending the provenance gate)
+- [x] **ADR-018 accepted** (2026-08-07) — was **gating**. Authored 2026-08-07 and revised the same day to drop the daemon-only scoping (§Decision), unify startup recovery across both regimes as report-only (§3), and make deferral the default (§4).
+- [x] `proposal.md` is complete and acceptance criteria are testable — AC1-AC13, AC9 included
 - [x] No open questions left in `proposal.md` "Risks / open questions" — the two original drafts plus the reopened provenance question are all resolved
 
 ## Implementation

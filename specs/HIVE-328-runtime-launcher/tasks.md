@@ -7,7 +7,7 @@ created: "2026-08-07"
 
 > TDD order. One task = one focused commit. Tick as you go.
 >
-> **Split into two PRs.** PR1 (exec resolution) had no design ambiguity and shipped first ([#330](https://github.com/mlorentedev/hive/pull/330)) — it is the half that stops `hive service install` registering a daemon against a dead binary. PR2 (the launcher) was blocked on the directory-ownership decision; that is **resolved by [ADR-019](../../docs/adr/adr-019-launcher-ownership.md)** (2026-08-07) and PR2 is gated only on the ADR's acceptance.
+> **Split into two PRs.** PR1 (exec resolution) had no design ambiguity and shipped first ([#330](https://github.com/mlorentedev/hive/pull/330)) — it is the half that stops `hive service install` registering a daemon against a dead binary. PR2 (the launcher) was blocked on the directory-ownership decision; that is **resolved by [ADR-019](../../docs/adr/adr-019-launcher-ownership.md)**, accepted 2026-08-07, and PR2 has no gate left.
 
 ## Setup
 
@@ -32,10 +32,10 @@ created: "2026-08-07"
 - [x] Test fixture uses `_runtime._make_junction`, not `Path.symlink_to`: a Windows symlink needs `SeCreateSymbolicLinkPrivilege` (WinError 1314) while a junction does not — which is precisely why A3 uses `mklink /J`. Reusing the production seam keeps the fixture honest cross-OS.
 - [x] `make check` equivalent green: ruff, ruff format --check, mypy --strict, pytest.
 
-### PR2 — the PATH launcher (AC7-AC11) — gated on ADR-019 acceptance
+### PR2 — the PATH launcher (AC7-AC11) — unblocked; ADR-019 accepted 2026-08-07
 
 - [x] **GATE: decide the launcher directory** — resolved by ADR-019: hive owns `%LOCALAPPDATA%\hive\bin`, prepended to the User PATH, and never touches `~/.local/bin`. The spec's original criterion (*"which one `hive service install` can make work without a shell restart"*) was aimed at the wrong consumer — service install uses an absolute path and never reads PATH.
-- [ ] **ADR-019 accepted** — **gating**; authored 2026-08-07, still `proposed`
+- [x] **ADR-019 accepted** (2026-08-07) — was **gating**; PR2 is now free to start
 - [ ] [P] [AC9] Write failing test: no install path writes to or deletes from `~/.local/bin` (guards the rejected option C — the boundary *is* the decision)
 - [ ] [P] [AC10] Write failing test: a `hive*` on PATH failing `_executes()` is reported and named alongside `dotf doctor --fix`, and is left unmodified
 - [ ] [P] [AC11] Write failing test: the hive bin dir is **prepended** to the User PATH, not appended

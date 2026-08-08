@@ -1,7 +1,7 @@
 ---
 id: "ADR-018-asynchronous-commit-queue"
 type: adr
-status: proposed
+status: accepted
 owner: manu
 date: "2026-08-07"
 issue: "hive#322"   # repo#NNN — GitHub issue / Project item that triggered this decision
@@ -13,7 +13,7 @@ created: "2026-08-07"
 
 ## Status
 
-Proposed (2026-08-07). Gates `specs/HIVE-322-commit-outbox/`. **Amends [ADR-014](adr-014-vault-commit-coordination.md)** — see "The ADR-014 tension" below, which is the load-bearing part of this decision. **Triggers the deferred "2b" evolution of [ADR-013](adr-013-write-idempotency-at-most-once.md)** — see "Relationship to ADR-013" below. The three design questions that blocked this ADR were resolved on 2026-08-07 and are recorded under "Decision".
+Accepted (2026-08-07). Gates `specs/HIVE-322-commit-outbox/`, which is now unfrozen for implementation. **Amends [ADR-014](adr-014-vault-commit-coordination.md)** — see "The ADR-014 tension" below, which is the load-bearing part of this decision. **Triggers the deferred "2b" evolution of [ADR-013](adr-013-write-idempotency-at-most-once.md)** — see "Relationship to ADR-013" below. The three design questions that blocked this ADR were resolved on 2026-08-07 and are recorded under "Decision".
 
 Revised the same day, before acceptance, on three points:
 
