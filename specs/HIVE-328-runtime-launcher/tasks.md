@@ -7,14 +7,14 @@ created: "2026-08-07"
 
 > TDD order. One task = one focused commit. Tick as you go.
 >
-> **Split into two PRs.** PR1 (exec resolution) has no design ambiguity and ships first — it is the half that stops `hive service install` registering a daemon against a dead binary. PR2 (the launcher) is **blocked on the directory-ownership decision** in `proposal.md` and must not start until that is settled.
+> **Split into two PRs.** PR1 (exec resolution) had no design ambiguity and shipped first ([#330](https://github.com/mlorentedev/hive/pull/330)) — it is the half that stops `hive service install` registering a daemon against a dead binary. PR2 (the launcher) was blocked on the directory-ownership decision; that is **resolved by [ADR-019](../../docs/adr/adr-019-launcher-ownership.md)** (2026-08-07) and PR2 is gated only on the ADR's acceptance.
 
 ## Setup
 
 - [x] Branch created from master: `fix/resolve-exec-verifies-the-binary`
 - [x] Gating issue open: hive#328
 - [x] `proposal.md` is complete and acceptance criteria are testable
-- [ ] No open questions left in `proposal.md` "Risks / open questions" — **one BLOCKING question remains** (launcher directory), scoped to PR2
+- [x] No open questions left in `proposal.md` "Risks / open questions" — the launcher-directory question is resolved by ADR-019
 
 ## Implementation
 
@@ -32,13 +32,20 @@ created: "2026-08-07"
 - [x] Test fixture uses `_runtime._make_junction`, not `Path.symlink_to`: a Windows symlink needs `SeCreateSymbolicLinkPrivilege` (WinError 1314) while a junction does not — which is precisely why A3 uses `mklink /J`. Reusing the production seam keeps the fixture honest cross-OS.
 - [x] `make check` equivalent green: ruff, ruff format --check, mypy --strict, pytest.
 
-### PR2 — the PATH launcher (AC7, AC8) — BLOCKED
+### PR2 — the PATH launcher (AC7-AC11) — gated on ADR-019 acceptance
 
-- [ ] **GATE: decide the launcher directory** (`proposal.md` -> Risks). `~/.local/bin` (already on PATH, no admin, no restart, but shared with uv and losing to a leftover `hive.exe` under PATHEXT) vs `%LOCALAPPDATA%\hive\bin` (hive-owned, but needs a PATH mutation that does not reach running shells). Middle path to evaluate: write to `~/.local/bin` but only replace a `hive*` entry that FAILS the `_executes` probe — repair, never seizure.
-- [ ] [AC7] Install a launcher resolving through `current` as part of `self_upgrade` and first install.
-- [ ] [AC8] Idempotent re-install; an upgrade repoints the junction and rewrites nothing.
-- [ ] [AC8] Never clobber a healthy non-hive binary of the same name.
-- [ ] Then flip ADR-015 -> `accepted` (its AC-3) and unblock dotfiles#791 PR2.
+- [x] **GATE: decide the launcher directory** — resolved by ADR-019: hive owns `%LOCALAPPDATA%\hive\bin`, prepended to the User PATH, and never touches `~/.local/bin`. The spec's original criterion (*"which one `hive service install` can make work without a shell restart"*) was aimed at the wrong consumer — service install uses an absolute path and never reads PATH.
+- [ ] **ADR-019 accepted** — **gating**; authored 2026-08-07, still `proposed`
+- [ ] [P] [AC9] Write failing test: no install path writes to or deletes from `~/.local/bin` (guards the rejected option C — the boundary *is* the decision)
+- [ ] [P] [AC10] Write failing test: a `hive*` on PATH failing `_executes()` is reported and named alongside `dotf doctor --fix`, and is left unmodified
+- [ ] [P] [AC11] Write failing test: the hive bin dir is **prepended** to the User PATH, not appended
+- [ ] [P] [AC8] Write failing test: re-running install is idempotent — no duplicate `PATH` entries, no rewritten shim
+- [ ] [AC7] Write a `hive.cmd` shim into `%LOCALAPPDATA%\hive\bin` dispatching through `current`, as part of `self_upgrade` and first install
+- [ ] [AC11] Prepend the directory to the User `PATH` (User-scope env var; no admin)
+- [ ] [AC10] Probe other `hive*` PATH entries with `_executes()` and warn on failure — detect only, never delete (ADR-019 Decision 4)
+- [ ] [AC7] Verify on Windows from a **fresh** shell; an already-open shell is explicitly out of contract
+- [ ] Author `features.json` now that the criteria set is complete (AC1-AC11)
+- [ ] Then flip ADR-015 -> `accepted` (its AC-3) and unblock dotfiles#791 PR2
 
 ## Closing
 
