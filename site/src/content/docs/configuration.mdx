@@ -66,6 +66,7 @@ When a tool call is cancelled mid-flight (slow worker, client timeout), the serv
 | `HIVE_VAULT_SCOPES` | `{"projects": "10_projects", "meta": "00_meta", "work": "50_work", "agents": "80_agents"}` | JSON mapping of scope names to vault subdirectories. Scopes support hierarchical resolution (BFS). The `agents` scope holds AI-agent inboxes; auto-scan tries scopes in insertion order, so `agents` is listed last to avoid shadowing existing project names. Each directory must be a unique relative path inside the vault — duplicate, absolute, or escaping (`..`) values are rejected at startup. |
 | `HIVE_LOG_PATH` | `~/.local/share/hive/hive.log` | File path for persistent debug log (1MB rotating) |
 | `HIVE_LOG_LEVEL` | `INFO` | Log level for the persistent log file. Captures `hive`, `fastmcp` and `mcp` loggers. Set to `DEBUG` for transport-level diagnostics, `WARNING` to suppress lifecycle events. |
+| `HIVE_LOG_RETENTION_DAYS` | `7` | How long a per-process debug log is kept. Each process writes its own `hive-<pid>.log` (size-capped at 1MB), so this bounds the *number* of files rather than their size. On startup, a log is deleted only when it is older than this **and** its owning process is gone — an idle daemon's log is never collected. Validated 1..365. |
 
 ## API Key Resolution
 
