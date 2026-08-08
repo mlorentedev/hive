@@ -15,6 +15,8 @@ created: "2026-08-07"
 
 Proposed (2026-08-07). Gates `specs/HIVE-322-commit-outbox/`. **Amends [ADR-014](adr-014-vault-commit-coordination.md)** — see "The ADR-014 tension" below, which is the load-bearing part of this decision. **Triggers the deferred "2b" evolution of [ADR-013](adr-013-write-idempotency-at-most-once.md)** — see "Relationship to ADR-013" below. The three design questions that blocked this ADR were resolved on 2026-08-07 and are recorded under "Decision".
 
+Revised the same day, before acceptance, on two points: the reconciler is **no longer scoped to the daemon** (§Decision), which removes the dependency on the [#176](https://github.com/mlorentedev/hive/issues/176) rollout and forced recovery to be redesigned (§3); and deferral becomes the **default** rather than an opt-in, making this a breaking contract change (§4).
+
 ## Date
 
 2026-08-07
@@ -76,11 +78,17 @@ Two points of reconciliation:
 
 ## Decision
 
-Move committing off the write path into a reconciler thread that drains a queue of pending paths on a tick (`HIVE_COMMIT_TICK_S`), producing one commit per tick rather than one per write. Scope the change to the single-owner daemon regime; the multi-process path keeps today's synchronous commit until the [#176](https://github.com/mlorentedev/hive/issues/176) rollout completes.
+Move committing off the write path into a reconciler thread that drains a queue of pending paths on a tick (`HIVE_COMMIT_TICK_S`), producing one commit per tick rather than one per write. The reconciler runs **in every hive server process, daemon or not**. This decision does not wait on the [#176](https://github.com/mlorentedev/hive/issues/176) rollout.
 
-Under the daemon this is strictly simpler than the multi-process framing would suggest: one process means **one shared queue**, so 10 concurrent writers produce one commit per tick in total — not one per writer — and no cross-process coordination is required. At a 5 s tick that is a ~5% duty cycle on a 25 ms commit, where contention is negligible.
+Scoping the queue to the daemon was considered and rejected. The argument for it was that one process means one shared queue and therefore no cross-process coordination is required — but that coordination **already exists and is already load-bearing**. `_git_filelock(vault_path)` in `_helpers.py` is a per-vault `filelock.FileLock` that every write path already acquires, and HIVE-115's AC-9b already documents concurrent processes interleaving staged-but-uncommitted state underneath it, rescued by the next call. The queue changes commit *frequency*; it does not change the concurrency model.
 
-The three questions that blocked this ADR are resolved as follows.
+The duty-cycle arithmetic is regime-independent, because the total commit work is identical either way. One daemon queue at a 5 s tick is a ~5% duty cycle on a 25 ms commit; ten process-local queues at the same tick is the same ~5%, redistributed and serialized by the filelock that already guards it. The measurements above agree: separate processes are not the *slower* regime (33.1 writes/s against the daemon's 30.0) — they are the *unfair* one, p50 23.5 ms with a 1389.6 ms tail. Deferring the commit removes that tail from the caller in both regimes, which is the outcome this ADR exists to buy.
+
+Restricting the fix to the daemon would also aim it away from the machines that hurt. The 1.4 s tail is a multi-process measurement; #176 has been open since 2026-06-05, and on at least one affected machine the daemon was never activated at all. A fix gated on that rollout does not reach the workload that motivated it.
+
+What the daemon still uniquely provides is a **singleton**, and exactly one part of this design needs one — recovery (§3).
+
+The three questions that blocked this ADR, plus the default-flip decision added in the same-day revision, are resolved as follows. (§4 never blocked the ADR — it arrives from the spec's remaining draft items.)
 
 ### 1. A sibling primitive, not an amended `Outbox[T]`
 
@@ -94,13 +102,32 @@ The reconciler spawns git with its own deadline and reuses the **synchronous** p
 
 `bounded_call` is rejected here despite being the repo-wide model: it is `async def`, so reusing it would require standing up an event loop inside a daemon thread purely to call it. Coupling async machinery to a synchronous thread costs more than the consistency buys. The *termination behaviour* stays shared even though the *supervision entry point* differs, which is where the actual cross-OS risk lives.
 
-### 3. Startup reconciliation, not a persisted queue
+### 3. Startup reconciliation under the singleton; bounded exposure without it
 
-Recovery extends `_startup_self_heal` (which already exists and today only clears a stale `index.lock`): enumerate uncommitted vault paths and issue one recovery commit.
+Recovery is the one place where the two regimes genuinely differ, so it splits.
 
-This is safe against the ADR-014 objection for two independent reasons: it runs **under the singleton `daemon.lock`**, so no sibling hive owns the tree, and it is a **startup event, not a recurring timer** — the property that made obsidian-git's sweep unsafe is absent. It still enumerates paths explicitly rather than running `add -A`.
+**Under the daemon**, recovery extends `_startup_self_heal` (`_daemon.py:171`, called at `_daemon.py:348`, which today only clears a stale `index.lock`): enumerate uncommitted vault paths and issue one recovery commit. This is safe against the ADR-014 objection for two independent reasons: it runs **under the singleton `daemon.lock`**, so no sibling hive owns the tree, and it is a **startup event, not a recurring timer** — the property that made obsidian-git's sweep unsafe is absent. It still enumerates paths explicitly rather than running `add -A`.
 
-A persisted queue was rejected as adding a second synchronous disk write to the very path this ADR exists to empty, in exchange for a guarantee stronger than the problem needs — the failure being mitigated is a *delayed* commit, not a lost one.
+**Without the daemon there is no singleton, and startup recovery is therefore not performed.** This is a deliberate refusal, not an omission. From inside a process that does not own the tree, "enumerate every uncommitted vault path at startup" is indistinguishable from obsidian-git's sweeping timer: it would stage a sibling hive's in-flight write, or a file the human has open and half-edited in Obsidian. That is ADR-014's objection in its original form, and multi-process makes it *sharper*, not equal — which is why the safety argument does not port even though the queue does.
+
+Exposure is bounded by observability instead. A path orphaned by a hard kill stays on disk uncommitted until the next hive write to that vault, an explicit `vault_commit`, or an external committer — and `vault_health` reports the count and age of uncommitted vault paths, so the condition is visible rather than silent. This follows the warn-don't-reject precedent already used for suspected input corruption ([#114](https://github.com/mlorentedev/hive/issues/114), HIVE-115).
+
+A persisted queue was rejected as adding a second synchronous disk write to the very path this ADR exists to empty, in exchange for a guarantee stronger than the problem needs — the failure being mitigated is a *delayed* commit, not a lost one. The file reaches disk **before** its path is queued, and that ordering is what makes every weaker guarantee in this section honest.
+
+### 4. Deferral becomes the default; `commit=True` becomes the synchronous escape hatch
+
+The `commit` keyword on `vault_write` / `vault_patch` flips its default from `True` (synchronous commit) to deferral.
+
+Leaving the default synchronous would reproduce HIVE-104's outcome: a correct mechanism that nobody reaches for, because every agent must be configured to pass the flag and something must call the flush. HIVE-104 measured 4.8x on batched writes and 10.4x on multi-patch, and the field response was that agents avoid the MCP for writes anyway. The measured problem is caused by the *default*, so the default is what has to change.
+
+`commit=True` keeps a precise meaning — commit synchronously before returning — for callers that need the commit confirmed. `vault_delete` opts out of the queue entirely and stays synchronous: its "git-recoverable" guarantee is exactly what coarsened commit granularity would weaken, since a delete and a recreate inside one tick collapse to a single state.
+
+This is a **breaking contract change**: a successful write no longer implies that a commit exists. It is the ACK-semantics shift ADR-013 predicted, it requires bilingual site docs (EN + ES) per the repo's i18n rule, and it ships as `feat!` — the next release is a major.
+
+Two adjacent mechanisms change meaning with it, and both are part of the same break:
+
+- **`commit=False` is subsumed.** Under HIVE-104 it meant "written to disk, and it stays uncommitted until *you* call `vault_commit`". Under the queue it becomes an alias for the deferred default: committed within one tick. The indefinite-deferral mode is therefore **removed**, not preserved — but what it was for (batch many writes, pay for one commit) is exactly what the queue now does automatically and without configuration. `vault_commit` remains available to flush early. Callers that genuinely need "on disk, never auto-committed" no longer have a keyword for it; that is a deliberate reduction, and the one place this ADR removes a capability rather than adding a default.
+- **`HIVE_AUTO_DEFER_TO_EXTERNAL_COMMITTER` composes by short-circuiting the flush, not the queue.** The predicate `_should_defer_to_external_committer()` (env true ∧ obsidian-git present ∧ healthy) exists so hive can yield committing to obsidian-git under [ADR-010](adr-010-external-committer-coexistence.md). A reconciler that committed at every tick regardless would silently defeat it. Resolution: paths are queued as normal, and the reconciler evaluates the predicate at drain time — when the external committer is healthy it **drains without committing**, leaving the paths for obsidian-git; when it is not, it commits. This keeps the ADR-010 hand-off intact and keeps the decision in one place instead of two competing deferral mechanisms.
 
 ## Consequences
 
@@ -109,19 +136,23 @@ A persisted queue was rejected as adding a second synchronous disk write to the 
 - Removes the throughput ceiling this ADR exists to address: commit rate becomes a function of the tick, not of write volume.
 - Write-tool latency collapses to file I/O; the commit leaves the caller's critical path entirely.
 - Reuses a primitive and a threading model already proven in-repo rather than introducing a new concurrency mechanism.
-- Composes with ADR-011: one daemon, one queue, one commit per tick.
+- Ships independently of [#176](https://github.com/mlorentedev/hive/issues/176), so it reaches the multi-process machines that carry the 1.4 s tail today rather than waiting on a rollout that has been open since 2026-06-05.
+- Composes with ADR-011 without depending on it: under the daemon there is one queue and one commit per tick, which is the best case, not the precondition.
+- Because deferral is the default (§4), the improvement arrives without per-agent configuration — the failure mode that limited HIVE-104's opt-in coalescing.
 
 ### Negative
 
 - Reintroduces a timed committer, which ADR-014 removed — safe only under the path-scoped constraint above, which is now a load-bearing invariant that future changes can silently break.
 - Commit granularity coarsens: a delete-and-recreate inside one tick collapses to a single state, weakening `vault_delete`'s "git-recoverable" guarantee unless it opts out.
 - A write returns before its commit exists, so the response contract changes for every caller, and HIVE-104's "(uncommitted — call vault_commit to flush)" suffix now describes the normal path rather than an opt-in one. This is the ACK-semantics shift ADR-013 predicted, and it requires **bilingual site docs** (EN + ES) per the repo's docs rule.
-- A crash between write and flush leaves a file on disk uncommitted until the next daemon start. Startup reconciliation bounds the exposure to one daemon lifetime rather than indefinitely, but the window is real and is not closed by a durable queue.
+- A crash between write and flush leaves a file on disk uncommitted. Under the daemon, startup reconciliation bounds the exposure to one daemon lifetime; **without the daemon there is no automatic recovery at all** (§3), and the path waits for the next hive write, an explicit `vault_commit`, or an external committer. The window is real in both regimes and is not closed by a durable queue.
+- Recovery therefore behaves differently in the two regimes, which is a genuine asymmetry a reader could mistake for a bug. It is deliberate and rests on the singleton, not on the queue.
 - Two supervision entry points now exist — `bounded_call` for the tool path, a synchronous watchdog for the reconciler. They share termination behaviour but not structure, so a future change to one must be mirrored deliberately.
+- The default flip (§4) breaks the response contract for every existing caller, and `feat!` forces a major release. Callers that relied on "write returned ⇒ commit exists" must now pass `commit=True` explicitly.
 
 ### Neutral
 
-- `vault_commit` and the explicit `commit=False` keyword keep their current semantics; this adds a default, it does not remove an option.
+- `vault_commit` keeps its current semantics as the explicit flush, and `commit=True` remains available as the synchronous escape hatch. No capability is removed — what changes is which behaviour you get without asking (§4).
 - Hive stays commit-only — no push, per ADR-014.
 
 ## References
@@ -129,7 +160,8 @@ A persisted queue was rejected as adding a second synchronous disk write to the 
 - [#322](https://github.com/mlorentedev/hive/issues/322) — measurements, methodology, and design discussion
 - `specs/HIVE-322-commit-outbox/` — the spec this ADR gates
 - [ADR-014](adr-014-vault-commit-coordination.md) — amended by this ADR
-- [ADR-011](adr-011-phase-c-daemon-model.md) — the single-owner daemon this decision assumes
+- [ADR-011](adr-011-phase-c-daemon-model.md) — the single-owner daemon; required for §3's startup recovery, **not** for the queue itself
+- `src/hive/_helpers.py` — `_git_filelock()`, the pre-existing cross-process serialization the rescope rests on
 - [ADR-010](adr-010-external-committer-coexistence.md), [ADR-013](adr-013-write-idempotency-at-most-once.md), [ADR-017](adr-017-auto-commit-bypasses-vault-pre-commit-hook.md) — interactions to check before acceptance
 - [ADR-008](adr-008-hard-deadline-enforcement.md) — the supervision model the reconciler thread currently escapes
 - `src/hive/_outbox.py` — the primitive under consideration
