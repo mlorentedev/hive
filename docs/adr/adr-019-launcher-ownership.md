@@ -1,7 +1,7 @@
 ---
 id: "ADR-019-launcher-ownership"
 type: adr
-status: proposed
+status: accepted
 owner: manu
 date: "2026-08-07"
 issue: "hive#328"   # repo#NNN — GitHub issue / Project item that triggered this decision
@@ -13,7 +13,7 @@ created: "2026-08-07"
 
 ## Status
 
-Proposed (2026-08-07). Unblocks PR2 of `specs/HIVE-328-runtime-launcher/`, which is in turn
+Accepted (2026-08-07). Unblocks PR2 of `specs/HIVE-328-runtime-launcher/`, which is in turn
 the upstream dependency of dotfiles AI-028 PR2. Scoped to **Windows only** — see "Why this is
 Windows-only" below.
 

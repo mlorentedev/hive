@@ -7,19 +7,21 @@ created: "2026-08-07"
 
 > TDD order. One task = one focused commit. Tick as you go. Reorder freely while spec is in `draft` state; freeze once you start `implementing`.
 >
-> **NOT FROZEN — one gate left.** All design questions are closed, including the daemon-recovery provenance question review reopened on 2026-08-07 (resolved: recovery reports, never commits, in either regime — ADR-018 §3). The only remaining gate is **ADR-018 acceptance**; it is still `proposed`. Freeze this file the moment the ADR is accepted.
+> **FROZEN (2026-08-07).** ADR-018 is `accepted`, which was this spec's only remaining gate. All design questions are closed, including the daemon-recovery provenance question review reopened on 2026-08-07 (resolved: recovery reports, never commits, in either regime — ADR-018 §3). Reorder no further: from here the list changes only by ticking items, and any design change needs an ADR amendment first. One such amendment already landed in the same PR as this freeze: ADR-018 §1 now states that a failed flush **drops** its drained paths instead of re-queueing them, adding AC14 and its two tasks. It is recorded here rather than silently applied, because the freeze is only worth anything if the exceptions to it are visible.
 
 ## Setup
 
 - [ ] Branch created from main: `feat/HIVE-322-commit-outbox` — not yet created; the docs-only rescope shipped on `docs/adr-018-in-process-reconciler`
-- [ ] **ADR-018 accepted** — **gating**. Authored 2026-08-07, revised the same day to drop the daemon-only scoping (§Decision), split recovery by regime (§3), and make deferral the default (§4).
-- [x] `proposal.md` is complete and acceptance criteria are testable — AC1-AC13 (AC9 pending the provenance gate)
+- [x] **ADR-018 accepted** (2026-08-07) — was **gating**. Authored 2026-08-07 and revised the same day to drop the daemon-only scoping (§Decision), unify startup recovery across both regimes as report-only (§3), and make deferral the default (§4).
+- [x] `proposal.md` is complete and acceptance criteria are testable — AC1-AC14, AC9 included
 - [x] No open questions left in `proposal.md` "Risks / open questions" — the two original drafts plus the reopened provenance question are all resolved
 
 ## Implementation
 
 - [ ] [P] [AC4] Write failing test: a reconciler flush exceeding its deadline is terminated, leaving no orphaned `git` process and no stale `index.lock`
 - [ ] [AC4] Give the reconciler a synchronous watchdog reusing `_deadline.py`'s sync primitives (`popen_creation_kwargs()`, `_cleanup_index_lock()`) — not `bounded_call`, which is `async def` (ADR-018 §2)
+- [ ] [P] [AC14] Write failing test: when the flush's commit fails, the drained paths are **not** re-queued — the queue is empty afterwards, the failure is logged with the dropped count, and the files remain visible to AC11's report
+- [ ] [AC14] Implement the drop-on-failure branch in the flush: log `mcp.reconciler.flush_failed` with the count and return, without calling `extend()` back onto the queue (ADR-018 §1)
 - [ ] [P] [AC2] Write failing test: N queued paths across one tick produce exactly one commit containing exactly those paths, with no unrelated working-tree file staged
 - [ ] [P] [AC8] Write failing test: the same path written twice within one tick produces one queue entry, not two
 - [ ] [AC2] [AC8] Add `CommitQueue` — a sibling primitive to `Outbox[T]` with its own crash-loss contract and within-tick path dedup (ADR-018 §1) — plus a reconciler thread draining on `HIVE_COMMIT_TICK_S`
