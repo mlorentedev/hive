@@ -1,15 +1,34 @@
-# Dependabot — weekly grouped updates, single PR per ecosystem.
+# Dependabot — weekly grouped updates; minor/patch batched, majors isolated.
 #
 # Rationale (HIVE-115 follow-up, 2026-05-22):
-# - We pin ``mcp >= 1.26, < 2.0`` in pyproject.toml because
+# - We pin ``mcp >= 1.27, < 3.0`` in pyproject.toml because
 #   src/hive/_compat.py monkey-patches private internals of
 #   mcp.shared.session.RequestResponder (upstream tracker:
-#   modelcontextprotocol/python-sdk#2610). Dependabot's `ignore`
+#   modelcontextprotocol/python-sdk#2416). Dependabot's `ignore`
 #   block below keeps it from trying to lift that cap automatically;
 #   any mcp bump must be a deliberate code review against the shim.
-# - Grouping all routine bumps into ONE PR per ecosystem per week
-#   avoids the "20 stale Dependabot PRs" noise pattern. Pairs with
+# - Grouping routine bumps per ecosystem per week avoids the
+#   "20 stale Dependabot PRs" noise pattern. Pairs with
 #   release-please for ergonomic batch merges.
+#
+# Amended 2026-08-07 (#334): a `*`-pattern group restricted to
+# minor+patch does not merely batch majors — it EXCLUDES them. `pip`
+# and `npm` had one such group each, so no major bump could reach
+# either ecosystem, including a security bump that requires one. That
+# is how a high-severity `cryptography` advisory (48.0.1 -> 50.0.0,
+# transitive via authlib <- fastmcp) sat with no PR while an earlier
+# *patch* advisory on the same package had sailed through (#137).
+#
+# Fix: a second group per affected ecosystem, matching the same `*`
+# but claiming `major` only. Two groups with identical patterns are
+# non-overlapping when their update-types are disjoint, so minors stay
+# batched while a major arrives as its OWN reviewable PR — which is
+# what a breaking bump deserves. `open-pull-requests-limit` is raised
+# to 2 so the two groups do not compete for one slot; the noise
+# ceiling stays bounded (2 per ecosystem, not 20).
+#
+# github-actions and docker were already unfiltered and so unaffected;
+# they are deliberately left with a single all-types group.
 # - github-actions ecosystem is included so CI workflows stay
 #   on supported runners + action versions.
 # - site/ has its own package.json (Astro + Starlight); covered as a
@@ -30,7 +49,7 @@ updates:
       day: "monday"
       time: "07:00"
       timezone: "America/Denver"
-    open-pull-requests-limit: 1
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
@@ -43,10 +62,18 @@ updates:
         update-types:
           - "minor"
           - "patch"
+      # Disjoint update-types from python-all, so majors are isolated
+      # into their own PR rather than excluded entirely (#334).
+      python-major:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
     ignore:
       # _compat.py patches mcp internals; major bumps must be reviewed
       # by hand against tests/test_compat_shim.py. Track upstream at
-      # modelcontextprotocol/python-sdk#2610.
+      # modelcontextprotocol/python-sdk#2416 (NOT #2610 — the __exit__
+      # patch for that one was removed; see hive#127 and hive#336).
       - dependency-name: "mcp"
         update-types:
           - "version-update:semver-major"
@@ -78,7 +105,7 @@ updates:
       day: "monday"
       time: "07:00"
       timezone: "America/Denver"
-    open-pull-requests-limit: 1
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "chore(site)"
       include: "scope"
@@ -91,6 +118,12 @@ updates:
         update-types:
           - "minor"
           - "patch"
+      # Same fix as python-major (#334): majors were excluded, not batched.
+      site-major:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
 
   # ── Docker base image (Dockerfile) ────────────────────────────
   - package-ecosystem: "docker"
