@@ -65,6 +65,10 @@ class HiveSettings(BaseSettings):
     relevance_epsilon: float = 0.15
     log_path: str = str(Path.home() / ".local" / "share" / "hive" / "hive.log")
     log_level: str = "INFO"
+    # HIVE-329: retention for the per-PID debug logs. Each file is already
+    # size-capped by RotatingFileHandler, so this bounds the file *count* —
+    # the axis that was unbounded (one log per server start, forever).
+    log_retention_days: int = Field(default=7, ge=1, le=365)
     # HIVE-115 / ADR-009: WAL checkpoint daemon thread interval.
     wal_checkpoint_interval_s: float = Field(default=30.0, gt=0.0, le=3600.0)
     # HIVE-115 / ADR-010: tunable lock acquire timeout (vault git operations).
