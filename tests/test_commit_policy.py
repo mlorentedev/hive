@@ -122,10 +122,20 @@ class TestCommitFalseLeavesFileDirty:
         assert "11-tasks.md" in _porcelain(git_vault)
         assert "queued" in result.lower()
 
-    async def test_vault_write_default_commits(self, git_vault: Path) -> None:
-        """Default commit=True must keep current behavior (additive change)."""
+    async def test_vault_write_default_defers(self, git_vault: Path) -> None:
+        """The default no longer commits — ADR-018 §4 reversed this deliberately.
+
+        HIVE-104 shipped deferral as an opt-in and measured 4.8x/10.4x, and
+        agents still avoided the MCP for writes. The measured problem was
+        caused by the *default*, so the default is what changed: a successful
+        write no longer implies a commit exists.
+
+        The write still reaches git — the reconciler commits it on its next
+        tick, asserted here by flushing explicitly rather than by sleeping.
+        """
         before = _commit_count(git_vault)
         mcp = create_server(vault_path=git_vault)
+        ctx = mcp._hive_ctx  # type: ignore[attr-defined]
         await mcp.call_tool(
             "vault_write",
             {
@@ -135,8 +145,15 @@ class TestCommitFalseLeavesFileDirty:
                 "content": "\n- [ ] task\n",
             },
         )
+        # No commit in the call path, and the file is dirty on return.
+        assert _commit_count(git_vault) == before
+        assert _porcelain(git_vault) != ""
+
+        # But a commit is owed, and the tick delivers it.
+        assert ctx.reconciler.flush_now() is True
         assert _commit_count(git_vault) == before + 1
         assert _porcelain(git_vault) == ""
+        ctx.reconciler.close()
 
 
 @pytest.mark.asyncio

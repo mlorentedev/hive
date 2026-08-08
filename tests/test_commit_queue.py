@@ -644,3 +644,118 @@ async def test_vault_health_reports_queue_depth_and_last_flush_age(
     assert "last_flush_age_s: null" not in report
 
     ctx.reconciler.close()
+
+
+# ── AC12 — deferral becomes the default ─────────────────────────────────
+
+
+@_POSIX_ONLY
+@pytest.mark.asyncio
+async def test_default_write_defers_and_commit_true_is_the_escape_hatch(
+    git_vault: Path,
+) -> None:
+    """AC12: the default no longer commits; ``commit=True`` still does.
+
+    This is the breaking half of ADR-018. A successful write stops implying
+    that a commit exists — which is the whole point, since the measured
+    problem was caused by the default rather than by the absence of an
+    opt-in. HIVE-104 already shipped the opt-in and agents kept avoiding
+    the MCP for writes.
+    """
+    from hive.server import create_server
+
+    mcp = create_server(vault_path=git_vault)
+    ctx = mcp._hive_ctx  # type: ignore[attr-defined]
+
+    # Plain call: no commit in the call path.
+    before = _rev_count(git_vault)
+    await mcp.call_tool(
+        "vault_write",
+        {
+            "project": "testproject",
+            "path": "default-defers.md",
+            "content": "# no commit here\n",
+        },
+    )
+    assert _rev_count(git_vault) == before
+    assert len(ctx.reconciler.queue) == 1
+
+    # commit=False is indistinguishable from the default: queued, not held.
+    await mcp.call_tool(
+        "vault_write",
+        {
+            "project": "testproject",
+            "path": "explicit-false.md",
+            "content": "# also queued\n",
+            "commit": False,
+        },
+    )
+    assert _rev_count(git_vault) == before
+    assert len(ctx.reconciler.queue) == 2
+
+    # commit=True remains the synchronous escape hatch.
+    await mcp.call_tool(
+        "vault_write",
+        {
+            "project": "testproject",
+            "path": "sync-escape-hatch.md",
+            "content": "# committed before returning\n",
+            "commit": True,
+        },
+    )
+    assert _rev_count(git_vault) == before + 1
+    assert "10_projects/testproject/sync-escape-hatch.md" in _files_in_head(git_vault)
+
+    ctx.reconciler.close()
+
+
+@_POSIX_ONLY
+@pytest.mark.asyncio
+async def test_vault_patch_default_defers(git_vault: Path) -> None:
+    """AC12, the patch half: the default defers there too."""
+    from hive.server import create_server
+
+    mcp = create_server(vault_path=git_vault)
+    ctx = mcp._hive_ctx  # type: ignore[attr-defined]
+
+    before = _rev_count(git_vault)
+    await mcp.call_tool(
+        "vault_patch",
+        {
+            "project": "testproject",
+            "path": "11-tasks.md",
+            "find": "- [ ] Task one",
+            "replace": "- [x] Task one done",
+        },
+    )
+    assert _rev_count(git_vault) == before
+    assert len(ctx.reconciler.queue) == 1
+
+    ctx.reconciler.close()
+
+
+@_POSIX_ONLY
+@pytest.mark.asyncio
+async def test_vault_delete_commits_synchronously_regardless_of_tick(
+    git_vault: Path,
+) -> None:
+    """AC12: ``vault_delete`` opts out of the queue entirely.
+
+    A delete and a recreate inside one tick collapse to a single state, and
+    git-recoverability is precisely the guarantee this tool sells — so it
+    keeps committing inline even though every other write now defers.
+    """
+    from hive.server import create_server
+
+    mcp = create_server(vault_path=git_vault)
+    ctx = mcp._hive_ctx  # type: ignore[attr-defined]
+
+    before = _rev_count(git_vault)
+    await mcp.call_tool(
+        "vault_delete",
+        {"project": "testproject", "path": "90-lessons.md"},
+    )
+    assert _rev_count(git_vault) == before + 1, "vault_delete must still commit inline"
+    assert len(ctx.reconciler.queue) == 0
+
+    ctx.reconciler.close()

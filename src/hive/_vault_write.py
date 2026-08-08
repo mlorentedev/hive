@@ -195,7 +195,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         section: str = "",
         path: str = "",
         doc_type: str = "",
-        commit: bool = True,
+        commit: bool = False,
         idempotency_key: str = "",
     ) -> str:
         """Write to the vault: append, replace a section, or create a new file.
@@ -216,13 +216,13 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 creates the file (create mode).
             doc_type: Document type for frontmatter (create mode). Optional;
                 defaults to "note".
-            commit: If True (default), auto-commit to git. If False, write to
-                disk but leave the file dirty so the caller can batch many
-                writes into one commit via the ``vault_commit`` tool, or let
-                obsidian-git's auto-commit pick it up. Durability contract:
-                files are persisted to disk regardless; only the *commit* is
-                deferred. A crash before the next flush loses the commit, not
-                the file content.
+            commit: If True, commit synchronously before returning — the
+                escape hatch for a caller that needs the commit to exist by
+                the time the call ends. Defaults to False, which queues the
+                path for the reconciler to commit on its next tick (a few
+                seconds). Durability contract: the file is persisted to disk
+                regardless; only the *commit* is deferred, so a crash before
+                the next flush loses the commit, not the content.
             idempotency_key: Optional at-most-once token. If set, a retry with
                 the same key is a no-op (safe for transparent retries after a
                 daemon restart cuts an in-flight write — ADR-013). Empty
@@ -448,7 +448,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         find: str = "",
         replace: str = "",
         patches: list[dict[str, str]] = [],  # noqa: B006
-        commit: bool = True,
+        commit: bool = False,
         old_string: str = "",
         new_string: str = "",
         idempotency_key: str = "",
@@ -474,10 +474,9 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 are accepted as aliases.)
             replace: Replacement text (single mode). Empty = not set.
             patches: List of {"find", "replace"} dicts (multi mode).
-            commit: If True (default), auto-commit. If False, write to disk
-                without committing — useful for batching many patches into
-                one ``vault_commit`` flush. See ``vault_write`` docstring for
-                the durability contract.
+            commit: If True, commit synchronously before returning.
+                Defaults to False, which queues the path for the reconciler.
+                See ``vault_write`` docstring for the durability contract.
             old_string: Alias of `find` (#151). Prefer `find`.
             new_string: Alias of `replace` (#151). Prefer `replace`.
             idempotency_key: Optional at-most-once token. If set, a retry with
