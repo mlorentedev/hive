@@ -11,7 +11,7 @@ created: "2026-08-07"
 
 ## Setup
 
-- [ ] Branch created from main: `feat/HIVE-322-commit-outbox` — not yet created; the docs-only rescope shipped on `docs/adr-018-in-process-reconciler`
+- [x] Branch created from master: `feat/HIVE-322-commit-outbox` (2026-08-07). The docs-only rescope shipped earlier on `docs/adr-018-in-process-reconciler`, and the acceptance that unfroze this file on `docs/accept-adr-018-and-adr-019` (#341)
 - [x] **ADR-018 accepted** (2026-08-07) — was **gating**. Authored 2026-08-07 and revised the same day to drop the daemon-only scoping (§Decision), unify startup recovery across both regimes as report-only (§3), and make deferral the default (§4).
 - [x] `proposal.md` is complete and acceptance criteria are testable — AC1-AC14, AC9 included
 - [x] No open questions left in `proposal.md` "Risks / open questions" — the two original drafts plus the reopened provenance question are all resolved
@@ -20,11 +20,11 @@ created: "2026-08-07"
 
 - [x] [P] [AC4] Write failing test: a reconciler flush exceeding its deadline is terminated, leaving no orphaned `git` process and no stale `index.lock` — `tests/test_commit_queue.py::test_flush_exceeding_deadline_is_terminated`
 - [x] [AC4] Give the reconciler a synchronous watchdog reusing `_deadline.py`'s sync primitives (`popen_creation_kwargs()`, `_cleanup_index_lock()`) — not `bounded_call`, which is `async def` (ADR-018 §2). `_commit_queue.flush_paths` + `_deadline.terminate_registry_sync`; `popen_creation_kwargs()` arrives via `_run_git`, which every flush already funnels through
-- [ ] [P] [AC14] Write failing test: when the flush's commit fails, the drained paths are **not** re-queued — the queue is empty afterwards, the failure is logged with the dropped count, and the files remain visible to AC11's report
-- [ ] [AC14] Implement the drop-on-failure branch in the flush: log `mcp.reconciler.flush_failed` with the count and return, without calling `extend()` back onto the queue (ADR-018 §1)
-- [ ] [P] [AC2] Write failing test: N queued paths across one tick produce exactly one commit containing exactly those paths, with no unrelated working-tree file staged
-- [ ] [P] [AC8] Write failing test: the same path written twice within one tick produces one queue entry, not two
-- [ ] [AC2] [AC8] Add `CommitQueue` — a sibling primitive to `Outbox[T]` with its own crash-loss contract and within-tick path dedup (ADR-018 §1) — plus a reconciler thread draining on `HIVE_COMMIT_TICK_S`
+- [x] [P] [AC14] Write failing test: when the flush's commit fails, the drained paths are **not** re-queued — the queue is empty afterwards, the failure is logged with the dropped count, and the files remain visible to AC11's report — `test_failed_flush_drops_its_paths_and_does_not_requeue`
+- [x] [AC14] Implement the drop-on-failure branch in the flush: log `mcp.reconciler.flush_failed` with the count and return, without calling `extend()` back onto the queue (ADR-018 §1)
+- [x] [P] [AC2] Write failing test: N queued paths across one tick produce exactly one commit containing exactly those paths, with no unrelated working-tree file staged — `test_one_tick_produces_one_commit_with_exactly_the_queued_paths`
+- [x] [P] [AC8] Write failing test: the same path written twice within one tick produces one queue entry, not two — `test_queue_dedups_at_enqueue_not_at_drain` (unit) + `test_path_written_twice_in_one_tick_appears_once_in_the_commit` (end to end)
+- [x] [AC2] [AC8] Add `CommitQueue` — a sibling primitive to `Outbox[T]` with its own crash-loss contract and within-tick path dedup (ADR-018 §1) — plus a reconciler thread draining on `HIVE_COMMIT_TICK_S`. Dedup lands at `add()`, not at `drain()`, so queue depth stays an honest backlog for AC5
 - [ ] [P] [AC7] Write failing test: the reconciler never stages a working-tree file it did not queue (the load-bearing ADR-014 invariant — guard it explicitly)
 - [ ] [AC1] Route `vault_write` / `vault_patch` through the queue; assert by test that no `git commit` occurs in the tool's call path
 - [ ] [P] [AC6] Write failing test: clean shutdown drains the queue; nothing queued is discarded
