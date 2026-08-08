@@ -114,6 +114,8 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
     - ``competing_pid_count`` — other ``hive-vault`` processes (same user)
     - ``last_git_lock_wait_ms`` — rolling-100 mean + p99
     - ``obsidian_git_present`` — external committer detection
+    - ``commit_queue`` — ADR-018 reconciler depth, last-flush age and tick,
+      which together make a stalled reconciler visible instead of silent
     """
     from hive import _helpers
     from hive.config import settings as _settings
@@ -141,6 +143,25 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
     except Exception:  # noqa: BLE001
         pass
 
+    # ADR-018 AC5: the reconciler's own vitals. Reported together with the
+    # tick because neither number means anything alone — a depth of 12 is
+    # ordinary one tick after a burst and alarming ten ticks later, and only
+    # the tick length makes that judgement possible. Defensive like every
+    # other computation here: telemetry must not break vault_health.
+    queue_depth = 0
+    last_flush_age_s: float | None = None
+    commit_tick_s: float | None = None
+    try:
+        if ctx.reconciler is not None:
+            queue_depth = len(ctx.reconciler.queue)
+            commit_tick_s = ctx.reconciler.tick_s
+            if ctx.reconciler.last_flush_at is not None:
+                last_flush_age_s = max(0.0, time.time() - ctx.reconciler.last_flush_at)
+    except Exception:  # noqa: BLE001
+        pass
+    flush_age_text = "null" if last_flush_age_s is None else f"{last_flush_age_s:.1f}"
+    tick_text = "null" if commit_tick_s is None else f"{commit_tick_s:.1f}"
+
     lines = [
         "## runtime",
         f"- uptime_s: {uptime_s:.1f}",
@@ -155,6 +176,10 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
         "- lock_eviction:",
         f"  - count_30d: {eviction_count_30d}",
         f"  - last_iso: {eviction_last_iso or 'null'}",
+        "- commit_queue:",
+        f"  - depth: {queue_depth}",
+        f"  - last_flush_age_s: {flush_age_text}",
+        f"  - tick_s: {tick_text}",
         "- openrouter_budget:",
         f"  - spent_usd: {float(stats['spent']):.4f}",
         f"  - cap_usd: {ctx.openrouter_budget}",

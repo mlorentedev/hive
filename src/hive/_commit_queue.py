@@ -234,6 +234,16 @@ class CommitReconciler:
             )
             self._thread.start()
 
+    @property
+    def tick_s(self) -> float:
+        """Drain interval, in seconds.
+
+        Read-only and public because ``vault_health`` reports it beside the
+        queue depth: a depth is only interpretable against the interval that
+        is supposed to be clearing it.
+        """
+        return self._tick_s
+
     # ── Write path ──────────────────────────────────────────────────
 
     def enqueue(self, path: Path) -> None:

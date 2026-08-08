@@ -157,6 +157,11 @@ def test_flush_within_deadline_commits_and_reports_success(git_vault: Path) -> N
 # ── AC2 / AC8 — the queue and its reconciler ────────────────────────────
 
 
+def _text_of(result: object) -> str:
+    """Extract the text payload from a ToolResult."""
+    return result.content[0].text  # type: ignore[attr-defined,union-attr,no-any-return]
+
+
 def _head(vault: Path) -> str:
     return subprocess.run(  # noqa: S603, S607
         ["git", "rev-parse", "HEAD"],
@@ -591,3 +596,51 @@ async def test_server_lifespan_shutdown_drains_the_queue(git_vault: Path) -> Non
     )
     assert _files_in_head(git_vault) == ["10_projects/queued-at-shutdown.md"]
     assert len(ctx.reconciler.queue) == 0
+
+
+# ── AC5 — the reconciler is observable in vault_health ──────────────────
+
+
+@_POSIX_ONLY
+@pytest.mark.asyncio
+async def test_vault_health_reports_queue_depth_and_last_flush_age(
+    git_vault: Path,
+) -> None:
+    """AC5: queue depth and last-flush age are visible in the runtime block.
+
+    Both numbers are reported alongside the tick, because neither is
+    interpretable alone: a depth of 12 is normal one tick after a burst and
+    alarming ten ticks later, and that judgement needs the tick length to
+    compare against. Together they are what makes a stalled reconciler
+    visible rather than silent.
+    """
+    from hive.server import create_server
+
+    mcp = create_server(vault_path=git_vault)
+    ctx = mcp._hive_ctx  # type: ignore[attr-defined]
+
+    # Nothing queued, nothing flushed yet.
+    report = _text_of(
+        await mcp.call_tool("vault_health", {"include_runtime": True}),
+    )
+    assert "commit_queue:" in report
+    assert "depth: 0" in report
+    assert "last_flush_age_s: null" in report
+
+    # A queued path shows up as depth.
+    for name in ("a.md", "b.md"):
+        ctx.reconciler.enqueue(_write(git_vault, f"10_projects/{name}"))
+    report = _text_of(
+        await mcp.call_tool("vault_health", {"include_runtime": True}),
+    )
+    assert "depth: 2" in report
+
+    # After a drain the depth clears and the age becomes a real number.
+    assert ctx.reconciler.flush_now() is True
+    report = _text_of(
+        await mcp.call_tool("vault_health", {"include_runtime": True}),
+    )
+    assert "depth: 0" in report
+    assert "last_flush_age_s: null" not in report
+
+    ctx.reconciler.close()
