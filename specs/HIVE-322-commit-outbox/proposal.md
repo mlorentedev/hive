@@ -51,32 +51,33 @@ Observable changes:
 
 **Consequences of the default flip that the drafts did not name** — decided in ADR-018 §4, listed here because they widen the break:
 
-- `commit=False` is **subsumed**, not preserved. It becomes an alias for the deferred default (committed within one tick), so HIVE-104's "stays uncommitted until you flush" mode is removed. The benefit it existed for is what the queue now does automatically; `vault_commit` still flushes early.
+- `commit=False` is **subsumed**, not preserved. It becomes an alias for the deferred default — the path is queued and becomes *eligible* for the next drain, which is weaker than "committed within one tick": a drain may produce no commit under the external-committer short-circuit, and a hard kill before the tick leaves the path uncommitted. HIVE-104's "stays uncommitted until you flush" mode is removed; the benefit it existed for is what the queue now does automatically, and `vault_commit` still flushes early.
 - `HIVE_AUTO_DEFER_TO_EXTERNAL_COMMITTER` composes by short-circuiting the **flush**, not the queue: paths queue as normal and the reconciler evaluates `_should_defer_to_external_committer()` at drain time, draining without committing while obsidian-git is healthy. Without this the queue would silently defeat the ADR-010 hand-off.
 
 Still open:
 
-- Nothing blocking. All design questions are resolved; **ADR-018 awaits acceptance**, which is this spec's only remaining gate.
+- **Daemon-recovery provenance (AC9) — reopened 2026-08-07 by review.** ADR-018 §3 justified daemon-side startup recovery on the singleton `daemon.lock`, but that lock excludes sibling *hives*, not a *human*. A maintainer with a half-edited note open in Obsidian during a daemon restart produces dirty state that recovery cannot tell from its own orphaned write — ADR-014's original objection surviving inside the regime claimed safe. Fixing it needs **provenance** (commit only what hive wrote), and after a crash the in-memory queue that knew those paths is gone. Candidates: (i) recovery only *reports*, collapsing AC9 into AC11; (ii) a minimal persisted provenance record, reopening the trade-off §3 rejected; (iii) narrow to hive's write conventions, which is fragile. **Must be settled before ADR-018 is accepted.**
 
 ## Acceptance criteria
 
 - [ ] AC1 — With the queue enabled, `vault_write` returns without a `git commit` in its call path (asserted by test, not by timing).
-- [ ] AC2 — N queued writes across one tick produce exactly one commit containing exactly those N paths, and no unrelated working-tree file is staged.
+- [ ] AC2 — N writes queued **in one process** across one tick produce exactly one commit from that process, containing exactly those N paths, and no unrelated working-tree file is staged. "One commit per tick" is per-process: with P processes the bound is P commits per tick (see AC3), which is the point the daemon's single queue improves on.
 - [ ] AC3 — 10 concurrent writers show write-tool latency bounded by file I/O, with commit count bounded by elapsed-time / tick rather than by write count. Asserted in **both** regimes: threads in one process, and separate processes sharing the vault filelock.
 - [ ] AC4 — A reconciler flush that exceeds its deadline is terminated and logged, leaving no orphaned `git` process and no stale `index.lock`.
 - [ ] AC5 — `vault_health` reports queue depth and last-flush age; a stalled reconciler is visible there.
 - [ ] AC6 — On clean shutdown the queue is drained; nothing queued is silently discarded.
 - [ ] AC7 — The reconciler never stages a working-tree file it did not queue. This is the load-bearing ADR-014 invariant and is guarded by an explicit test, not by convention.
 - [ ] AC8 — The same path written twice within one tick produces one queue entry and appears once in the resulting commit.
-- [ ] AC9 — After an unclean exit, the next **daemon** start commits the vault paths left uncommitted, enumerating them explicitly rather than via `git add -A`.
+- [ ] AC9 — After an unclean exit, the next **daemon** start commits the vault paths left uncommitted, enumerating them explicitly rather than via `git add -A`, **and leaves untouched any dirty path hive did not write** (the provenance gap under "Still open" — this criterion cannot be finalised until that is settled).
 - [ ] AC10 — A non-daemon server start performs **no** recovery commit: a dirty working-tree file it did not write is left untouched. This guards the deliberate refusal in ADR-018 §3 against a future "helpful" sweep.
 - [ ] AC11 — `vault_health` reports the count and age of uncommitted vault paths, so the non-daemon recovery gap is observable.
-- [ ] AC12 — `commit` defaults to deferral: a plain `vault_write` produces no commit in its call path, `commit=True` produces one before returning, and `vault_delete` commits synchronously regardless of the tick.
+- [ ] AC12 — `commit` defaults to deferral on **both** `vault_write` and `vault_patch`: a plain call produces no commit in its call path, `commit=True` produces one before returning, `commit=False` is indistinguishable from the default (queued, not held indefinitely), and `vault_delete` commits synchronously regardless of the tick.
+- [ ] AC13 — The reconciler acquires `_git_filelock(vault)` around its commit. Without this the deferred commit runs outside the lock the write path used to hold, which would invalidate the cross-process argument the whole rescope rests on (ADR-018 §Decision).
 
 ## References
 
 - Bitácora board: [hive#322](https://github.com/mlorentedev/hive/issues/322)
 - Gating ADR: `docs/adr/adr-018-asynchronous-commit-queue.md` (awaiting acceptance)
-- Related ADR: `docs/adr/adr-014-vault-commit-coordination.md` (single deliberate committer — amended by ADR-018), `docs/adr/adr-011-phase-c-daemon-model.md` (single-owner daemon — needed for AC9 recovery only, **not** for the queue), `docs/adr/adr-013-write-idempotency-at-most-once.md` (the deferred "2b" this implements a subset of), `docs/adr/adr-010` (external-committer coexistence), `docs/adr/adr-017-auto-commit-bypasses-vault-pre-commit-hook.md`
+- Related ADR: `docs/adr/adr-014-vault-commit-coordination.md` (single deliberate committer — amended by ADR-018), `docs/adr/adr-011-phase-c-daemon-model.md` (single-owner daemon — needed for AC9 recovery only, **not** for the queue), `docs/adr/adr-013-write-idempotency-at-most-once.md` (the deferred "2b" this implements a subset of), `docs/adr/adr-010-external-committer-coexistence.md` (external-committer coexistence), `docs/adr/adr-017-auto-commit-bypasses-vault-pre-commit-hook.md`
 - Prior art in-repo: `src/hive/_outbox.py` (`Outbox[T]` + reconciler-thread pattern, HIVE-115 PR-4), HIVE-104 commit coalescing (`commit=False` + `vault_commit`)
 - Related issues: [#176](https://github.com/mlorentedev/hive/issues/176) (daemon rollout — improves the best case, no longer gates this spec), [#288](https://github.com/mlorentedev/hive/issues/288) / [#289](https://github.com/mlorentedev/hive/issues/289) (tracker locks — measured NOT to be a latency cause; hang risk only)

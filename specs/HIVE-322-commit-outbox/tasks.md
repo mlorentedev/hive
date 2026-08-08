@@ -7,14 +7,14 @@ created: "2026-08-07"
 
 > TDD order. One task = one focused commit. Tick as you go. Reorder freely while spec is in `draft` state; freeze once you start `implementing`.
 >
-> **NOT FROZEN — one gate left.** All four design questions are resolved in ADR-018, and both remaining draft items in `proposal.md` are closed (2026-08-07). The only remaining gate is **ADR-018 acceptance**; it is still `proposed`. Freeze this file the moment the ADR is accepted.
+> **NOT FROZEN — two gates left.** The four design questions in ADR-018 are resolved and both original draft items in `proposal.md` are closed (2026-08-07). But review the same day **reopened one question**: daemon-recovery provenance (AC9) — `daemon.lock` excludes sibling hives, not a human editing in Obsidian, so §3's safety argument is incomplete. Gates are therefore (1) settle the provenance question, (2) **ADR-018 acceptance**. Freeze this file only after both.
 
 ## Setup
 
 - [ ] Branch created from main: `feat/HIVE-322-commit-outbox` — not yet created; the docs-only rescope shipped on `docs/adr-018-in-process-reconciler`
 - [ ] **ADR-018 accepted** — **gating**. Authored 2026-08-07, revised the same day to drop the daemon-only scoping (§Decision), split recovery by regime (§3), and make deferral the default (§4).
-- [x] `proposal.md` is complete and acceptance criteria are testable — AC1-AC12
-- [x] No open questions left in `proposal.md` "Risks / open questions" — both remaining draft items resolved (`vault_delete` opts out and stays synchronous; suffix reworded for deferral-by-default)
+- [x] `proposal.md` is complete and acceptance criteria are testable — AC1-AC13 (AC9 pending the provenance gate)
+- [ ] No open questions left in `proposal.md` "Risks / open questions" — the two original draft items are resolved (`vault_delete` opts out and stays synchronous; suffix reworded for deferral-by-default), but **daemon-recovery provenance is open** — **gating**
 
 ## Implementation
 
@@ -29,12 +29,16 @@ created: "2026-08-07"
 - [ ] [AC6] Implement drain-on-shutdown on **two** triggers, since the reconciler is no longer daemon-only: the daemon's existing signal handling, and the stdio server's lifespan teardown / stdin EOF. A client `SIGKILL` gets no drain — that path is covered by AC11's observability, not by AC6
 - [ ] [P] [AC5] Write failing test: `vault_health` reports queue depth and last-flush age, and a stalled reconciler is visible
 - [ ] [AC5] Surface queue depth + last-flush age in the `vault_health` runtime block
-- [ ] [P] [AC12] Write failing test: a plain `vault_write` produces no commit in its call path; `commit=True` produces one before returning; `vault_delete` commits synchronously regardless of tick
+- [ ] [P] [AC12] Write failing test, for **both** `vault_write` and `vault_patch`: a plain call produces no commit in its call path; `commit=True` produces one before returning; `commit=False` behaves identically to the default; `vault_delete` commits synchronously regardless of tick
 - [ ] [AC12] Flip the `commit` default to deferral on `vault_write` / `vault_patch`, keep `commit=True` synchronous, and opt `vault_delete` out of the queue entirely (ADR-018 §4). **Breaking — the commit must be `feat!`**
 - [ ] [AC3] Concurrency benchmark beside `TestWriteThroughputBenchmark`: 10 writers, assert commit count is bounded by elapsed-time / tick rather than by write count
 - [ ] [AC3] Run the same benchmark in the **separate-processes** regime, sharing `_git_filelock`, and assert the analogous bound — `P x elapsed/tick` for P processes, still independent of write count. This is the measurement that substantiates dropping the daemon-only scoping
+- [ ] **GATE: settle daemon-recovery provenance** before writing any AC9 task — `daemon.lock` does not exclude a human editing in Obsidian, so "enumerate uncommitted vault paths" can sweep work hive did not write. Pick (i) report-only (collapses AC9 into AC11), (ii) a minimal persisted provenance record, or (iii) narrowing to hive's write conventions. See `proposal.md` -> Still open.
 - [ ] [P] [AC9] Write failing test: startup reconciliation commits uncommitted vault paths left by a prior crash, enumerating paths explicitly (never `add -A`)
-- [ ] [AC9] Extend `_startup_self_heal` with the recovery commit, under the singleton `daemon.lock` (ADR-018 §3)
+- [ ] [P] [AC9] Write failing test: a dirty working-tree path hive did **not** write survives daemon startup recovery untouched
+- [ ] [AC9] Extend `_startup_self_heal` with the recovery commit, under the singleton `daemon.lock`, per whatever the provenance gate decides (ADR-018 §3)
+- [ ] [P] [AC13] Write failing test: the reconciler's commit happens while holding `_git_filelock(vault)` — a concurrent process cannot interleave a commit into the same drain
+- [ ] [AC13] Acquire `_git_filelock(vault)` in the reconciler around the commit. The write path released it when the tool returned, so without this the deferred commit runs outside the lock the rescope argument depends on
 - [ ] [P] [AC10] Write failing test: a **non-daemon** server start performs no recovery commit and leaves a foreign dirty working-tree file untouched — guards the deliberate refusal against a future "helpful" sweep
 - [ ] [P] [AC11] Write failing test: `vault_health` reports the count and age of uncommitted vault paths
 - [ ] [AC11] Surface uncommitted-path count + oldest age in the `vault_health` runtime block — the only recovery signal outside the daemon (warn-don't-reject, per the #114 precedent)
