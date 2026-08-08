@@ -7,6 +7,7 @@ import logging.handlers
 import os
 import sys
 import time
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -17,6 +18,7 @@ _hive_compat.apply()
 from fastmcp import FastMCP  # noqa: E402
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from pathlib import Path
 
     from fastmcp.server.auth import AuthProvider
@@ -206,9 +208,34 @@ def create_server(
     # events without taking a ServerContext arg (would create a cycle).
     register_lock_eviction_tracker(lock_eviction)
 
+    @asynccontextmanager
+    async def _lifespan(_app: object) -> AsyncIterator[None]:
+        """Drain the commit queue on clean shutdown (ADR-018 AC6).
+
+        The lifespan is the one teardown seam both transports share: the
+        stdio run fires it, and the daemon's ``http_app(lifespan="on")``
+        fires it during uvicorn's graceful shutdown. A drain hung off
+        ``finally`` would not do — ``_daemon`` records that uvicorn's
+        SIGTERM handling exits via the signal, bypassing ``finally`` and
+        ``atexit``, and SIGTERM is exactly how systemd stops the daemon.
+
+        Shutdown must not fail because a commit failed, so the drain is
+        best-effort: whatever it cannot commit stays on disk and is
+        reported rather than lost.
+        """
+        try:
+            yield
+        finally:
+            if ctx.reconciler is not None:
+                try:
+                    ctx.reconciler.close()
+                except Exception as exc:  # noqa: BLE001
+                    logging.getLogger("hive").warning("hive.shutdown.drain_failed err=%s", exc)
+
     mcp = FastMCP(
         "Hive",
         auth=auth,
+        lifespan=_lifespan,
         middleware=[LifecycleMiddleware()],
         instructions=(
             "Hive provides on-demand access to an Obsidian vault.\n\n"

@@ -553,3 +553,41 @@ async def test_vault_write_commit_true_still_commits_synchronously(
     assert _rev_count(git_vault) == count_before + 1
     assert len(ctx.reconciler.queue) == 0
     ctx.reconciler.close()
+
+
+# ── AC6 — clean shutdown drains the queue ───────────────────────────────
+
+
+@_POSIX_ONLY
+@pytest.mark.asyncio
+async def test_server_lifespan_shutdown_drains_the_queue(git_vault: Path) -> None:
+    """AC6: nothing queued is discarded when the server shuts down cleanly.
+
+    Driven through the FastMCP lifespan rather than through a signal, which
+    is the seam both transports share: the stdio run and the daemon's
+    ``http_app(lifespan="on")`` both fire it on teardown. A drain hung off
+    ``finally`` would not survive the daemon's stop path — ``_daemon`` records
+    that uvicorn's SIGTERM handling exits via the signal and bypasses
+    ``finally``/``atexit``, and SIGTERM is exactly how systemd stops it.
+    """
+    from hive.server import create_server
+
+    mcp = create_server(vault_path=git_vault)
+    ctx = mcp._hive_ctx  # type: ignore[attr-defined]
+
+    target = _write(git_vault, "10_projects/queued-at-shutdown.md")
+    ctx.reconciler.enqueue(target)
+    assert len(ctx.reconciler.queue) == 1
+
+    count_before = _rev_count(git_vault)
+
+    # Drive the ASGI lifespan exactly as uvicorn does on the daemon path.
+    app = mcp.http_app(path="/mcp", transport="http")
+    async with app.router.lifespan_context(app):
+        pass
+
+    assert _rev_count(git_vault) == count_before + 1, (
+        "a clean shutdown must commit what was queued, not discard it"
+    )
+    assert _files_in_head(git_vault) == ["10_projects/queued-at-shutdown.md"]
+    assert len(ctx.reconciler.queue) == 0
