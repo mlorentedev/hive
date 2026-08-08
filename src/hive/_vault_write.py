@@ -56,6 +56,12 @@ def _env_truthy(value: str | None) -> bool:
 
 _DEFERRED_SUFFIX = " (deferred to obsidian-git; will be picked up on its next tick)"
 _UNCOMMITTED_SUFFIX = " (uncommitted — call vault_commit to flush)"
+# ADR-018: the path was handed to the reconciler, so a commit is owed and
+# will arrive without the caller doing anything. Distinct from
+# _UNCOMMITTED_SUFFIX, which promises the opposite — that nothing happens
+# until vault_commit — and would be a false statement once a reconciler
+# is running.
+_QUEUED_SUFFIX = " (queued — commits on the next reconciler tick)"
 
 # HIVE-116 AC-5: public contract for the partial-state response. Locked
 # 2026-05-27 per ``specs/HIVE-116-stale-lock-after-deadline/proposal.md``
@@ -74,28 +80,66 @@ def _commit_status_suffix(
     deferred: bool,
     *,
     deadline_killed: bool = False,
+    queued: bool = False,
 ) -> str:
     """Format the trailing response suffix for write tools.
 
-    Four states feed into one line; ``deadline_killed`` dominates:
+    Five states feed into one line; ``deadline_killed`` dominates:
 
     - ``deadline_killed=True`` (any other args) → partial-state suffix
       (HIVE-116 AC-5; disk write landed but git commit was killed by
       the deadline supervisor).
-    - ``requested_commit=False`` → uncommitted (caller must
-      ``vault_commit`` later). Unchanged from pre-PR-4 behaviour.
+    - ``requested_commit=False, queued=True`` → the ADR-018 reconciler
+      holds the path and commits it on its next tick.
+    - ``requested_commit=False, queued=False`` → uncommitted, caller must
+      ``vault_commit`` later. Reached only when no reconciler is running.
     - ``requested_commit=True, deferred=True`` → obsidian-git is healthy
       and will pick this up on its next tick.
     - ``requested_commit=True, deferred=False`` → hive committed inline;
       empty suffix.
+
+    The ``queued`` split matters because the two non-committing states
+    make opposite promises: one says a commit is already owed, the other
+    says nothing will happen until the caller asks.
     """
     if deadline_killed:
         return _PARTIAL_STATE_SUFFIX
     if not requested_commit:
-        return _UNCOMMITTED_SUFFIX
+        return _QUEUED_SUFFIX if queued else _UNCOMMITTED_SUFFIX
     if deferred:
         return _DEFERRED_SUFFIX
     return ""
+
+
+def _commit_or_queue(
+    ctx: ServerContext,
+    rel_paths: list[Path],
+    message: str,
+    *,
+    commit: bool,
+    should_defer: bool,
+) -> bool:
+    """Commit inline, hand the paths to the reconciler, or do neither.
+
+    Returns ``True`` when the paths were queued, which the response suffix
+    needs in order to tell the caller a commit is owed.
+
+    Three outcomes, matching the three states the write path can be in:
+    ``commit`` and no external committer → commit synchronously; ``commit``
+    with a healthy obsidian-git → leave it to that committer (ADR-010);
+    otherwise → queue, so the deferred write still reaches git without the
+    caller having to call ``vault_commit``.
+    """
+    if commit and not should_defer:
+        _git_commit(ctx.vault, rel_paths, message)
+        return False
+    if commit:
+        return False
+    if ctx.reconciler is None:
+        return False
+    for rel in rel_paths:
+        ctx.reconciler.enqueue(rel)
+    return True
 
 
 def _was_deadline_killed() -> bool:
@@ -270,12 +314,13 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     rel = filepath.relative_to(ctx.vault)
                     display = "00_meta" if project == "_meta" else project
                     should_defer = commit and _should_defer_to_external_committer(ctx.vault)
-                    if commit and not should_defer:
-                        _git_commit(
-                            ctx.vault,
-                            [rel],
-                            f"vault: create {display}/{path}",
-                        )
+                    queued = _commit_or_queue(
+                        ctx,
+                        [rel],
+                        f"vault: create {display}/{path}",
+                        commit=commit,
+                        should_defer=should_defer,
+                    )
             except WriteLockTimeout as exc:
                 return track(
                     ctx,
@@ -288,6 +333,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 commit,
                 should_defer,
                 deadline_killed=_was_deadline_killed(),
+                queued=queued,
             )
             schedule_async_hook(ctx.index_update_hook, filepath)
             return track(
@@ -364,12 +410,13 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
                 rel = filepath.relative_to(ctx.vault)
                 should_defer = commit and _should_defer_to_external_committer(ctx.vault)
-                if commit and not should_defer:
-                    _git_commit(
-                        ctx.vault,
-                        [rel],
-                        f"vault: update {project}/{section}",
-                    )
+                queued = _commit_or_queue(
+                    ctx,
+                    [rel],
+                    f"vault: update {project}/{section}",
+                    commit=commit,
+                    should_defer=should_defer,
+                )
         except WriteLockTimeout as exc:
             return track(
                 ctx,
@@ -382,6 +429,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             commit,
             should_defer,
             deadline_killed=_was_deadline_killed(),
+            queued=queued,
         )
         schedule_async_hook(ctx.index_update_hook, filepath)
         return track(
@@ -552,12 +600,13 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 rel = filepath.relative_to(ctx.vault)
                 n = len(patch_list)
                 should_defer = commit and _should_defer_to_external_committer(ctx.vault)
-                if commit and not should_defer:
-                    _git_commit(
-                        ctx.vault,
-                        [rel],
-                        f"vault: patch {project}/{path}",
-                    )
+                queued = _commit_or_queue(
+                    ctx,
+                    [rel],
+                    f"vault: patch {project}/{path}",
+                    commit=commit,
+                    should_defer=should_defer,
+                )
         except WriteLockTimeout as exc:
             return track(
                 ctx,
@@ -571,6 +620,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             commit,
             should_defer,
             deadline_killed=_was_deadline_killed(),
+            queued=queued,
         )
         schedule_async_hook(ctx.index_update_hook, filepath)
         return track(
@@ -707,6 +757,10 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
                 rel = filepath.relative_to(ctx.vault)
                 should_defer = commit and _should_defer_to_external_committer(ctx.vault)
+                # Deliberately NOT routed through the queue (ADR-018 §4).
+                # A delete and a recreate inside one tick would collapse to
+                # a single state, and git-recoverability is precisely the
+                # guarantee this tool sells.
                 if commit and not should_defer:
                     _git_commit(ctx.vault, [rel], f"vault: delete {project}/{path}")
         except WriteLockTimeout as exc:

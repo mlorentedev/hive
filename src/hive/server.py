@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.responses import Response
 
+from hive._commit_queue import CommitReconciler  # noqa: E402
 from hive._context import ServerContext  # noqa: E402
 from hive._diagnostics import LifecycleMiddleware  # noqa: E402
 from hive._helpers import (  # noqa: E402
@@ -193,6 +194,12 @@ def create_server(
         synth_model=synth_model if synth_model is not None else settings.synth_model,
         started_at_iso=datetime.now(UTC).isoformat(timespec="seconds"),
         started_at_monotonic=time.monotonic(),
+        # ADR-018: one reconciler per serving process. Built here rather
+        # than lazily because create_server() is only reached when hive is
+        # actually going to serve — `hive --version` and `hive service
+        # install` are dispatched before this point and never construct a
+        # context, so no short-lived CLI invocation gets a live thread.
+        reconciler=CommitReconciler(resolved_path),
     )
     # HIVE-116 PR-2: register tracker as the process-global supervisor
     # singleton so ``tool_span`` / ``bounded_call`` can persist eviction

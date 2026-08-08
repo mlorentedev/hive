@@ -60,7 +60,20 @@ def _commit_count(vault: Path) -> int:
 
 @pytest.mark.asyncio
 class TestCommitFalseLeavesFileDirty:
-    """vault_write(commit=False) / vault_patch(commit=False) skip git commit."""
+    """vault_write(commit=False) / vault_patch(commit=False) skip git commit.
+
+    The *call path* contract these tests were written for is unchanged and
+    still asserted: no commit happens while the tool runs, and the file is
+    dirty when it returns.
+
+    What ADR-018 §4 changed is the promise made afterwards. HIVE-104's
+    ``commit=False`` meant "held indefinitely until you call
+    ``vault_commit``"; that indefinite-deferral mode is removed, and the
+    path is now handed to the reconciler, which commits it on its next
+    tick. The response says so. Left in this class rather than moved,
+    because "commit=False does not commit here" is still exactly what is
+    being verified.
+    """
 
     async def test_vault_write_commit_false_leaves_file_dirty(
         self,
@@ -84,8 +97,8 @@ class TestCommitFalseLeavesFileDirty:
         assert _commit_count(git_vault) == before
         # File is dirty in working tree
         assert "11-tasks.md" in _porcelain(git_vault)
-        # Response signals uncommitted state
-        assert "uncommitted" in result.lower()
+        # Response signals a commit is owed but not yet made (ADR-018 §4).
+        assert "queued" in result.lower()
 
     async def test_vault_patch_commit_false_leaves_file_dirty(
         self,
@@ -107,7 +120,7 @@ class TestCommitFalseLeavesFileDirty:
         )
         assert _commit_count(git_vault) == before
         assert "11-tasks.md" in _porcelain(git_vault)
-        assert "uncommitted" in result.lower()
+        assert "queued" in result.lower()
 
     async def test_vault_write_default_commits(self, git_vault: Path) -> None:
         """Default commit=True must keep current behavior (additive change)."""

@@ -405,3 +405,151 @@ def test_failed_flush_drops_its_paths_and_does_not_requeue(
     assert any("flush_failed" in rec.message for rec in caplog.records), [
         r.message for r in caplog.records
     ]
+
+
+# ── AC7 — the reconciler never stages what it did not queue ─────────────
+
+
+@_POSIX_ONLY
+def test_reconciler_never_stages_a_file_it_did_not_queue(git_vault: Path) -> None:
+    """AC7: the load-bearing ADR-014 invariant, guarded explicitly.
+
+    ADR-014 turned obsidian-git's auto-commit off because a timer sweeping
+    ``git add -A`` stages an agent's half-written change. ADR-018 is only
+    exempt from that objection because a path enters the queue *after* its
+    write completes and the reconciler stages nothing else. That exemption
+    is the whole basis for amending ADR-014, so it gets a test rather than
+    a convention.
+
+    Both kinds of foreign dirt are covered: an untracked new file, and a
+    modification to an already-tracked one. A refactor to ``git add -A``
+    would pass a test that only checked the former, because ``git show
+    --name-only`` on a fresh commit would still list it.
+    """
+    from hive._commit_queue import CommitReconciler
+
+    tracked = git_vault / "10_projects" / "already-tracked.md"
+    tracked.parent.mkdir(parents=True, exist_ok=True)
+    tracked.write_text("# committed at fixture time\n", encoding="utf-8")
+    subprocess.run(  # noqa: S603, S607
+        ["git", "add", "10_projects/already-tracked.md"],
+        cwd=git_vault,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(  # noqa: S603, S607
+        ["git", "commit", "-m", "track the file"],
+        cwd=git_vault,
+        capture_output=True,
+        check=True,
+    )
+
+    # Foreign dirt of both kinds, neither queued.
+    tracked.write_text("# edited by a human in Obsidian, mid-sentence\n", encoding="utf-8")
+    _write(git_vault, "10_projects/untracked-foreign.md")
+
+    ours = _write(git_vault, "10_projects/ours.md")
+
+    reconciler = CommitReconciler(git_vault, tick_s=3600.0)
+    try:
+        reconciler.enqueue(ours)
+        assert reconciler.flush_now() is True
+    finally:
+        reconciler.close()
+
+    assert _files_in_head(git_vault) == ["10_projects/ours.md"]
+
+    # The foreign edits survive untouched in the working tree — the
+    # reconciler neither committed nor reverted them.
+    still_dirty = subprocess.run(  # noqa: S603, S607
+        ["git", "status", "--porcelain"],
+        cwd=git_vault,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "10_projects/already-tracked.md" in still_dirty
+    assert "10_projects/untracked-foreign.md" in still_dirty
+    assert tracked.read_text(encoding="utf-8").startswith("# edited by a human")
+
+
+# ── AC1 — the write path defers instead of committing inline ────────────
+
+
+@_POSIX_ONLY
+@pytest.mark.asyncio
+async def test_vault_write_deferred_does_not_commit_in_its_call_path(
+    git_vault: Path,
+) -> None:
+    """AC1: a deferred write returns with no ``git commit`` in its call path.
+
+    Asserted by intercepting ``_git_commit`` rather than by timing, so the
+    test states the contract ("no commit happened here") instead of
+    measuring a proxy for it.
+    """
+    from hive import _vault_write
+    from hive.server import create_server
+
+    calls: list[list[str]] = []
+    real_commit = _vault_write._git_commit
+
+    def _spy(vault: Path, rel_paths: list[Path], message: str) -> bool:
+        calls.append([p.as_posix() for p in rel_paths])
+        return real_commit(vault, rel_paths, message)
+
+    mcp = create_server(vault_path=git_vault)
+    ctx = mcp._hive_ctx  # type: ignore[attr-defined]
+    assert ctx.reconciler is not None, "serving contexts must carry a reconciler"
+
+    import unittest.mock
+
+    with unittest.mock.patch.object(_vault_write, "_git_commit", _spy):
+        await mcp.call_tool(
+            "vault_write",
+            {
+                "project": "testproject",
+                "path": "deferred-write.md",
+                "content": "# written without a commit\n",
+                "commit": False,
+            },
+        )
+
+    assert calls == [], f"a deferred write must not commit inline, got {calls}"
+    assert [p.as_posix() for p in ctx.reconciler.queue.peek()] == [
+        "10_projects/testproject/deferred-write.md"
+    ]
+
+    # And the deferred path really does commit when the tick comes.
+    count_before = _rev_count(git_vault)
+    assert ctx.reconciler.flush_now() is True
+    assert _rev_count(git_vault) == count_before + 1
+    assert _files_in_head(git_vault) == ["10_projects/testproject/deferred-write.md"]
+
+    ctx.reconciler.close()
+
+
+@_POSIX_ONLY
+@pytest.mark.asyncio
+async def test_vault_write_commit_true_still_commits_synchronously(
+    git_vault: Path,
+) -> None:
+    """``commit=True`` stays the synchronous escape hatch (ADR-018 §4)."""
+    from hive.server import create_server
+
+    mcp = create_server(vault_path=git_vault)
+    ctx = mcp._hive_ctx  # type: ignore[attr-defined]
+
+    count_before = _rev_count(git_vault)
+    await mcp.call_tool(
+        "vault_write",
+        {
+            "project": "testproject",
+            "path": "sync-write.md",
+            "content": "# committed before the call returned\n",
+            "commit": True,
+        },
+    )
+
+    assert _rev_count(git_vault) == count_before + 1
+    assert len(ctx.reconciler.queue) == 0
+    ctx.reconciler.close()
