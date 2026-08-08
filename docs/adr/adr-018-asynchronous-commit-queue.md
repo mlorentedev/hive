@@ -15,7 +15,11 @@ created: "2026-08-07"
 
 Proposed (2026-08-07). Gates `specs/HIVE-322-commit-outbox/`. **Amends [ADR-014](adr-014-vault-commit-coordination.md)** — see "The ADR-014 tension" below, which is the load-bearing part of this decision. **Triggers the deferred "2b" evolution of [ADR-013](adr-013-write-idempotency-at-most-once.md)** — see "Relationship to ADR-013" below. The three design questions that blocked this ADR were resolved on 2026-08-07 and are recorded under "Decision".
 
-Revised the same day, before acceptance, on two points: the reconciler is **no longer scoped to the daemon** (§Decision), which removes the dependency on the [#176](https://github.com/mlorentedev/hive/issues/176) rollout and forced recovery to be redesigned (§3); and deferral becomes the **default** rather than an opt-in, making this a breaking contract change (§4).
+Revised the same day, before acceptance, on three points:
+
+1. The reconciler is **no longer scoped to the daemon** (§Decision), which removes the dependency on the [#176](https://github.com/mlorentedev/hive/issues/176) rollout.
+2. Deferral becomes the **default** rather than an opt-in, making this a breaking contract change (§4).
+3. Startup recovery **reports and never commits** (§3). A first attempt at (1) kept daemon-side recovery committing under `daemon.lock`; review showed that lock excludes sibling hives but not a human editing in Obsidian, so the safety argument did not hold. Report-only is the only resolution that needs no provenance, and it removes the regime asymmetry (1) had introduced.
 
 ## Date
 
@@ -59,7 +63,7 @@ The distinction that makes it safe is narrow and must be enforced in code, not m
 
 A path-scoped timed committer cannot sweep an agent's half-written file, because a path enters the queue only *after* its write has completed. ADR-014's objection is therefore specific to *sweeping* timers, not to timed commits as such, and this ADR amends it to say so.
 
-**Consequence for #322 as originally written:** the first comment on that issue proposed "per-path drain, with an `add -A` sweep as the self-heal fallback". Under ADR-014 that fallback **is** the failure mode. It is withdrawn. Recovery of a dropped queue entry needs a different answer (see the open questions).
+**Consequence for #322 as originally written:** the first comment on that issue proposed "per-path drain, with an `add -A` sweep as the self-heal fallback". Under ADR-014 that fallback **is** the failure mode. It is withdrawn. §3 answers recovery differently: startup reports rather than sweeps, and the only legal sweep is the one a human asks for via `vault_commit`.
 
 ## Relationship to ADR-013
 
@@ -71,10 +75,10 @@ ADR-013 already anticipated this work. It adopted "2a" (synchronous idempotency-
 
 Two points of reconciliation:
 
-- **This ADR implements a subset of 2b.** It defers the *commit*; it does not build 2b's durable journal (see Decision 3 — startup reconciliation was chosen over a persisted queue). ADR-013's constraint that "the journal MUST be **SQLite-backed**" therefore does not bind here, but **remains binding** if idempotency-keyed at-most-once is later extended across the deferred path.
+- **This ADR implements a subset of 2b.** It defers the *commit*; it does not build 2b's durable journal, and after the §3 revision it does not build 2b's replay-on-startup either — startup reports rather than replays. ADR-013's constraint that "the journal MUST be **SQLite-backed**" therefore does not bind here, but **remains binding** if idempotency-keyed at-most-once is later extended across the deferred path.
 - **ADR-013's at-most-once guarantee survives.** A claimed key means "the write was applied", and deferral does not duplicate writes. What changes is only that a claimed key no longer implies its commit has landed — which is precisely the ACK-semantics shift ADR-013 flagged.
 
-[ADR-017](adr-017-auto-commit-bypasses-vault-pre-commit-hook.md) needs no amendment: deferred and recovery commits both route through `_git_commit` → `_commit_args`, so `--no-verify` continues to apply uniformly, and push-side scanning is unaffected.
+[ADR-017](adr-017-auto-commit-bypasses-vault-pre-commit-hook.md) needs no amendment: the reconciler's deferred commit routes through `_git_commit` → `_commit_args` like every other write-path commit, so `--no-verify` continues to apply uniformly and push-side scanning is unaffected. There are no recovery commits to consider after §3.
 
 ## Decision
 
@@ -104,19 +108,25 @@ The reconciler spawns git with its own deadline and reuses the **synchronous** p
 
 `bounded_call` is rejected here despite being the repo-wide model: it is `async def`, so reusing it would require standing up an event loop inside a daemon thread purely to call it. Coupling async machinery to a synchronous thread costs more than the consistency buys. The *termination behaviour* stays shared even though the *supervision entry point* differs, which is where the actual cross-OS risk lives.
 
-### 3. Startup reconciliation under the singleton; bounded exposure without it
+### 3. Startup recovery reports; it never commits. Remediation stays user-initiated
 
-Recovery is the one place where the two regimes genuinely differ, so it splits.
+**No automatic startup recovery commits anything, in either regime.** Startup enumerates the vault paths left uncommitted and *reports* them — count and oldest age, in the `vault_health` runtime block. It does not stage and does not commit.
 
-**Under the daemon**, recovery extends `_startup_self_heal` (`_daemon.py:171`, called at `_daemon.py:348`, which today only clears a stale `index.lock`): enumerate uncommitted vault paths and issue one recovery commit. Two properties argue for its safety: it runs **under the singleton `daemon.lock`**, so no sibling hive owns the tree, and it is a **startup event, not a recurring timer** — the property that made obsidian-git's sweep unsafe is absent. It still enumerates paths explicitly rather than running `add -A`.
+The first draft of this section split by regime: daemon-side recovery would commit under the singleton `daemon.lock`, and the non-daemon path would refuse. Review killed that, correctly. **`daemon.lock` excludes sibling *hives*; it does not exclude a *human*.** A maintainer with a half-edited note open in Obsidian while the daemon restarts produces dirty working-tree state that recovery cannot distinguish from its own orphaned write — so ADR-014's objection survived inside the regime the draft called safe. The singleton was necessary but not sufficient, and no amount of locking supplies what was actually missing.
 
-> **Open question, and the reason AC9 is not yet safe as written.** `daemon.lock` excludes sibling *hives*; it does not exclude a *human*. A maintainer with a half-edited note open in Obsidian while the daemon restarts is dirty-working-tree state that recovery cannot distinguish from its own orphaned write — which is ADR-014's objection surviving inside the regime this section claims is safe. The singleton is necessary but not sufficient.
->
-> Resolving it needs **provenance**, not exclusion: recovery must commit only paths hive itself wrote, and after a crash the in-memory queue that knew them is gone. That is the argument a persisted marker exists to win, which this section otherwise rejects — so the three candidate resolutions are (i) recovery only *reports*, collapsing AC9 into AC11, (ii) a minimal persisted provenance record, reopening the trade-off below, or (iii) narrowing recovery to paths matching hive's own write conventions, which is fragile. **This must be settled before ADR-018 is accepted**; it is the one design question the same-day revision opened rather than closed.
+What was missing is **provenance**: recovery would need to know which paths *hive* wrote, and after a crash the in-memory queue that knew them is gone. Reconstructing it means persisting a marker on the write path — the very thing this ADR exists to empty, and rejected below on its own merits. Two other options were weighed: narrowing recovery to paths matching hive's write conventions (fragile — it infers provenance from a naming convention), and a minimal persisted provenance record (buys a guarantee stronger than the problem needs, at the cost this ADR is trying to avoid).
 
-**Without the daemon there is no singleton, and startup recovery is therefore not performed.** This is a deliberate refusal, not an omission. From inside a process that does not own the tree, "enumerate every uncommitted vault path at startup" is indistinguishable from obsidian-git's sweeping timer: it would stage a sibling hive's in-flight write, or a file the human has open and half-edited in Obsidian. That is ADR-014's objection in its original form, and multi-process makes it *sharper*, not equal — which is why the safety argument does not port even though the queue does.
+Report-only wins because it is the only resolution that **does not need provenance at all.** Reporting a path is safe whoever wrote it.
 
-Exposure is bounded by observability instead. A path orphaned by a hard kill stays on disk uncommitted until the next hive write to that vault, an explicit `vault_commit`, or an external committer — and `vault_health` reports the count and age of uncommitted vault paths, so the condition is visible rather than silent. This follows the warn-don't-reject precedent already used for suspected input corruption ([#114](https://github.com/mlorentedev/hive/issues/114), HIVE-115).
+The distinction this lands on is sharper than the one the draft was reaching for, and it restates ADR-014 rather than bending it:
+
+> **Automatic committing is path-scoped, always.** Only the reconciler commits, and only paths it queued itself. **Sweeping the working tree is legal only as an explicit user action** — which is exactly what `vault_commit` already is.
+
+`vault_commit` already sweeps via `_git_commit_all`'s `git add -A` (HIVE-104), and that stays correct: a human asking for a flush has consented to flushing their own in-progress edits. A timer has no such consent. ADR-014's objection was never to *sweeping* as such — it was to a **timer** doing it unasked, which is why obsidian-git's auto-commit had to be turned off while `vault_commit` did not.
+
+So an orphaned path waits for the next hive write to that vault, an explicit `vault_commit`, or an external committer — and is visible in `vault_health` the whole time rather than silently rotting. This follows the warn-don't-reject precedent already used for suspected input corruption ([#114](https://github.com/mlorentedev/hive/issues/114), HIVE-115).
+
+Two things get simpler as a result, which is the tell that this is the right cut. `_startup_self_heal` keeps its current job (clear a stale `index.lock`) and gains a report rather than a commit path, so it needs no lock reasoning at all. And the regime asymmetry disappears: daemon and multi-process now behave identically at startup, so there is no longer a difference for a future reader to mistake for a bug.
 
 A persisted queue was rejected as adding a second synchronous disk write to the very path this ADR exists to empty, in exchange for a guarantee stronger than the problem needs — the failure being mitigated is a *delayed* commit, not a lost one. The file reaches disk **before** its path is queued, and that ordering is what makes every weaker guarantee in this section honest.
 
@@ -151,8 +161,8 @@ Two adjacent mechanisms change meaning with it, and both are part of the same br
 - Reintroduces a timed committer, which ADR-014 removed — safe only under the path-scoped constraint above, which is now a load-bearing invariant that future changes can silently break.
 - Commit granularity coarsens: a delete-and-recreate inside one tick collapses to a single state, weakening `vault_delete`'s "git-recoverable" guarantee unless it opts out.
 - A write returns before its commit exists, so the response contract changes for every caller, and HIVE-104's "(uncommitted — call vault_commit to flush)" suffix now describes the normal path rather than an opt-in one. This is the ACK-semantics shift ADR-013 predicted, and it requires **bilingual site docs** (EN + ES) per the repo's docs rule.
-- A crash between write and flush leaves a file on disk uncommitted. Under the daemon, startup reconciliation bounds the exposure to one daemon lifetime; **without the daemon there is no automatic recovery at all** (§3), and the path waits for the next hive write, an explicit `vault_commit`, or an external committer. The window is real in both regimes and is not closed by a durable queue.
-- Recovery therefore behaves differently in the two regimes, which is a genuine asymmetry a reader could mistake for a bug. It is deliberate and rests on the singleton, not on the queue.
+- A crash between write and flush leaves a file on disk uncommitted, and **nothing recovers it automatically** in either regime (§3). It waits for the next hive write to that vault, an explicit `vault_commit`, or an external committer — visible in `vault_health` throughout, but a real window that a durable queue would have closed and this design deliberately does not.
+- Hive therefore no longer self-heals its own git state at startup. That is a genuine reduction against the first draft of this ADR, accepted because the alternative required provenance hive cannot reconstruct after a crash without persisting on the write path.
 - Two supervision entry points now exist — `bounded_call` for the tool path, a synchronous watchdog for the reconciler. They share termination behaviour but not structure, so a future change to one must be mirrored deliberately.
 - The default flip (§4) breaks the response contract for every existing caller, and `feat!` forces a major release. Callers that relied on "write returned ⇒ commit exists" must now pass `commit=True` explicitly.
 
@@ -166,7 +176,7 @@ Two adjacent mechanisms change meaning with it, and both are part of the same br
 - [#322](https://github.com/mlorentedev/hive/issues/322) — measurements, methodology, and design discussion
 - `specs/HIVE-322-commit-outbox/` — the spec this ADR gates
 - [ADR-014](adr-014-vault-commit-coordination.md) — amended by this ADR
-- [ADR-011](adr-011-phase-c-daemon-model.md) — the single-owner daemon; required for §3's startup recovery, **not** for the queue itself
+- [ADR-011](adr-011-phase-c-daemon-model.md) — the single-owner daemon; the queue's best case, but after the §3 revision it is **not required by any part of this decision**
 - `src/hive/_helpers.py` — `_git_filelock()`, the pre-existing cross-process serialization the rescope rests on
 - [ADR-010](adr-010-external-committer-coexistence.md), [ADR-013](adr-013-write-idempotency-at-most-once.md), [ADR-017](adr-017-auto-commit-bypasses-vault-pre-commit-hook.md) — interactions to check before acceptance
 - [ADR-008](adr-008-hard-deadline-enforcement.md) — the supervision model the reconciler thread currently escapes
