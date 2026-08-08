@@ -77,6 +77,7 @@ Still open:
 - [ ] AC11 — `vault_health` reports the count and oldest age of uncommitted vault paths. With AC9 refusing to self-heal, this is the *entire* recovery signal, so a regression here is silent data rot rather than a missing metric.
 - [ ] AC12 — `commit` defaults to deferral on **both** `vault_write` and `vault_patch`: a plain call produces no commit in its call path, `commit=True` produces one before returning, `commit=False` is indistinguishable from the default (queued, not held indefinitely), and `vault_delete` commits synchronously regardless of the tick.
 - [ ] AC13 — The reconciler acquires `_git_filelock(vault)` around its commit. Without this the deferred commit runs outside the lock the write path used to hold, which would invalidate the cross-process argument the whole rescope rests on (ADR-018 §Decision).
+- [ ] AC14 — A **failed** flush drops its drained paths rather than re-queueing them: after a flush whose commit fails (deadline kill or `_git_commit` failure), the queue does not contain those paths, the failure is logged with the dropped count, and the affected files appear in AC11's uncommitted-path report. Asserted explicitly because the tempting alternative — re-queue and retry — turns a permanent failure into an unbounded queue plus one doomed `git` per tick (ADR-018 §1).
 
 ## References
 

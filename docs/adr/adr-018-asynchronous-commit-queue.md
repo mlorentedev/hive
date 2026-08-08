@@ -102,6 +102,12 @@ Introduce `CommitQueue` with its own crash-loss contract. `Outbox[T]`'s docstrin
 
 The two also need different semantics: `CommitQueue` must **deduplicate paths within a tick** (the same file written twice produces one entry, not two) and defines recovery, neither of which `Outbox[T]` has. Its contract is narrower than the one it declines to inherit: an unflushed path is a **delayed commit, not lost data**, because the file write lands on disk *before* the path is queued.
 
+**A failed flush drops its paths; it does not re-queue them.** `drain()` is an atomic swap, so paths leave the queue before the commit is attempted — and if that commit fails (the §2 watchdog kills a `git` that overran its deadline, or `_git_commit` reports failure), those paths are **not** put back. They are logged and forgotten by the queue.
+
+This follows from §3 rather than adding a new principle: hive reports uncommitted state and lets remediation stay user-initiated. Re-queueing is the retry loop that principle rejects, and it degrades badly in exactly the cases that produce a failed flush in the first place — a rejecting pre-commit hook, a full disk, a foreign `index.lock` — where every subsequent tick would spawn another doomed `git` and the queue would only grow. Bounded retries were weighed and rejected for needing a per-path attempt counter, which is the persisted write-path state this ADR exists to avoid.
+
+Nothing is lost that was not already on disk. The file landed before its path was queued, so a dropped path means a **file awaiting a commit**, not a missing edit — and that file is exactly what the uncommitted-path report surfaces. The report is therefore not a nice-to-have metric but the **entire** recovery signal for this failure mode; a regression in it is silent data rot.
+
 ### 2. A synchronous watchdog reusing the existing termination primitives
 
 The reconciler spawns git with its own deadline and reuses the **synchronous** primitives already in `_deadline.py` — `popen_creation_kwargs()` (the per-OS process-group/kill setup) and `_cleanup_index_lock()` — rather than duplicating platform logic.
