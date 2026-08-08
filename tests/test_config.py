@@ -279,6 +279,25 @@ class TestLogPath:
         monkeypatch.setenv("HIVE_LOG_PATH", "/tmp/hive-test.log")
         assert HiveSettings().log_path == "/tmp/hive-test.log"
 
+    def test_log_retention_days_default(self) -> None:
+        assert HiveSettings().log_retention_days == 7
+
+    def test_log_retention_days_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HIVE_LOG_RETENTION_DAYS", "30")
+        assert HiveSettings().log_retention_days == 30
+
+    @pytest.mark.parametrize("bad", ["0", "366", "-1"])
+    def test_log_retention_days_rejects_out_of_range(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        bad: str,
+    ) -> None:
+        """Bounded 1..365: a 0 would collect the log being written this second,
+        and an unbounded value silently disables the GC that #329 exists for."""
+        monkeypatch.setenv("HIVE_LOG_RETENTION_DAYS", bad)
+        with pytest.raises(ValidationError):
+            HiveSettings()
+
 
 class TestNewDefaults:
     def test_stale_threshold_days_default(self) -> None:

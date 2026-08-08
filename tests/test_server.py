@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sys
+import time
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, Mock
 
@@ -4489,6 +4491,154 @@ class TestSetupFileLogging:
         for h in file_handlers:
             logger.removeHandler(h)
             h.close()
+
+
+# ── _gc_stale_logs (#329) ──────────────────────────────────────────
+
+
+class TestGcStaleLogs:
+    """One ``hive-<pid>.log`` per process start, never collected (#329: 295
+    observed). Each file is size-capped by ``RotatingFileHandler``, so the
+    unbounded axis is the file *count*, not the file size.
+
+    Deletion needs two guards, not one. Age alone is unsafe: an idle daemon
+    that has not logged in a week has a stale mtime while still holding the
+    file open, and unlinking it on POSIX silently detaches the writer's inode.
+    """
+
+    STALE = 30 * 86_400
+
+    @staticmethod
+    def _template(tmp_path: Path) -> Path:
+        return tmp_path / "hive.log"
+
+    def _make_log(self, tmp_path: Path, pid: int, *, age_s: float, suffix: str = "") -> Path:
+        path = tmp_path / f"hive-{pid}.log{suffix}"
+        path.write_text("x", encoding="utf-8")
+        stamp = time.time() - age_s
+        os.utime(path, (stamp, stamp))
+        return path
+
+    def test_stale_log_from_dead_pid_is_deleted(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from hive.server import _gc_stale_logs
+
+        monkeypatch.setattr("psutil.pid_exists", lambda _pid: False)
+        victim = self._make_log(tmp_path, 424242, age_s=self.STALE)
+
+        _gc_stale_logs(self._template(tmp_path), 7)
+
+        assert not victim.exists()
+
+    def test_rotated_backup_is_collected_too(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``RotatingFileHandler`` leaves ``hive-<pid>.log.1`` beside the live
+        file; collecting only the base name would halve the reclaimed space."""
+        from hive.server import _gc_stale_logs
+
+        monkeypatch.setattr("psutil.pid_exists", lambda _pid: False)
+        backup = self._make_log(tmp_path, 424242, age_s=self.STALE, suffix=".1")
+
+        _gc_stale_logs(self._template(tmp_path), 7)
+
+        assert not backup.exists()
+
+    def test_fresh_log_is_kept(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from hive.server import _gc_stale_logs
+
+        monkeypatch.setattr("psutil.pid_exists", lambda _pid: False)
+        recent = self._make_log(tmp_path, 424242, age_s=60)
+
+        _gc_stale_logs(self._template(tmp_path), 7)
+
+        assert recent.exists()
+
+    def test_live_pid_log_is_kept_even_when_stale(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The guard that age alone cannot provide: an idle-but-running daemon."""
+        from hive.server import _gc_stale_logs
+
+        monkeypatch.setattr("psutil.pid_exists", lambda _pid: True)
+        idle_daemon = self._make_log(tmp_path, 424242, age_s=self.STALE)
+
+        _gc_stale_logs(self._template(tmp_path), 7)
+
+        assert idle_daemon.exists()
+
+    def test_own_log_is_never_collected(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from hive.server import _gc_stale_logs
+
+        # Even with the liveness probe lying about us, our own PID is excluded.
+        monkeypatch.setattr("psutil.pid_exists", lambda _pid: False)
+        mine = self._make_log(tmp_path, os.getpid(), age_s=self.STALE)
+
+        _gc_stale_logs(self._template(tmp_path), 7)
+
+        assert mine.exists()
+
+    def test_unrelated_files_are_untouched(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from hive.server import _gc_stale_logs
+
+        monkeypatch.setattr("psutil.pid_exists", lambda _pid: False)
+        stamp = time.time() - self.STALE
+        keepers = []
+        for name in ("worker.db", "hive.log", "hive-notapid.log", "relevance.db"):
+            path = tmp_path / name
+            path.write_text("x", encoding="utf-8")
+            os.utime(path, (stamp, stamp))
+            keepers.append(path)
+
+        _gc_stale_logs(self._template(tmp_path), 7)
+
+        assert all(p.exists() for p in keepers)
+
+    def test_unlink_failure_never_propagates(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A GC failure must not take down server startup — AGENTS.md's
+        broad-``Exception`` rule, and on Windows an in-use file raises
+        ``PermissionError`` here rather than anything git-shaped."""
+        from pathlib import Path as _Path
+
+        from hive.server import _gc_stale_logs
+
+        monkeypatch.setattr("psutil.pid_exists", lambda _pid: False)
+        self._make_log(tmp_path, 424242, age_s=self.STALE)
+
+        def _boom(self: Path, **_kw: object) -> None:
+            raise PermissionError("file in use")
+
+        monkeypatch.setattr(_Path, "unlink", _boom)
+
+        _gc_stale_logs(self._template(tmp_path), 7)  # must not raise
+
+    def test_missing_log_dir_is_a_no_op(self, tmp_path: Path) -> None:
+        from hive.server import _gc_stale_logs
+
+        _gc_stale_logs(tmp_path / "absent" / "hive.log", 7)  # must not raise
 
 
 # ── CLI dispatch (hive --version / --help / unknown token) ─────────

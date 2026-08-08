@@ -593,6 +593,68 @@ def _setup_file_logging() -> None:
         logger.addHandler(handler)
         logger.setLevel(level)
 
+    # After the handler is attached, so the GC's own summary is captured.
+    _gc_stale_logs(template, settings.log_retention_days)
+
+
+def _pid_from_log_name(path: Path, template: Path) -> int | None:
+    """The PID embedded in ``<stem>-<pid><suffix>``, or its ``.N`` backup.
+
+    Returns ``None`` for anything that is not one of our per-PID logs, so an
+    unrelated file sharing the directory is never a deletion candidate.
+    """
+    prefix = f"{template.stem}-"
+    if not path.name.startswith(prefix):
+        return None
+    rest = path.name[len(prefix) :]
+    digits = rest.split(template.suffix, 1)[0] if template.suffix else rest
+    return int(digits) if digits.isdigit() else None
+
+
+def _gc_stale_logs(template: Path, retention_days: int) -> None:
+    """Collect per-PID debug logs whose writer is gone and whose mtime is old.
+
+    ``_setup_file_logging`` gives every process its own ``hive-{pid}.log`` to
+    dodge the multi-writer rotation race. That caps each *file* at ~2 MB but
+    leaves the file *count* unbounded — one per server start, forever (#329
+    found 295 of them).
+
+    Deletion needs two guards, not one. Age alone is unsafe: an idle daemon
+    that has not logged in a week has a stale mtime while still holding its
+    file open, and unlinking it on POSIX would silently detach the writer's
+    inode and lose its logs. A file goes only once its owning PID is gone.
+    """
+    import psutil
+
+    cutoff = time.time() - retention_days * 86_400
+    self_pid = os.getpid()
+    try:
+        candidates = list(template.parent.glob(f"{template.stem}-*"))
+    except OSError:
+        return
+
+    removed = 0
+    for path in candidates:
+        # Broad Exception per AGENTS.md: a Windows in-use file raises
+        # PermissionError here, and log GC must never break startup.
+        try:
+            pid = _pid_from_log_name(path, template)
+            if pid is None or pid == self_pid or psutil.pid_exists(pid):
+                continue
+            if path.stat().st_mtime > cutoff:
+                continue
+            path.unlink()
+            removed += 1
+        except Exception:  # noqa: BLE001, PERF203
+            continue
+
+    if removed:
+        logging.getLogger("hive").info(
+            "hive.log_gc.removed count=%d retention_days=%d",
+            removed,
+            retention_days,
+        )
+
 
 def _run_serve(argv: list[str]) -> int:
     """``hive serve`` — run the Phase C single-owner daemon (ADR-011).
