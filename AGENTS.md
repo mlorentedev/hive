@@ -39,9 +39,14 @@ The package layout follows a deliberate split: `server.py` is a thin registratio
 
 ### Compat shim (do not delete blindly)
 
-`src/hive/_compat.py` monkey-patches `mcp.shared.session.RequestResponder.__exit__` to swallow the spurious `CancelledError` that anyio re-raises after a cancelled tool call has already responded. Without it, a client sending `notifications/cancelled` kills the stdio receive loop and every subsequent call hangs (hive issue #75). The patch fires only on the exact failure mode and degrades silently if upstream removes the symbol. Delete only after confirming the upstream MCP fix has shipped.
+`src/hive/_compat.py` monkey-patches `mcp.shared.session.RequestResponder.respond` so that a response produced *after* the request was cancelled short-circuits silently instead of tripping the upstream `assert not self._completed`. Without it, that assertion propagates into the receive loop's task group and kills the server with `AssertionError('Request already responded to')`; every subsequent call in the process then gets `Connection closed`. Hive is unusually exposed because a tool that offloads sync work (git) to a worker thread can call `respond()` late. The patch is self-gated to the exact state (responder already `_completed`) and `apply()` logs a warning and no-ops if the symbol is gone. Delete only after confirming the upstream fix has shipped.
 
-**Upstream tracker:** [modelcontextprotocol/python-sdk#2610](https://github.com/modelcontextprotocol/python-sdk/issues/2610). `mcp` pinned `>=1.26,<2.0` in `pyproject.toml` so a major `RequestResponder` refactor cannot silently break the shim. **Escalation deadline:** 2026-06-12 — if upstream is still silent, port the fix upstream ([#127](https://github.com/mlorentedev/hive/issues/127)).
+**Upstream tracker:** [modelcontextprotocol/python-sdk#2416](https://github.com/modelcontextprotocol/python-sdk/issues/2416) — open; maintainer-confirmed on `main` and `v1.x`, and a contributor volunteered to fix it on 2026-07-11.
+
+Two corrections worth carrying, because the stale versions of both are still quoted in places:
+
+- **The `__exit__` patch is gone.** A companion patch for [#2610](https://github.com/modelcontextprotocol/python-sdk/issues/2610) (hive issue #75) was removed once we confirmed that symptom no longer reproduces on `mcp >= 1.27`: `Server._handle_request` catches the in-flight cancellation before it can reach `RequestResponder.__exit__`. So this shim's fate is tied to **#2416**, not #2610, and #2610 already has an upstream fix PR ([#2624](https://github.com/modelcontextprotocol/python-sdk/pull/2624)) — writing another would duplicate it. [#127](https://github.com/mlorentedev/hive/issues/127) still describes the old premise.
+- **The pin no longer guards what it claims.** `pyproject.toml` now has `mcp>=1.27,<3.0` (widened from `<2.0` by #316). The original narrow cap existed so a major `RequestResponder` refactor could not silently break the shim; `<3.0` admits `mcp` 2.x, which is precisely such a boundary. `apply()` degrades loudly rather than silently, so this is a lost guard rather than a live bug — but it is a lost guard.
 
 ### Worker routing order
 
