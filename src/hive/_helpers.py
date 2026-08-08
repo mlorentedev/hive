@@ -1488,8 +1488,14 @@ def _git_commit(
     vault_path: Path,
     rel_paths: list[Path],
     message: str,
-) -> None:
+) -> bool:
     """Stage one or more files and commit them in a single git invocation.
+
+    Returns ``True`` when a commit was created, ``False`` on any failure
+    (lock timeout, git error, external termination). The boolean is what
+    the ADR-018 reconciler predicates its drop-on-failure branch on; every
+    pre-existing caller ignores it and keeps the best-effort contract
+    below unchanged — failures are still logged and never raised.
 
     Accepts a list of paths so a multi-write tool (``vault_patch`` with N
     patches, ``capture_lesson`` batch with N lessons) issues exactly one
@@ -1519,7 +1525,7 @@ def _git_commit(
     """
     if not rel_paths:
         _log.debug("git commit no-op: empty path list")
-        return
+        return False
     safe_msg = message.replace("\n", " ").replace("\r", " ")
     path_strs = [str(p) for p in rel_paths]
     if not _acquire_with_telemetry(_GIT_LOCK, "_GIT_LOCK"):
@@ -1528,7 +1534,7 @@ def _git_commit(
             path_strs,
             _lock_timeout(),
         )
-        return
+        return False
     try:
         try:
             with _filelock_with_telemetry(_git_filelock(vault_path), "_git_filelock"):
@@ -1542,7 +1548,7 @@ def _git_commit(
                         cause,
                         err.strip(),
                     )
-                    return
+                    return False
                 rc, _, err = _run_git(_commit_args(safe_msg), vault_path)
                 if rc != 0:
                     cause = "external_termination" if rc == RC_EXTERNAL_TERMINATION else "git_error"
@@ -1553,6 +1559,8 @@ def _git_commit(
                         cause,
                         err.strip(),
                     )
+                    return False
+                return True
         except filelock.Timeout:
             _log.warning(
                 "git commit skipped for %s: inter-process lock timeout (%ds)",
@@ -1567,6 +1575,7 @@ def _git_commit(
             )
     finally:
         _GIT_LOCK.release()
+    return False
 
 
 def _git_commit_all(

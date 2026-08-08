@@ -18,8 +18,8 @@ created: "2026-08-07"
 
 ## Implementation
 
-- [ ] [P] [AC4] Write failing test: a reconciler flush exceeding its deadline is terminated, leaving no orphaned `git` process and no stale `index.lock`
-- [ ] [AC4] Give the reconciler a synchronous watchdog reusing `_deadline.py`'s sync primitives (`popen_creation_kwargs()`, `_cleanup_index_lock()`) — not `bounded_call`, which is `async def` (ADR-018 §2)
+- [x] [P] [AC4] Write failing test: a reconciler flush exceeding its deadline is terminated, leaving no orphaned `git` process and no stale `index.lock` — `tests/test_commit_queue.py::test_flush_exceeding_deadline_is_terminated`
+- [x] [AC4] Give the reconciler a synchronous watchdog reusing `_deadline.py`'s sync primitives (`popen_creation_kwargs()`, `_cleanup_index_lock()`) — not `bounded_call`, which is `async def` (ADR-018 §2). `_commit_queue.flush_paths` + `_deadline.terminate_registry_sync`; `popen_creation_kwargs()` arrives via `_run_git`, which every flush already funnels through
 - [ ] [P] [AC14] Write failing test: when the flush's commit fails, the drained paths are **not** re-queued — the queue is empty afterwards, the failure is logged with the dropped count, and the files remain visible to AC11's report
 - [ ] [AC14] Implement the drop-on-failure branch in the flush: log `mcp.reconciler.flush_failed` with the count and return, without calling `extend()` back onto the queue (ADR-018 §1)
 - [ ] [P] [AC2] Write failing test: N queued paths across one tick produce exactly one commit containing exactly those paths, with no unrelated working-tree file staged
