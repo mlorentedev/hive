@@ -267,6 +267,12 @@ class CommitReconciler:
         Returns ``True`` only when a commit was created — ``False`` covers
         both "nothing was queued" and "the commit failed", which are the
         same thing to a caller: no new commit exists.
+
+        ``last_flush_at`` is stamped only when a drain actually had paths
+        to commit, successfully or not. An idle tick leaves it alone, so
+        the value answers "when did work last happen" rather than "when
+        did the loop last wake up" — the former is what a stalled-reconciler
+        check needs.
         """
         with self._flush_lock:
             paths = self.queue.drain()
