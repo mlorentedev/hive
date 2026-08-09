@@ -68,9 +68,9 @@ La funcionalidad de vault y worker se sirve desde una única instancia FastMCP. 
 
 ### Auto-Commit a Git
 
-Por defecto, todas las escrituras al vault hacen auto-commit a git. Esto proporciona historial completo y permite que `vault_search(since_days=N)` detecte cambios vía `git log`.
+Todas las escrituras al vault llegan a git, que es lo que da historial completo y permite que `vault_search(since_days=N)` detecte cambios vía `git log`. Desde que existe la cola de commits asíncrona llegan de forma *asíncrona*: una escritura devuelve en cuanto el fichero está en disco, y un hilo reconciler commitea las rutas encoladas en el siguiente tick (`HIVE_COMMIT_TICK_S`). La tasa de commits sigue al tick, no al volumen de escrituras.
 
-Para flujos masivos, `vault_write(commit=False)` y `vault_patch(commit=False)` escriben a disco pero difieren el commit; una llamada posterior a `vault_commit(message=...)` hace flush del working tree en una sola operación. Cuando se detecta el plugin obsidian-git en el vault (vía `.obsidian/plugins/obsidian-git/data.json`), `vault_health` expone un bloque `external_committer` para que las personas usuarias sepan que el intervalo de auto-commit ya está cubierto por el plugin.
+Los flujos masivos ya no necesitan tratamiento especial — agrupar es lo que la cola hace por defecto. `commit=True` fuerza un commit síncrono para quien necesite confirmarlo, y `vault_commit(message=...)` sigue haciendo flush del working tree en una sola operación. `vault_delete` se mantiene síncrono y fuera de la cola, así que un borrado y una recreación no pueden colapsar en un mismo tick. Cuando se detecta el plugin obsidian-git en el vault (vía `.obsidian/plugins/obsidian-git/data.json`), `vault_health` expone un bloque `external_committer` y el reconciler le cede el commit en el momento del drain en vez de commitear él.
 
 ### Controles de Presupuesto
 

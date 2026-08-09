@@ -18,7 +18,7 @@ Hive degrades gracefully — every recommended or optional dependency reveals mo
 - **Recommended**
   - `git` initialised inside the vault. Without it, `vault_write` / `vault_patch` still write to disk; they just skip the per-write commit (and `vault_commit` reports the working tree as untracked).
   - The [Obsidian](https://obsidian.md) desktop app to author the vault by hand.
-  - The [obsidian-git plugin](https://github.com/Vinzent03/obsidian-git) with auto-commit set to **5–10 minutes**. Pair it with `vault_write(commit=False)` / `vault_patch(commit=False)` to push the git workload off the synchronous tool path; see *Recommended configuration* below.
+  - The [obsidian-git plugin](https://github.com/Vinzent03/obsidian-git) with auto-commit set to **5–10 minutes**. The git workload is already off the synchronous tool path — writes defer to a reconciler tick by default — but the plugin still earns its place; see *Recommended configuration* below.
 
 - **Optional**
   - [Ollama](https://ollama.com/) running `qwen2.5-coder:7b` (or compatible) for local, free `delegate_task` / `capture_lesson` worker calls.
@@ -31,10 +31,11 @@ Per [ADR-006 (commit policy)](https://github.com/mlorentedev/hive/blob/master/do
 
 1. Install and enable the obsidian-git plugin in your vault.
 2. Set its auto-commit interval to 5 or 10 minutes.
-3. Call `vault_write(..., commit=False)` and `vault_patch(..., commit=False)` for all bulk operations.
-4. Optionally call `vault_commit(message="...")` at the end of a session to force a checkpoint sooner than the obsidian-git tick.
+3. Nothing to do per call. Writes defer to the reconciler tick by default, so bulk operations already pay for one commit instead of N. Step 3 used to be "pass `commit=False` everywhere" — that flag is now the default and the keyword is redundant.
+4. Optionally call `vault_commit(message="...")` at the end of a session to force a checkpoint sooner than either tick.
+5. Optionally set `HIVE_AUTO_DEFER_TO_EXTERNAL_COMMITTER=true` to have the reconciler hand off to the plugin instead of committing, whenever the plugin is present and healthy.
 
-`vault_health` reports a `## external_committer` block when it detects obsidian-git in the vault. The `commit=False` durability contract is explicit: files are persisted to disk regardless; only the *commit* is deferred. A crash before the next flush loses the commit, not the content.
+`vault_health` reports a `## external_committer` block when it detects obsidian-git in the vault. The durability contract is explicit and unchanged in substance: files are persisted to disk regardless; only the *commit* is deferred. A crash before the next flush loses the commit, not the content — and nothing recovers it automatically, so the `uncommitted` count in the runtime block is where you go looking. See [Deferred commits](/tools/vault/#deferred-commits-ack-semantics).
 
 When a tool call is cancelled mid-flight (slow worker, client timeout), the server may have already mutated the disk before the cancel ack reaches the wire. `vault_health` surfaces a `## ghost_responses` counter and emits a `mcp.ghost_response.suppressed_after_cancel_ack` WARNING for each event — verify state via `vault_query` rather than retrying, since the ErrorData ack does **not** imply rollback ([ADR-007](https://github.com/mlorentedev/hive/blob/master/docs/architecture/adr-007-mcp-cancellation-response.md)).
 
