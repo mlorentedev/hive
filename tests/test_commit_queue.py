@@ -478,6 +478,68 @@ def test_reconciler_never_stages_a_file_it_did_not_queue(git_vault: Path) -> Non
     assert tracked.read_text(encoding="utf-8").startswith("# edited by a human")
 
 
+# ── AC13 — the deferred commit runs under the inter-process lock ────────
+
+
+@_POSIX_ONLY
+def test_reconciler_commit_happens_under_the_git_filelock(git_vault: Path) -> None:
+    """AC13: a concurrent holder of ``_git_filelock`` excludes the flush.
+
+    The synchronous write path took this lock and released it when the tool
+    returned. Deferral moves the commit *after* that release, so without the
+    reconciler taking the lock itself the deferred commit would run outside
+    the very lock the daemon-only rescope was dropped on the strength of
+    (ADR-018 §Decision): with P processes the bound is P commits per tick
+    only if those P commits cannot interleave.
+
+    Exclusion is asserted from another thread on purpose.
+    ``_git_filelock`` returns a per-vault singleton, but ``filelock``
+    builds it ``thread_local=True``, so a same-thread re-entry is free —
+    that is what lets ``vault_write_lock`` nest ``_git_commit`` without
+    deadlocking — while a *foreign* thread opens its own descriptor and
+    genuinely contends at the OS level. Holding the lock on this thread
+    and flushing on this thread would therefore prove nothing.
+    """
+    import threading
+
+    from hive._commit_queue import CommitReconciler
+    from hive._helpers import _git_filelock
+
+    target = _write(git_vault, "10_projects/under-the-lock.md")
+    count_before = _rev_count(git_vault)
+
+    reconciler = CommitReconciler(git_vault, tick_s=3600.0)
+    flushed: list[bool] = []
+
+    def _flush() -> None:
+        flushed.append(reconciler.flush_now())
+
+    try:
+        reconciler.enqueue(target)
+
+        with _git_filelock(git_vault).acquire(timeout=30.0):
+            worker = threading.Thread(target=_flush, name="ac13-flush", daemon=True)
+            worker.start()
+
+            # Blocked, not merely slow: the flush waits out the whole hold.
+            # The lock timeout is 30s by default, so this window is well
+            # inside it and the flush resumes rather than abandoning.
+            worker.join(timeout=1.5)
+            assert worker.is_alive(), "flush completed while the filelock was held"
+            assert _rev_count(git_vault) == count_before, (
+                "a commit landed while another holder had the filelock"
+            )
+
+        worker.join(timeout=30.0)
+        assert not worker.is_alive(), "flush never resumed after the filelock released"
+    finally:
+        reconciler.close(drain=False)
+
+    assert flushed == [True], f"flush did not commit after acquiring the lock: {flushed}"
+    assert _rev_count(git_vault) == count_before + 1
+    assert _files_in_head(git_vault) == ["10_projects/under-the-lock.md"]
+
+
 # ── AC1 — the write path defers instead of committing inline ────────────
 
 
