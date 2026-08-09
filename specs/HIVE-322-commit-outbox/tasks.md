@@ -57,7 +57,7 @@ created: "2026-08-07"
 - [x] Lint passes — `ruff check` + `ruff format --check`, 70 files
 - [x] No unrelated changes in the diff (no scope creep) — audited file by file. **One line sits outside the feature's obvious footprint**: the `cross_worker` marker description in `pyproject.toml`, which claimed every test under it needs the fake-git PATH fixture and stopped being true when the multiprocess benchmark joined. Called out rather than buried. The site-docs diff is wider than the ACK-semantics section because four pages still asserted the *old* default in plain terms (`architecture.md`: "By default, all vault writes auto-commit to git"), and leaving a documented contradiction is worse than an incomplete doc. `docs/lessons.md` follows the precedent already set on this branch by `208ec7d` — lessons *from this spec* ride with it; unrelated docs go off master
 - [x] `verification.md` filled in — evidence table, post-implementation results beside the pre-implementation baseline, decisions, and a **defects-found** section carrying the `vault_delete` finding below
-- [ ] PR opened referencing this spec folder — **title must carry `feat!`** (AC12 breaks the response contract; the repo squash-merges and release-please reads the title)
+- [x] PR opened referencing this spec folder — [#354](https://github.com/mlorentedev/hive/pull/354), title carries **`feat!`** (AC12 breaks the response contract; the repo squash-merges and release-please reads the title)
 
 ## Follow-up (needs a ticket, not resolvable under the freeze)
 
