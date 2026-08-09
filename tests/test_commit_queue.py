@@ -1304,12 +1304,21 @@ def test_tick_above_the_ceiling_disables_auto_flush_and_says_so(
     from hive._commit_queue import _MAX_AUTO_TICK_S, CommitReconciler
 
     with caplog.at_level(logging.WARNING, logger="hive._commit_queue"):
-        disabled = CommitReconciler(git_vault, tick_s=_MAX_AUTO_TICK_S + 1.0)
+        # Just past the ceiling rather than comfortably past it: with `%.1f`
+        # this value rendered as "tick_s=300.0 max_tick_s=300.0", a warning
+        # that reads as though the ceiling had not been crossed. A `+1.0`
+        # probe cannot see that, which is why the margin is 0.04.
+        disabled = CommitReconciler(git_vault, tick_s=_MAX_AUTO_TICK_S + 0.04)
     try:
         assert disabled._thread is None
-        assert any("auto_flush_disabled" in rec.message for rec in caplog.records), [
-            r.message for r in caplog.records
+        warnings = [
+            rec.getMessage() for rec in caplog.records if "auto_flush_disabled" in rec.message
         ]
+        assert warnings, [r.message for r in caplog.records]
+        # The rendered values, not just the event name: a lossy format would
+        # report the configured tick as equal to the ceiling it exceeded.
+        assert "tick_s=300.04" in warnings[0], warnings[0]
+        assert "max_tick_s=300.0" in warnings[0], warnings[0]
     finally:
         disabled.close(drain=False)
 

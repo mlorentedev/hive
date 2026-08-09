@@ -239,13 +239,18 @@ class CommitReconciler:
             # The ceiling doubles as a test affordance and a production
             # cliff: ``HIVE_COMMIT_TICK_S`` is documented and settable, so a
             # plausible "commit every 10 minutes" reaches this branch and
-            # gets no reconciler at all. Deferred paths would then wait for
-            # shutdown or an explicit vault_commit, which is a defensible
-            # mode but a terrible one to enter unknowingly (ADR-018 §3
-            # leaves the report as the only other signal).
+            # gets no reconciler at all. What stops is *automatic*
+            # reconciliation: deferred paths still reach git through a clean
+            # shutdown, an explicit vault_commit, or an external committer
+            # (ADR-010). A defensible mode to choose, a terrible one to enter
+            # unknowingly — ADR-018 §3 leaves the report as the only signal.
+            # %r, not %.1f: the threshold is exclusive, so a tick of 300.04
+            # lands here and would render as "tick_s=300.0 max_tick_s=300.0"
+            # — a warning that reads as though the ceiling was not crossed.
             _log.warning(
-                "mcp.reconciler.auto_flush_disabled tick_s=%.1f max_tick_s=%.1f "
-                "queued paths now commit only on clean shutdown or vault_commit",
+                "mcp.reconciler.auto_flush_disabled tick_s=%r max_tick_s=%r "
+                "no automatic reconciliation; queued paths reach git only via "
+                "clean shutdown, an explicit vault_commit, or an external committer",
                 self._tick_s,
                 _MAX_AUTO_TICK_S,
             )
