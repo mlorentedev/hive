@@ -158,6 +158,10 @@ Two blocks there report on [deferred commits](#deferred-commits-ack-semantics). 
 
 The commit moved off the write path. A write lands on disk, its path is queued, and a reconciler thread drains the queue into **one commit per tick** (`HIVE_COMMIT_TICK_S`, default 5s) rather than one commit per write. Commit rate is now a function of the tick instead of write volume, which is what lifts the throughput ceiling: git commits against one repository serialize, so the only way to go faster is to commit less often.
 
+:::caution[The tick has a ceiling of 300s]
+Setting `HIVE_COMMIT_TICK_S` above **300** does not slow the reconciler down — it stops it from starting at all. Queued paths then commit only on clean shutdown or an explicit `vault_commit`, and `vault_health` is what shows the backlog growing. The server logs `mcp.reconciler.auto_flush_disabled` at startup when this happens. For infrequent commits, prefer a tick within the ceiling.
+:::
+
 | You want | Pass |
 |---|---|
 | The previous synchronous behaviour | `commit=True` — commits before returning |
