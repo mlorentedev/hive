@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.0.0](https://github.com/mlorentedev/hive/compare/v1.43.1...v2.0.0) (2026-08-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **vault:** move committing off the write path into an asynchronous commit queue ([#354](https://github.com/mlorentedev/hive/issues/354))
+
+### Features
+
+* **vault:** move committing off the write path into an asynchronous commit queue ([#354](https://github.com/mlorentedev/hive/issues/354)) ([c056cfa](https://github.com/mlorentedev/hive/commit/c056cfa7529e68f7ca1eacbbc90ed229f160a645))
+
+
+### Documentation
+
+* **agents:** correct the mcp pin note to match the re-narrowed cap ([#350](https://github.com/mlorentedev/hive/issues/350)) ([0d146e0](https://github.com/mlorentedev/hive/commit/0d146e03eb716d8e8fc9ab6f5c350d0cf0af4bfa))
+* **lessons:** capture two lessons on test evidence and log-stream assertions ([#351](https://github.com/mlorentedev/hive/issues/351)) ([b098919](https://github.com/mlorentedev/hive/commit/b098919ead987dc77127c7c9d9c82bb68a2c533a))
+
 ## [1.43.1](https://github.com/mlorentedev/hive/compare/v1.43.0...v1.43.1) (2026-08-08)
 
 
