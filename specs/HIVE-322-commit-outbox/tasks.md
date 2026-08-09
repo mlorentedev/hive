@@ -51,13 +51,17 @@ created: "2026-08-07"
 
 ## Closing
 
-- [ ] Every acceptance criterion from `proposal.md` is covered by at least one test
-- [ ] Every acceptance criterion has a matching entry in `features.json` with a non-vacuous verification command
-- [ ] Type checks pass
-- [ ] Lint passes
-- [ ] No unrelated changes in the diff (no scope creep)
-- [ ] `verification.md` filled in
-- [ ] PR opened referencing this spec folder
+- [x] Every acceptance criterion from `proposal.md` is covered by at least one test — AC1-AC14 mapped in `verification.md`, which also records **which six held by construction** and the neuter that proves each guard discriminates. A tick that hides "nothing had to change" is what lets a later refactor break an invariant nobody re-checked
+- [x] Every acceptance criterion has a matching entry in `features.json` with a non-vacuous verification command — 15 entries (AC1-AC14 plus the external-committer hand-off, which is not an AC but is a contract the default flip would otherwise have defeated silently). **All 15 executed as a batch, 15/15 exit 0**, rather than eyeballed: a command naming a test that no longer exists exits 4, so a criterion can ship verifying nothing and still look filled in. AC3's command carries `-m cross_worker` explicitly and that flag is load-bearing — without it the separate-processes half is deselected by `addopts` and the criterion goes vacuous. `state` is `pending` on every entry; only the harness may write `passing`
+- [x] Type checks pass — `mypy --strict src/`, 30 source files, no issues
+- [x] Lint passes — `ruff check` + `ruff format --check`, 70 files
+- [x] No unrelated changes in the diff (no scope creep) — audited file by file. **One line sits outside the feature's obvious footprint**: the `cross_worker` marker description in `pyproject.toml`, which claimed every test under it needs the fake-git PATH fixture and stopped being true when the multiprocess benchmark joined. Called out rather than buried. The site-docs diff is wider than the ACK-semantics section because four pages still asserted the *old* default in plain terms (`architecture.md`: "By default, all vault writes auto-commit to git"), and leaving a documented contradiction is worse than an incomplete doc. `docs/lessons.md` follows the precedent already set on this branch by `208ec7d` — lessons *from this spec* ride with it; unrelated docs go off master
+- [x] `verification.md` filled in — evidence table, post-implementation results beside the pre-implementation baseline, decisions, and a **defects-found** section carrying the `vault_delete` finding below
+- [ ] PR opened referencing this spec folder — **title must carry `feat!`** (AC12 breaks the response contract; the repo squash-merges and release-please reads the title)
+
+## Follow-up (needs a ticket, not resolvable under the freeze)
+
+- [ ] `vault_delete`'s `commit=False` is the **indefinite-deferral mode ADR-018 §4 removed** — it never routes through `_commit_or_queue`, so the path is left uncommitted with no queue behind it. Found while documenting; the false docs claim ("same durability contract as `vault_write`") was corrected, the code was not. §4 says both "`vault_delete` opts out of the queue entirely" and "the indefinite-deferral mode is removed", and this sits exactly where the two readings disagree — so resolving it is a design change and needs an ADR amendment first
 
 ## Machine-readable features
 
