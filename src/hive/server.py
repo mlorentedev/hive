@@ -35,6 +35,7 @@ from hive._helpers import (  # noqa: E402
     _safe_read,
     _truncate,
     register_lock_eviction_tracker,
+    vault_git_startup_warning,
     vault_startup_warning,
 )
 from hive._idempotency import IdempotencyStore  # noqa: E402
@@ -588,6 +589,15 @@ Total estimated savings: ~C tokens
             "an error until VAULT_PATH is configured correctly.",
             resolved_path,
         )
+    else:
+        # A vault that exists but is not a repository fails every deferred
+        # flush while writes keep reporting success, so the condition has to
+        # be loud at boot — it is the one place a caller looks before the
+        # first write, and the tool response cannot carry it without putting
+        # a git call back on the write path.
+        git_warning = vault_git_startup_warning(resolved_path)
+        if git_warning:
+            logging.getLogger("hive").warning("%s", git_warning)
 
     return mcp
 

@@ -150,6 +150,8 @@ Los problemas se categorizan como `[error]` o `[warning]` con ruta del archivo y
 
 **Bloque de runtime** (`include_runtime=True`, opt-in): Diagnósticos dinámicos al final del reporte — uptime en segundos, número + nombres de tools MCP registrados (sanity check de que ningún módulo falló al registrarse), y snapshot del presupuesto OpenRouter (`spent_usd`, `cap_usd`, `period`). Independiente de `include_usage`; ambos pueden combinarse en una sola llamada.
 
+`git_repo` informa de si el vault es siquiera un repositorio git. Es lo que hace legibles los dos bloques siguientes: sin repositorio, `uncommitted` es permanentemente `null` y una profundidad de `commit_queue` que nunca baja es el estado esperado, no un reconciler atascado. El servidor también avisa de esto al arrancar.
+
 Dos bloques ahí informan sobre los [commits diferidos](#commits-diferidos-semántica-de-ack). `commit_queue` da `depth`, `last_flush_age_s` y `tick_s` — la profundidad solo es interpretable frente al tick que se supone que la está vaciando, así que un reconciler atascado se ve como una profundidad que sobrevive a varios ticks. `uncommitted` da `count` y `oldest_age_s` de las rutas del vault que siguen esperando commit; `null` ahí significa que git no pudo responder, que no es la misma respuesta que `0`. Los dos se solapan a mitad de tick, y eso es cierto — una ruta encolada está realmente sin commitear en disco.
 
 ## Commits diferidos (semántica de ACK)
