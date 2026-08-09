@@ -821,3 +821,183 @@ async def test_vault_delete_commits_synchronously_regardless_of_tick(
     assert len(ctx.reconciler.queue) == 0
 
     ctx.reconciler.close()
+
+
+# ── AC9 — startup reports uncommitted paths and never commits ───────────
+#
+# The enumerator these two ACs share lives in `_helpers.uncommitted_paths`.
+# It is built once here and spent twice: AC9 logs it at daemon startup, AC11
+# renders it in the `vault_health` runtime block. Both need count + oldest
+# age and nothing else, but the primitive returns the paths so the summary
+# stays derived and the parse stays testable.
+
+
+def _dirty(vault: Path) -> str:
+    """Porcelain status, for asserting a path is still uncommitted."""
+    return subprocess.run(  # noqa: S603, S607
+        ["git", "status", "--porcelain"],
+        cwd=vault,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def test_uncommitted_paths_enumerates_untracked_staged_and_modified(
+    git_vault: Path,
+) -> None:
+    """The enumerator must see all three shapes of "on disk, not committed".
+
+    The staged-but-uncommitted case is the one worth stating: a flush killed
+    between ``git add`` and ``git commit`` — the HIVE-115 AC-9b window, and
+    exactly AC14's deadline-kill path — leaves residue with only the X column
+    set. An enumerator that filtered to ``??`` and `` M`` would hide the
+    report's most important customer.
+    """
+    from hive._helpers import uncommitted_paths
+
+    _write(git_vault, "10_projects/testproject/untracked.md")
+
+    staged = _write(git_vault, "10_projects/testproject/staged.md")
+    subprocess.run(  # noqa: S603, S607
+        ["git", "add", str(staged.relative_to(git_vault))],
+        cwd=git_vault,
+        capture_output=True,
+        check=True,
+    )
+
+    tracked = git_vault / "10_projects" / "testproject" / "00-context.md"
+    tracked.write_text(tracked.read_text(encoding="utf-8") + "\nedited\n", encoding="utf-8")
+
+    found = uncommitted_paths(git_vault)
+    assert found is not None
+    by_path = {p.rel_path: p for p in found}
+
+    assert "10_projects/testproject/untracked.md" in by_path
+    assert "10_projects/testproject/staged.md" in by_path, (
+        "a flush killed between `git add` and `git commit` leaves staged residue; "
+        "the report exists for exactly that file"
+    )
+    assert "10_projects/testproject/00-context.md" in by_path
+
+    assert by_path["10_projects/testproject/untracked.md"].status == "??"
+    assert by_path["10_projects/testproject/staged.md"].status.startswith("A")
+    # mtime is the only provenance-free age signal available.
+    assert by_path["10_projects/testproject/untracked.md"].mtime is not None
+
+
+def test_uncommitted_paths_returns_none_when_enumeration_fails(tmp_path: Path) -> None:
+    """A failed enumeration is NOT an empty one.
+
+    AC11 calls this the entire recovery signal, so conflating "git could not
+    tell me" with "nothing is pending" is precisely the silent data rot the
+    row warns about. `None` is the only honest answer for a non-repo.
+    """
+    from hive._helpers import uncommitted_paths
+
+    assert uncommitted_paths(tmp_path) is None, "a non-repo must report unknown, not clean"
+
+
+def test_uncommitted_paths_parses_a_renamed_entry_without_misaligning(
+    git_vault: Path,
+) -> None:
+    """`-z` emits a second NUL field for renames — consume it or the parse skews.
+
+    Without the extra read, the source path is mistaken for the next entry's
+    ``XY PATH`` record and every subsequent path is garbage. One rename is
+    enough to catch it, and the trailing untracked file is what proves the
+    stream re-synchronised rather than merely surviving.
+    """
+    from hive._helpers import uncommitted_paths
+
+    src = git_vault / "10_projects" / "testproject" / "90-lessons.md"
+    subprocess.run(  # noqa: S603, S607
+        ["git", "mv", str(src.relative_to(git_vault)), "10_projects/testproject/renamed.md"],
+        cwd=git_vault,
+        capture_output=True,
+        check=True,
+    )
+    _write(git_vault, "10_projects/testproject/zz-after-the-rename.md")
+
+    found = uncommitted_paths(git_vault)
+    assert found is not None
+    rel_paths = {p.rel_path for p in found}
+
+    assert "10_projects/testproject/renamed.md" in rel_paths
+    assert "10_projects/testproject/zz-after-the-rename.md" in rel_paths, (
+        "the entry after a rename was lost — the `-z` source field was not consumed"
+    )
+    assert "" not in rel_paths
+
+
+def test_uncommitted_summary_reports_unknown_rather_than_clean(tmp_path: Path) -> None:
+    """The summary preserves the primitive's unknown/clean distinction."""
+    from hive._helpers import uncommitted_summary
+
+    count, oldest_age_s = uncommitted_summary(tmp_path)
+    assert count is None
+    assert oldest_age_s is None
+
+
+def test_uncommitted_summary_counts_and_ages_a_dirty_tree(git_vault: Path) -> None:
+    """Non-vacuity the other way: a dirty tree yields a real count and age."""
+    from hive._helpers import uncommitted_summary
+
+    _write(git_vault, "10_projects/testproject/pending.md")
+
+    count, oldest_age_s = uncommitted_summary(git_vault)
+    assert count is not None
+    assert count >= 1
+    assert oldest_age_s is not None
+    assert oldest_age_s >= 0.0
+
+
+def test_startup_self_heal_reports_uncommitted_paths_and_never_commits(
+    git_vault: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """AC9: startup reports; it never commits — identically in both regimes.
+
+    Asserted **with and without** the daemon lock held because the point of
+    the ADR-018 §3 revision is that the two regimes stopped differing. The
+    first draft let daemon-side recovery commit under ``daemon.lock``; review
+    killed it, since that lock excludes sibling hives but not a human with a
+    half-edited note open in Obsidian. Report-only is the only resolution
+    needing no provenance, so a future change that makes the behaviour
+    lock-dependent again is the regression this test exists to catch.
+    """
+    import filelock
+
+    from hive import _daemon
+
+    dirty = _write(git_vault, "10_projects/testproject/orphaned-by-a-crash.md")
+    before_bytes = dirty.read_bytes()
+    before_head = _head(git_vault)
+    before_count = _rev_count(git_vault)
+
+    lock = filelock.FileLock(str(_daemon.lock_file_path()))
+
+    for regime, held in (("daemon lock held", True), ("no daemon lock", False)):
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="hive._daemon"):
+            if held:
+                with lock:
+                    _daemon._startup_self_heal(git_vault)
+            else:
+                _daemon._startup_self_heal(git_vault)
+
+        assert _head(git_vault) == before_head, f"{regime}: startup moved HEAD"
+        assert _rev_count(git_vault) == before_count, f"{regime}: startup created a commit"
+        assert dirty.read_bytes() == before_bytes, f"{regime}: startup rewrote the dirty file"
+        assert "10_projects/testproject/orphaned-by-a-crash.md" in _dirty(git_vault), (
+            f"{regime}: the dirty path stopped being uncommitted"
+        )
+
+        report = [r for r in caplog.records if "uncommitted" in r.getMessage()]
+        assert report, f"{regime}: startup produced no uncommitted-path report"
+        message = report[0].getMessage()
+        assert "uncommitted_count=" in message, f"{regime}: report omits the count"
+        assert "oldest_age_s=" in message, f"{regime}: report omits the oldest age"
+        assert "orphaned-by-a-crash.md" not in message, (
+            f"{regime}: the report enumerated paths; a dirty vault would flood the log"
+        )
