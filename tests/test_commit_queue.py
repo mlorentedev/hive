@@ -1001,3 +1001,70 @@ def test_startup_self_heal_reports_uncommitted_paths_and_never_commits(
         assert "orphaned-by-a-crash.md" not in message, (
             f"{regime}: the report enumerated paths; a dirty vault would flood the log"
         )
+
+
+# ── AC11 — the uncommitted-path report reaches vault_health ─────────────
+
+
+@pytest.mark.asyncio
+async def test_vault_health_reports_uncommitted_count_and_oldest_age(
+    git_vault: Path,
+) -> None:
+    """AC11: count and oldest age of uncommitted paths, beside the queue depth.
+
+    With AC9 refusing to self-heal, this is the *entire* recovery signal for
+    a path dropped by a failed flush or orphaned by a hard kill. It sits next
+    to ``commit_queue`` on purpose: mid-tick the two overlap, and that is
+    truthful — a queued path really is uncommitted on disk. Subtracting the
+    queue would reintroduce the provenance reasoning ADR-018 §3 removed.
+    """
+    from hive.server import create_server
+
+    mcp = create_server(vault_path=git_vault)
+    ctx = mcp._hive_ctx  # type: ignore[attr-defined]
+
+    report = _text_of(await mcp.call_tool("vault_health", {"include_runtime": True}))
+    assert "uncommitted:" in report
+    assert "count: 0" in report, "a clean tree must report zero, not unknown"
+
+    # A file on disk with no commit behind it — the shape AC14 drops and a
+    # hard kill orphans.
+    _write(git_vault, "10_projects/testproject/awaiting-a-commit.md")
+
+    report = _text_of(await mcp.call_tool("vault_health", {"include_runtime": True}))
+    assert "count: 1" in report
+    oldest = [ln for ln in report.splitlines() if "oldest_age_s:" in ln]
+    assert oldest, "the report omits the oldest age"
+    assert "null" not in oldest[0], f"a pending path must carry a real age: {oldest[0]!r}"
+
+    ctx.reconciler.close()
+
+
+@pytest.mark.asyncio
+async def test_vault_health_reports_unknown_rather_than_clean_when_git_fails(
+    git_vault: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC11's data-rot guard: a failed enumeration must never read as clean.
+
+    ``count: 0`` when git could not answer is the silent rot the row warns
+    about — an operator would see a healthy vault while orphaned paths
+    accumulated. The unknown case has to be *loud in the same field*, which
+    is why the primitive returns ``None`` instead of an empty list.
+    """
+    from hive import _helpers
+    from hive.server import create_server
+
+    mcp = create_server(vault_path=git_vault)
+    ctx = mcp._hive_ctx  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(_helpers, "uncommitted_paths", lambda _vault: None)
+
+    report = _text_of(await mcp.call_tool("vault_health", {"include_runtime": True}))
+    uncommitted = report.split("uncommitted:", 1)[1].splitlines()[1:3]
+    assert any("count: null" in ln for ln in uncommitted), (
+        f"a failed enumeration reported as clean: {uncommitted!r}"
+    )
+    assert any("oldest_age_s: null" in ln for ln in uncommitted)
+
+    ctx.reconciler.close()

@@ -116,6 +116,8 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
     - ``obsidian_git_present`` — external committer detection
     - ``commit_queue`` — ADR-018 reconciler depth, last-flush age and tick,
       which together make a stalled reconciler visible instead of silent
+    - ``uncommitted`` — ADR-018 §3 count + oldest age of vault paths awaiting
+      a commit; the only recovery signal, since startup refuses to self-heal
     """
     from hive import _helpers
     from hive.config import settings as _settings
@@ -162,6 +164,23 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
     flush_age_text = "null" if last_flush_age_s is None else f"{last_flush_age_s:.1f}"
     tick_text = "null" if commit_tick_s is None else f"{commit_tick_s:.1f}"
 
+    # ADR-018 AC11: with §3 refusing to self-heal, this is the *entire*
+    # recovery signal — for a path dropped by a failed flush (AC14) and for
+    # one orphaned by a hard kill. `null` is therefore load-bearing and not
+    # cosmetic: reporting `0` when git could not answer would show a healthy
+    # vault while orphaned paths accumulated, which is silent data rot rather
+    # than a missing metric. Reported beside `commit_queue` because mid-tick
+    # the two legitimately overlap — a queued path IS uncommitted on disk, and
+    # netting them off would need the provenance §3 exists to avoid.
+    uncommitted_count: int | None = None
+    uncommitted_oldest_age_s: float | None = None
+    with contextlib.suppress(Exception):
+        uncommitted_count, uncommitted_oldest_age_s = _helpers.uncommitted_summary(ctx.vault)
+    count_text = "null" if uncommitted_count is None else str(uncommitted_count)
+    oldest_age_text = (
+        "null" if uncommitted_oldest_age_s is None else f"{uncommitted_oldest_age_s:.1f}"
+    )
+
     lines = [
         "## runtime",
         f"- uptime_s: {uptime_s:.1f}",
@@ -180,6 +199,9 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
         f"  - depth: {queue_depth}",
         f"  - last_flush_age_s: {flush_age_text}",
         f"  - tick_s: {tick_text}",
+        "- uncommitted:",
+        f"  - count: {count_text}",
+        f"  - oldest_age_s: {oldest_age_text}",
         "- openrouter_budget:",
         f"  - spent_usd: {float(stats['spent']):.4f}",
         f"  - cap_usd: {ctx.openrouter_budget}",
