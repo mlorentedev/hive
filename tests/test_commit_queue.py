@@ -1068,3 +1068,64 @@ async def test_vault_health_reports_unknown_rather_than_clean_when_git_fails(
     assert any("oldest_age_s: null" in ln for ln in uncommitted)
 
     ctx.reconciler.close()
+
+
+# ── AC10 — vault_commit stays the one sanctioned sweep ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_vault_commit_still_sweeps_foreign_working_tree_edits(
+    git_vault: Path,
+) -> None:
+    """AC10: the explicit user flush may stage edits hive never wrote.
+
+    This is the exact inverse of AC7, and the asymmetry is the decision.
+    ADR-014's objection was never to *sweeping* — it was to a **timer**
+    sweeping unasked, which is why obsidian-git's auto-commit had to go while
+    ``vault_commit`` did not. A human asking for a flush has consented to
+    flushing their own work in progress; a tick has no such consent.
+
+    So a future "safety" narrowing here — path-scoping the sweep to match the
+    reconciler, or filtering to hive-written paths — would look like hardening
+    and would instead remove the **only** remediation ADR-018 §3 leaves. With
+    startup refusing to self-heal, this sweep and the next write to the vault
+    are all an orphaned path has.
+
+    Both shapes of foreign edit are asserted, mirroring AC7's reasoning: a
+    narrowing to "paths hive knows about" could still sweep an untracked file
+    while silently dropping a modification to a tracked one.
+    """
+    from hive._helpers import uncommitted_summary
+    from hive.server import create_server
+
+    mcp = create_server(vault_path=git_vault)
+    ctx = mcp._hive_ctx  # type: ignore[attr-defined]
+
+    # Neither of these went through hive: one is a note dropped into the vault
+    # by hand, the other an edit made in Obsidian to an already-tracked file.
+    foreign_new = _write(git_vault, "10_projects/testproject/written-in-obsidian.md")
+    foreign_edit = git_vault / "10_projects" / "testproject" / "11-tasks.md"
+    foreign_edit.write_text(
+        foreign_edit.read_text(encoding="utf-8") + "\n- [ ] added by hand\n",
+        encoding="utf-8",
+    )
+    assert len(ctx.reconciler.queue) == 0, "fixture error: hive must not have queued these"
+
+    before = _rev_count(git_vault)
+    result = _text_of(await mcp.call_tool("vault_commit", {"message": "manual flush"}))
+
+    assert _rev_count(git_vault) == before + 1, f"vault_commit did not commit: {result!r}"
+    committed = _files_in_head(git_vault)
+    assert str(foreign_new.relative_to(git_vault)) in committed, (
+        "the sweep dropped an untracked foreign file — remediation is gone"
+    )
+    assert str(foreign_edit.relative_to(git_vault)) in committed, (
+        "the sweep dropped a modification to a tracked file; a path-scoped "
+        "narrowing passes the untracked case and fails exactly here"
+    )
+
+    # The loop the three rows form: AC9 reports, AC11 surfaces, this clears.
+    count, _oldest = uncommitted_summary(git_vault)
+    assert count == 0, f"the vault is still dirty after an explicit flush: {count}"
+
+    ctx.reconciler.close()
