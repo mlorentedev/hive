@@ -150,6 +150,8 @@ Issues are categorized as `[error]` or `[warning]` with file path and descriptio
 
 **Runtime block** (`include_runtime=True`, opt-in): Dynamic diagnostics layered after the report — uptime in seconds, count + names of MCP tools currently registered (sanity check that no module failed to register), and the OpenRouter budget snapshot (`spent_usd`, `cap_usd`, `period`). Independent of `include_usage`; both can stack in one call.
 
+`git_repo` reports whether the vault is a git repository at all. It is what makes the two blocks below it readable: without a repository `uncommitted` is permanently `null` and a `commit_queue` depth that never falls is the expected state rather than a stalled reconciler. The server also warns about this at startup.
+
 Two blocks there report on [deferred commits](#deferred-commits-ack-semantics). `commit_queue` gives `depth`, `last_flush_age_s` and `tick_s` — the depth is only interpretable against the tick that is supposed to be clearing it, so a stalled reconciler shows up as a depth that outlives several ticks. `uncommitted` gives `count` and `oldest_age_s` for vault paths still awaiting a commit; `null` there means git could not answer, which is a different answer from `0`. The two overlap mid-tick, and that is truthful — a queued path really is uncommitted on disk.
 
 ## Deferred commits (ACK semantics)
@@ -157,6 +159,10 @@ Two blocks there report on [deferred commits](#deferred-commits-ack-semantics). 
 **Breaking change — ships in a major release.** A successful `vault_write` or `vault_patch` no longer means a commit exists.
 
 The commit moved off the write path. A write lands on disk, its path is queued, and a reconciler thread drains the queue into **one commit per tick** (`HIVE_COMMIT_TICK_S`, default 5s) rather than one commit per write. Commit rate is now a function of the tick instead of write volume, which is what lifts the throughput ceiling: git commits against one repository serialize, so the only way to go faster is to commit less often.
+
+:::caution[The tick has a ceiling of 300s]
+Setting `HIVE_COMMIT_TICK_S` above **300** does not slow the reconciler down — it stops it from starting at all. Queued paths then commit only on clean shutdown or an explicit `vault_commit`, and `vault_health` is what shows the backlog growing. The server logs `mcp.reconciler.auto_flush_disabled` at startup when this happens. For infrequent commits, prefer a tick within the ceiling.
+:::
 
 | You want | Pass |
 |---|---|

@@ -181,6 +181,14 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
         "null" if uncommitted_oldest_age_s is None else f"{uncommitted_oldest_age_s:.1f}"
     )
 
+    # Reported beside the two blocks above because it is what makes them
+    # readable: with no repository, `uncommitted` is permanently `null` and a
+    # `commit_queue` depth that never falls is the expected state rather than
+    # a stalled reconciler. Without this line the two are indistinguishable.
+    git_repo = False
+    with contextlib.suppress(Exception):
+        git_repo = _helpers.vault_is_git_repo(ctx.vault)
+
     lines = [
         "## runtime",
         f"- uptime_s: {uptime_s:.1f}",
@@ -192,6 +200,7 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
         f"  - p99: {lock_stats['p99_ms']:.1f}",
         f"  - samples: {lock_stats['sample_count']}",
         f"- obsidian_git_present: {str(obsidian).lower()}",
+        f"- git_repo: {str(git_repo).lower()}",
         "- lock_eviction:",
         f"  - count_30d: {eviction_count_30d}",
         f"  - last_iso: {eviction_last_iso or 'null'}",

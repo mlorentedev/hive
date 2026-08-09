@@ -1,7 +1,7 @@
 ---
 id: "HIVE-322-commit-outbox"
 type: spec
-status: draft # draft | implementing | verifying | archived
+status: archived # draft | implementing | verifying | archived
 created: "2026-08-07"
 issue: "hive#322"   # repo#NNN — GitHub issue / Project item that tracks this spec
 tags: [spec, proposal]
@@ -64,20 +64,20 @@ Still open:
 
 ## Acceptance criteria
 
-- [ ] AC1 — With the queue enabled, `vault_write` returns without a `git commit` in its call path (asserted by test, not by timing).
-- [ ] AC2 — N writes queued **in one process** across one tick produce exactly one commit from that process, containing exactly those N paths, and no unrelated working-tree file is staged. "One commit per tick" is per-process: with P processes the bound is P commits per tick (see AC3), which is the point the daemon's single queue improves on.
-- [ ] AC3 — 10 concurrent writers show write-tool latency bounded by file I/O, with commit count bounded by elapsed-time / tick rather than by write count. Asserted in **both** regimes: threads in one process, and separate processes sharing the vault filelock.
-- [ ] AC4 — A reconciler flush that exceeds its deadline is terminated and logged, leaving no orphaned `git` process and no stale `index.lock`.
-- [ ] AC5 — `vault_health` reports queue depth and last-flush age; a stalled reconciler is visible there.
-- [ ] AC6 — On clean shutdown the queue is drained; nothing queued is silently discarded.
-- [ ] AC7 — The reconciler never stages a working-tree file it did not queue. This is the load-bearing ADR-014 invariant and is guarded by an explicit test, not by convention.
-- [ ] AC8 — The same path written twice within one tick produces one queue entry and appears once in the resulting commit.
-- [ ] AC9 — Startup performs **no** recovery commit, in **either** regime: a dirty working-tree path is left untouched whether or not the daemon lock is held. This is the invariant that replaces provenance — reporting a path is safe whoever wrote it, committing one is not (ADR-018 §3).
-- [ ] AC10 — `vault_commit` remains the only sweep: an explicit call still flushes the working tree via `git add -A`, because a human asking for a flush has consented to flushing their own edits. A timer never does.
-- [ ] AC11 — `vault_health` reports the count and oldest age of uncommitted vault paths. With AC9 refusing to self-heal, this is the *entire* recovery signal, so a regression here is silent data rot rather than a missing metric.
-- [ ] AC12 — `commit` defaults to deferral on **both** `vault_write` and `vault_patch`: a plain call produces no commit in its call path, `commit=True` produces one before returning, `commit=False` is indistinguishable from the default (queued, not held indefinitely), and `vault_delete` commits synchronously regardless of the tick.
-- [ ] AC13 — The reconciler acquires `_git_filelock(vault)` around its commit. Without this the deferred commit runs outside the lock the write path used to hold, which would invalidate the cross-process argument the whole rescope rests on (ADR-018 §Decision).
-- [ ] AC14 — A **failed** flush drops its drained paths rather than re-queueing them: after a flush whose commit fails (deadline kill or `_git_commit` failure), the queue does not contain those paths, the failure is logged with the dropped count, and the affected files appear in AC11's uncommitted-path report. Asserted explicitly because the tempting alternative — re-queue and retry — turns a permanent failure into an unbounded queue plus one doomed `git` per tick (ADR-018 §1).
+- [x] AC1 — With the queue enabled, `vault_write` returns without a `git commit` in its call path (asserted by test, not by timing).
+- [x] AC2 — N writes queued **in one process** across one tick produce exactly one commit from that process, containing exactly those N paths, and no unrelated working-tree file is staged. "One commit per tick" is per-process: with P processes the bound is P commits per tick (see AC3), which is the point the daemon's single queue improves on.
+- [x] AC3 — 10 concurrent writers show write-tool latency bounded by file I/O, with commit count bounded by elapsed-time / tick rather than by write count. Asserted in **both** regimes: threads in one process, and separate processes sharing the vault filelock.
+- [x] AC4 — A reconciler flush that exceeds its deadline is terminated and logged, leaving no orphaned `git` process and no stale `index.lock`.
+- [x] AC5 — `vault_health` reports queue depth and last-flush age; a stalled reconciler is visible there.
+- [x] AC6 — On clean shutdown the queue is drained; nothing queued is silently discarded.
+- [x] AC7 — The reconciler never stages a working-tree file it did not queue. This is the load-bearing ADR-014 invariant and is guarded by an explicit test, not by convention.
+- [x] AC8 — The same path written twice within one tick produces one queue entry and appears once in the resulting commit.
+- [x] AC9 — Startup performs **no** recovery commit, in **either** regime: a dirty working-tree path is left untouched whether or not the daemon lock is held. This is the invariant that replaces provenance — reporting a path is safe whoever wrote it, committing one is not (ADR-018 §3).
+- [x] AC10 — `vault_commit` remains the only sweep: an explicit call still flushes the working tree via `git add -A`, because a human asking for a flush has consented to flushing their own edits. A timer never does.
+- [x] AC11 — `vault_health` reports the count and oldest age of uncommitted vault paths. With AC9 refusing to self-heal, this is the *entire* recovery signal, so a regression here is silent data rot rather than a missing metric.
+- [x] AC12 — `commit` defaults to deferral on **both** `vault_write` and `vault_patch`: a plain call produces no commit in its call path, `commit=True` produces one before returning, `commit=False` is indistinguishable from the default (queued, not held indefinitely), and `vault_delete` commits synchronously regardless of the tick.
+- [x] AC13 — The reconciler acquires `_git_filelock(vault)` around its commit. Without this the deferred commit runs outside the lock the write path used to hold, which would invalidate the cross-process argument the whole rescope rests on (ADR-018 §Decision).
+- [x] AC14 — A **failed** flush drops its drained paths rather than re-queueing them: after a flush whose commit fails (deadline kill or `_git_commit` failure), the queue does not contain those paths, the failure is logged with the dropped count, and the affected files appear in AC11's uncommitted-path report. Asserted explicitly because the tempting alternative — re-queue and retry — turns a permanent failure into an unbounded queue plus one doomed `git` per tick (ADR-018 §1).
 
 ## References
 

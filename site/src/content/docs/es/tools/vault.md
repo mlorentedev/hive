@@ -150,6 +150,8 @@ Los problemas se categorizan como `[error]` o `[warning]` con ruta del archivo y
 
 **Bloque de runtime** (`include_runtime=True`, opt-in): Diagnósticos dinámicos al final del reporte — uptime en segundos, número + nombres de tools MCP registrados (sanity check de que ningún módulo falló al registrarse), y snapshot del presupuesto OpenRouter (`spent_usd`, `cap_usd`, `period`). Independiente de `include_usage`; ambos pueden combinarse en una sola llamada.
 
+`git_repo` informa de si el vault es siquiera un repositorio git. Es lo que hace legibles los dos bloques siguientes: sin repositorio, `uncommitted` es permanentemente `null` y una profundidad de `commit_queue` que nunca baja es el estado esperado, no un reconciler atascado. El servidor también avisa de esto al arrancar.
+
 Dos bloques ahí informan sobre los [commits diferidos](#commits-diferidos-semántica-de-ack). `commit_queue` da `depth`, `last_flush_age_s` y `tick_s` — la profundidad solo es interpretable frente al tick que se supone que la está vaciando, así que un reconciler atascado se ve como una profundidad que sobrevive a varios ticks. `uncommitted` da `count` y `oldest_age_s` de las rutas del vault que siguen esperando commit; `null` ahí significa que git no pudo responder, que no es la misma respuesta que `0`. Los dos se solapan a mitad de tick, y eso es cierto — una ruta encolada está realmente sin commitear en disco.
 
 ## Commits diferidos (semántica de ACK)
@@ -157,6 +159,10 @@ Dos bloques ahí informan sobre los [commits diferidos](#commits-diferidos-semá
 **Cambio incompatible — sale en una release mayor.** Que `vault_write` o `vault_patch` devuelvan con éxito ya no significa que exista un commit.
 
 El commit salió del camino de escritura. Una escritura aterriza en disco, su ruta se encola, y un hilo reconciler vacía la cola en **un commit por tick** (`HIVE_COMMIT_TICK_S`, 5s por defecto) en vez de un commit por escritura. La tasa de commits pasa a ser función del tick y no del volumen de escrituras, que es lo que levanta el techo de rendimiento: los commits de git contra un mismo repositorio se serializan, así que la única forma de ir más rápido es commitear menos veces.
+
+:::caution[El tick tiene un techo de 300s]
+Poner `HIVE_COMMIT_TICK_S` por encima de **300** no ralentiza el reconciler: impide que arranque. A partir de ahí las rutas encoladas solo se commitean en un apagado limpio o con un `vault_commit` explícito, y `vault_health` es lo que muestra crecer el backlog. El servidor registra `mcp.reconciler.auto_flush_disabled` al arrancar cuando ocurre. Si quieres commits poco frecuentes, usa un tick por debajo del techo.
+:::
 
 | Si quieres | Pasa |
 |---|---|

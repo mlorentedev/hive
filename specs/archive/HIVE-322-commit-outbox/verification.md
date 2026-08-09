@@ -97,6 +97,18 @@ The separate-processes row is the measurement that substantiates dropping the da
 - **`vault_delete`'s `commit=False` is the removed indefinite-deferral mode.** The site docs claimed it carried "the same durability contract as `vault_write`"; it does not, because `vault_delete` never routes through `_commit_or_queue`. The false claim was corrected in the docs and the code was left alone: ADR-018 §4 says both "`vault_delete` opts out of the queue entirely" and "the indefinite-deferral mode is removed", and delete's `commit=False` sits exactly where those two readings disagree. Resolving that is a design change, which the freeze puts behind an ADR amendment. **Ticketed:** [#353](https://github.com/mlorentedev/hive/issues/353).
 - **The `cross_worker` marker description was inaccurate** once a second file joined it ("requires fake-git PATH fixture" is true of only the HIVE-116 lock tests). Fixed in scope, one line in `pyproject.toml`. It is the only diff line outside this feature's obvious footprint and is called out here so the "no unrelated changes" review has something to check against.
 
+### Found during the pre-archive adversarial review (2026-08-09)
+
+The review ran after the merge, against the published 2.0.0 artifact rather than the checkout. Three findings; the first is fixed, the other two are open.
+
+- **`HIVE_COMMIT_TICK_S` above the 300s ceiling silently started no reconciler at all.** The knob is public and documented with its 5s default, but `_MAX_AUTO_TICK_S` was named nowhere and `CommitReconciler.__init__` had no `else` branch, so a plausible "commit every 10 minutes" left queued paths committing only on clean shutdown or an explicit `vault_commit`. The ceiling is deliberate — nine tests here pass `tick_s=3600.0` so no background thread races an explicit `flush_now()` — and that test affordance is exactly what kept the production cliff invisible: all nine depend on the branch and none asserted it. **Fixed in [#355](https://github.com/mlorentedev/hive/pull/355)** (warning log, a test asserting the threshold in both directions, EN + ES docs).
+- **A vault that is not a git repository is accepted in silence.** Verified against 2.0.0: startup emits no warning, and `vault_write` answers `(queued — commits on the next reconciler tick)` — a promise nothing can keep. Each tick logs `git add failed … fatal: not a git repository` then `flush_failed dropped=1`, but none of it reaches the caller unless they pass `include_runtime=True`. The contrast is the point: a *nonexistent* vault path gets two startup warnings and an actionable message naming `HIVE_VAULT_PATH`, its alias and the client `env:` block. **Open — needs a ticket.**
+- **`_git_filelock` fabricates a `.git/` directory in a non-git vault.** The lock lives at `vault/.git/hive.lock`, so the directory is created as a side effect: verified absent before startup and present afterwards containing only `['hive.lock']`. What remains is a `.git` that is not a repository, which misleads both a human and any tool that tests for `.git` presence. **Open — needs a ticket.**
+
+What the same probes confirmed working, recorded so it is not re-litigated: spaces and non-ASCII in the vault path, a symlinked vault, a read-only project directory (`Cannot create …: permission denied`, no crash), and — the one that matters most for ADR-018 §3 — `uncommitted.count` reporting `null` rather than `0` when git cannot answer. That design decision holds in the shipped artifact.
+
+An A/B load test on the published package, same harness both modes, 120 writes per cell at the default 5s tick: deferred runs 693–1070 writes/s against 35–37 for `commit=True`, p50 at 12 writers 13.2 ms against 319.2 ms, and 480 deferred writes produced 2 commits against 480. The synchronous ladder is flat at ~37 writes/s regardless of writer count, reproducing the baseline shape this spec set out to move.
+
 ## Promotion candidates
 
 - [x] Lesson for the repo's `docs/lessons.md`? **Two.** (1) `--no-optional-locks` is what makes a `git status` genuinely read-only — without it a read-only telemetry path takes `index.lock` and contends with writers, which is a trap for anyone adding git-backed metrics. (2) The flake-proof benchmark shape: bound a *count*, derive the bound from *measured* elapsed rather than a fixed budget, and add a `bound < load` precondition so a later shrink of the workload fails loudly instead of passing vacuously.
@@ -105,7 +117,11 @@ The separate-processes row is the measurement that substantiates dropping the da
 
 ## Archive checklist
 
-- [ ] `proposal.md` frontmatter set to `status: archived`
-- [ ] Folder moved: `specs/HIVE-322-commit-outbox/` -> `specs/archive/HIVE-322-commit-outbox/`
-- [ ] Bitácora board ticket for this spec moved to Done / closed with PR link (ADR-018)
-- [ ] Promotions above executed (if any)
+- [x] `proposal.md` frontmatter set to `status: archived` — AC1-AC14 ticked at the same time; every one is evidenced in the table above, and leaving them blank would have archived a spec that understates itself
+- [x] Folder moved: `specs/HIVE-322-commit-outbox/` -> `specs/archive/HIVE-322-commit-outbox/`
+- [x] Bitácora board ticket for this spec moved to Done / closed with PR link (ADR-018) — [#322](https://github.com/mlorentedev/hive/issues/322) closed 2026-08-09T03:03:32Z by the [#354](https://github.com/mlorentedev/hive/pull/354) merge, which the board workflow moves to Done automatically
+- [x] Promotions above executed (if any) — verified already landed rather than re-created: both lessons are in `docs/lessons.md` (the `--no-optional-locks` one and the flake-proof benchmark shape), and ADR-018 exists at `docs/adr/adr-018-asynchronous-commit-queue.md`. The pattern candidate stays declined at one project
+
+## Adversarial review verdict
+
+**PASS WITH GAPS** (2026-08-09), run from a different session than the one that implemented the change. No blockers. All 18 tests named in the evidence table were confirmed to exist by name rather than by suite. The two load-bearing invariants were re-derived from the code rather than trusted: AC7 holds because the only `git add -A` in `src/` is reachable from `vault_commit` alone, and AC13 because `_git_commit` wraps both Popens in `_git_filelock`. Rubric: Verification A, Maintainability A, Handoff-readiness A, Correctness B, Scope B, Reliability B. The gaps are the three findings recorded above.

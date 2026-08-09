@@ -23,6 +23,7 @@ from hive._helpers import (
     evict_filelock,
     find_lesson_heading,
     tool_span,
+    vault_git_startup_warning,
     vault_startup_warning,
 )
 
@@ -259,6 +260,48 @@ class TestFilelockPath:
         assert str(_filelock_path(tmp_path)) in _GIT_FILELOCKS
         assert evict_filelock(tmp_path) is True
         assert str(_filelock_path(tmp_path)) not in _GIT_FILELOCKS
+
+
+class TestVaultGitStartupWarning:
+    """Tests for vault_git_startup_warning — the vault exists but carries no
+    repository, so every deferred flush fails while writes keep reporting
+    success (ADR-018)."""
+
+    def test_git_vault_produces_no_warning(self, git_vault: Path) -> None:
+        """The discriminating half: a real repository must stay silent."""
+        assert vault_git_startup_warning(git_vault) == ""
+
+    def test_plain_dir_flags_missing_repo(self, tmp_path: Path) -> None:
+        """A directory with no repository -> loud WHY/FIX naming the fix."""
+        msg = vault_git_startup_warning(tmp_path)
+        assert msg
+        assert str(tmp_path) in msg
+        assert "git init" in msg
+        assert "WHY" in msg
+        assert "FIX" in msg
+
+    def test_missing_dir_defers_to_the_existence_warning(self, tmp_path: Path) -> None:
+        """A path that does not exist is not also a non-repository.
+
+        Both warnings fire from the same startup block, and reporting a
+        missing directory twice under two different headings would send the
+        reader chasing `git init` for a path that is not there at all.
+        """
+        assert vault_git_startup_warning(tmp_path / "gone") == ""
+
+    def test_a_lone_dot_git_dir_is_not_a_repository(self, tmp_path: Path) -> None:
+        """Presence of `.git/` is not evidence, which is why git is asked.
+
+        `_git_filelock` writes `vault/.git/hive.lock` and creates the parent
+        as a side effect, so after one hive run a non-repository vault has a
+        `.git/` directory. A presence check would go quiet exactly once the
+        problem had been active long enough to matter.
+        """
+        (tmp_path / ".git").mkdir()
+        (tmp_path / ".git" / "hive.lock").write_text("")
+        msg = vault_git_startup_warning(tmp_path)
+        assert msg, "a .git/ dir holding only a lock file is not a repository"
+        assert "git init" in msg
 
 
 class TestToolSpan:
