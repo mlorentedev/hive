@@ -9,6 +9,7 @@ cross-OS risk actually lives.
 
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
 import sys
@@ -1129,3 +1130,109 @@ async def test_vault_commit_still_sweeps_foreign_working_tree_edits(
     assert count == 0, f"the vault is still dirty after an explicit flush: {count}"
 
     ctx.reconciler.close()
+
+
+# ── The ADR-010 hand-off survives the queue ─────────────────────────────
+
+
+def _install_obsidian_git_config(vault: Path, interval_minutes: int = 10) -> None:
+    """Make ``detect_obsidian_git`` see the plugin as installed.
+
+    Mirrors ``test_detect_and_defer``'s fixture rather than importing it —
+    the predicate itself is exercised for real here, not stubbed, so the
+    test fails if the queue path and the write path ever disagree about
+    what "an external committer is handling this" means.
+    """
+    cfg_dir = vault / ".obsidian" / "plugins" / "obsidian-git"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "data.json").write_text(
+        json.dumps({"commitInterval": interval_minutes}),
+        encoding="utf-8",
+    )
+
+
+@_POSIX_ONLY
+def test_tick_defers_to_a_healthy_external_committer_and_commits_otherwise(
+    git_vault: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A drain hands off to obsidian-git when it is healthy; else it commits.
+
+    Deferral is now the default, so every write is queued whether or not an
+    external committer exists. A reconciler that committed on every tick
+    would therefore defeat the ADR-010 hand-off *silently* — the write path
+    still consults the predicate, but only on the `commit=True` branch that
+    the default flip made rare. Evaluating it at drain time keeps the
+    decision in one place instead of two competing deferral mechanisms.
+
+    The paths are **drained, not left queued**: they stay on disk for
+    obsidian-git to pick up, and until it does they remain visible in the
+    uncommitted-path report. That composition is the intended behaviour, not
+    a leak — the report describes the working tree, whoever is committing it.
+    """
+    from hive._commit_queue import CommitReconciler
+    from hive._helpers import uncommitted_summary
+
+    _install_obsidian_git_config(git_vault)
+    # A large tick disables the loop, so the drains below are the only ones.
+    reconciler = CommitReconciler(git_vault, tick_s=3600.0)
+    try:
+        # ── Healthy external committer: drain, hand off, do not commit ──
+        monkeypatch.setenv("HIVE_AUTO_DEFER_TO_EXTERNAL_COMMITTER", "true")
+        deferred = _write(git_vault, "10_projects/testproject/left-for-obsidian.md")
+        reconciler.enqueue(deferred)
+
+        before = _rev_count(git_vault)
+        assert reconciler.flush_now() is False, "the drain committed despite the hand-off"
+        assert _rev_count(git_vault) == before, "hive committed over obsidian-git"
+        assert len(reconciler.queue) == 0, "a deferred drain must still drain"
+        assert deferred.exists(), "the file must stay on disk for obsidian-git"
+        # Handing off is work, so the stall detector must see a fresh drain.
+        assert reconciler.last_flush_at is not None
+        # Still owed a commit, and still visible as such.
+        count, _oldest = uncommitted_summary(git_vault)
+        assert count is not None
+        assert count >= 1, "a handed-off path must remain in the uncommitted report"
+
+        # ── No external committer: the same tick commits ───────────────
+        monkeypatch.delenv("HIVE_AUTO_DEFER_TO_EXTERNAL_COMMITTER", raising=False)
+        committed = _write(git_vault, "10_projects/testproject/hive-commits-this.md")
+        reconciler.enqueue(committed)
+
+        before = _rev_count(git_vault)
+        assert reconciler.flush_now() is True, "the drain skipped a commit it owned"
+        assert _rev_count(git_vault) == before + 1
+        assert "10_projects/testproject/hive-commits-this.md" in _files_in_head(git_vault)
+    finally:
+        reconciler.close(drain=False)
+
+
+@_POSIX_ONLY
+def test_tick_commits_when_the_defer_predicate_cannot_be_evaluated(
+    git_vault: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unverifiable predicate falls back to committing, never to deferring.
+
+    Deferring on a predicate that raised would hand the paths to a committer
+    nobody confirmed exists, and with startup refusing to self-heal there is
+    no second chance to notice. Committing is the recoverable error of the
+    two, and it matches what the predicate itself already does when it finds
+    obsidian-git installed but broken.
+    """
+    from hive import _vault_write
+    from hive._commit_queue import CommitReconciler
+
+    def _boom(_vault: Path) -> bool:
+        raise RuntimeError("plugin config unreadable")
+
+    monkeypatch.setattr(_vault_write, "_should_defer_to_external_committer", _boom)
+
+    reconciler = CommitReconciler(git_vault, tick_s=3600.0)
+    try:
+        reconciler.enqueue(_write(git_vault, "10_projects/testproject/predicate-blew-up.md"))
+        before = _rev_count(git_vault)
+        assert reconciler.flush_now() is True
+        assert _rev_count(git_vault) == before + 1
+    finally:
+        reconciler.close(drain=False)

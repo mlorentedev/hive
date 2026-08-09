@@ -271,22 +271,63 @@ class CommitReconciler:
 
     # ── Drain path ──────────────────────────────────────────────────
 
+    def _defer_to_external_committer(self) -> bool:
+        """Is a healthy obsidian-git going to commit these paths for us?
+
+        Evaluated at *drain* time rather than write time. The write path
+        still consults the same predicate, but only on its ``commit=True``
+        branch — and the default flip made that branch the rare one, so a
+        reconciler committing on every tick would silently defeat the ADR-010
+        hand-off for essentially every write (ADR-018 §4).
+
+        An unevaluable predicate means **commit**, never defer. Deferring
+        would hand the paths to a committer nobody confirmed exists, and with
+        startup refusing to self-heal there is no second chance to notice.
+        That also matches the predicate's own fallback when it finds
+        obsidian-git installed but broken.
+
+        Imported locally: ``_vault_write`` imports this module, so a
+        top-level import would close the cycle. ``_helpers`` already reaches
+        for this predicate the same way.
+        """
+        try:
+            from hive._vault_write import _should_defer_to_external_committer
+
+            return _should_defer_to_external_committer(self.vault_path)
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("mcp.reconciler.defer_check_failed err=%s", exc)
+            return False
+
     def flush_now(self) -> bool:
         """Drain the queue and commit whatever it held. Never raises.
 
         Returns ``True`` only when a commit was created — ``False`` covers
-        both "nothing was queued" and "the commit failed", which are the
-        same thing to a caller: no new commit exists.
+        "nothing was queued", "the commit failed", and "an external committer
+        owns this", which are the same thing to a caller: no new commit
+        exists.
 
         ``last_flush_at`` is stamped only when a drain actually had paths
         to commit, successfully or not. An idle tick leaves it alone, so
         the value answers "when did work last happen" rather than "when
         did the loop last wake up" — the former is what a stalled-reconciler
-        check needs.
+        check needs. A hand-off to an external committer stamps it too:
+        deciding not to commit is work, and a reconciler cooperating with
+        obsidian-git must not read as a stalled one.
         """
         with self._flush_lock:
             paths = self.queue.drain()
             if not paths:
+                return False
+            if self._defer_to_external_committer():
+                # Drained, deliberately uncommitted. The files stay on disk
+                # for obsidian-git, and until it commits them they remain in
+                # the uncommitted-path report — that report describes the
+                # working tree, whoever owns committing it (ADR-018 §3).
+                self.last_flush_at = time.time()
+                _log.info(
+                    "mcp.reconciler.flush_deferred_to_external paths=%d",
+                    len(paths),
+                )
                 return False
             message = _batch_message(paths)
             committed = flush_paths(
