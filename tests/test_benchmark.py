@@ -8,8 +8,10 @@ Run with: pytest tests/test_benchmark.py -v -s
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
+import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
@@ -33,6 +35,19 @@ def _tokens(text: str) -> int:
 
 def _text(result: ToolResult) -> str:
     return result.content[0].text  # type: ignore[union-attr]
+
+
+def _rev_count(vault: Path) -> int:
+    """Commits on HEAD — the quantity ADR-018 exists to decouple from writes."""
+    return int(
+        subprocess.run(  # noqa: S603, S607
+            ["git", "rev-list", "--count", "HEAD"],
+            cwd=vault,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    )
 
 
 def _count_file_tokens(path: Path) -> int:
@@ -550,6 +565,87 @@ class TestWriteThroughputBenchmark:
 
         assert baseline_total > 0
         assert batched_total > 0
+
+    async def test_commit_count_is_bounded_by_the_tick_not_the_write_count(
+        self,
+        git_vault: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """AC3: 10 concurrent writers, commits bounded by elapsed/tick.
+
+        This is the measurement ADR-018 exists to produce. The daemon fixed
+        tail *fairness* (a 1389.6 ms worst case became a fair 417.5 ms queue)
+        but not the *ceiling* — ~30-33 writes/s either way, because git
+        commits against one repository serialize no matter who asks. Only
+        committing less often raises it, which is what this asserts.
+
+        The assertion bounds a **count** and adapts to measured time, so it
+        cannot flake the way a throughput threshold would. The reconciler
+        structurally cannot commit more than once per tick (``_flush_lock``
+        plus the loop's ``wait(tick_s)``), plus one final drain at ``close``.
+        A slow machine inflates ``elapsed`` and therefore *loosens* the
+        bound; contention can only delay commits, never manufacture them.
+
+        ``elapsed`` is measured around ``close()`` too — stop the clock
+        earlier and the shutdown drain's commit lands outside the bound
+        being asserted.
+        """
+        import math
+        import time
+
+        tick_s = 0.5
+        writers, per_writer = 10, 20
+        total_writes = writers * per_writer
+
+        # The reconciler reads its tick in __init__, so this must precede
+        # create_server.
+        monkeypatch.setenv("HIVE_COMMIT_TICK_S", str(tick_s))
+        mcp = create_server(vault_path=git_vault)
+        ctx = mcp._hive_ctx  # type: ignore[attr-defined]
+
+        async def _writer(writer_id: int) -> None:
+            for i in range(per_writer):
+                await mcp.call_tool(
+                    "vault_write",
+                    {
+                        "project": "testproject",
+                        "path": f"bench/w{writer_id}-{i}.md",
+                        "content": f"# writer {writer_id} note {i}\n",
+                    },
+                )
+
+        before = _rev_count(git_vault)
+        t0 = time.perf_counter()
+        await asyncio.gather(*(_writer(w) for w in range(writers)))
+        ctx.reconciler.close()
+        elapsed = time.perf_counter() - t0
+        commits = _rev_count(git_vault) - before
+
+        # +2: the tick boundary the run starts on, and the shutdown drain.
+        bound = math.ceil(elapsed / tick_s) + 2
+
+        print(f"\n{'=' * 72}")
+        print("HIVE-322 commit rate — bounded by the tick, not the write count")
+        print(f"{'=' * 72}")
+        print(f"  Concurrent writers    : {writers}")
+        print(f"  Writes                : {total_writes}")
+        print(f"  Tick                  : {tick_s:.1f} s")
+        print(f"  Elapsed               : {elapsed:.2f} s")
+        print(f"  Commits               : {commits}  (bound {bound})")
+        print(f"  Writes per commit     : {total_writes / max(commits, 1):.1f}")
+
+        # Precondition, not a result: if the load ever shrinks until the
+        # bound exceeds the write count, the test would pass while proving
+        # nothing. Fail loudly instead of silently going vacuous.
+        assert bound < total_writes, (
+            f"load too small to discriminate: bound {bound} >= {total_writes} writes"
+        )
+        assert commits >= 1, "nothing committed at all — the reconciler never ran"
+        assert commits <= bound, (
+            f"{commits} commits for {total_writes} writes in {elapsed:.2f}s "
+            f"exceeds elapsed/tick + 2 = {bound}; commit rate is tracking "
+            f"write volume again"
+        )
 
     async def test_multi_patch_vs_sequential_patches(
         self,

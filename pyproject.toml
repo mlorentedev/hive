@@ -115,6 +115,6 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "smoke: end-to-end tests against real Ollama/OpenRouter (skip in CI)",
-    "cross_worker: HIVE-116 multi-process integration tests (excluded from default run, requires fake-git PATH fixture)",
+    "cross_worker: multi-process integration tests and benchmarks (excluded from default run; the HIVE-116 lock tests also require a fake-git PATH fixture)",
 ]
 addopts = "-m 'not smoke and not cross_worker'"

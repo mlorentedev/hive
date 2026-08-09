@@ -7,6 +7,7 @@ import logging.handlers
 import os
 import sys
 import time
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -17,12 +18,14 @@ _hive_compat.apply()
 from fastmcp import FastMCP  # noqa: E402
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from pathlib import Path
 
     from fastmcp.server.auth import AuthProvider
     from starlette.requests import Request
     from starlette.responses import Response
 
+from hive._commit_queue import CommitReconciler  # noqa: E402
 from hive._context import ServerContext  # noqa: E402
 from hive._diagnostics import LifecycleMiddleware  # noqa: E402
 from hive._helpers import (  # noqa: E402
@@ -193,15 +196,46 @@ def create_server(
         synth_model=synth_model if synth_model is not None else settings.synth_model,
         started_at_iso=datetime.now(UTC).isoformat(timespec="seconds"),
         started_at_monotonic=time.monotonic(),
+        # ADR-018: one reconciler per serving process. Built here rather
+        # than lazily because create_server() is only reached when hive is
+        # actually going to serve — `hive --version` and `hive service
+        # install` are dispatched before this point and never construct a
+        # context, so no short-lived CLI invocation gets a live thread.
+        reconciler=CommitReconciler(resolved_path),
     )
     # HIVE-116 PR-2: register tracker as the process-global supervisor
     # singleton so ``tool_span`` / ``bounded_call`` can persist eviction
     # events without taking a ServerContext arg (would create a cycle).
     register_lock_eviction_tracker(lock_eviction)
 
+    @asynccontextmanager
+    async def _lifespan(_app: object) -> AsyncIterator[None]:
+        """Drain the commit queue on clean shutdown (ADR-018 AC6).
+
+        The lifespan is the one teardown seam both transports share: the
+        stdio run fires it, and the daemon's ``http_app(lifespan="on")``
+        fires it during uvicorn's graceful shutdown. A drain hung off
+        ``finally`` would not do — ``_daemon`` records that uvicorn's
+        SIGTERM handling exits via the signal, bypassing ``finally`` and
+        ``atexit``, and SIGTERM is exactly how systemd stops the daemon.
+
+        Shutdown must not fail because a commit failed, so the drain is
+        best-effort: whatever it cannot commit stays on disk and is
+        reported rather than lost.
+        """
+        try:
+            yield
+        finally:
+            if ctx.reconciler is not None:
+                try:
+                    ctx.reconciler.close()
+                except Exception as exc:  # noqa: BLE001
+                    logging.getLogger("hive").warning("hive.shutdown.drain_failed err=%s", exc)
+
     mcp = FastMCP(
         "Hive",
         auth=auth,
+        lifespan=_lifespan,
         middleware=[LifecycleMiddleware()],
         instructions=(
             "Hive provides on-demand access to an Obsidian vault.\n\n"

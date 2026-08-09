@@ -153,6 +153,13 @@ async def _client_appends(env: dict[str, str], markers: list[str]) -> int:
                     "section": "context",
                     "operation": "append",
                     "content": f"\n{marker}\n",
+                    # commit=True explicitly: these tests use the commit as an
+                    # *instrument* to observe single-owner serialization, not as
+                    # the subject under test. Since ADR-018 made deferral the
+                    # default, an implicit commit no longer lands inside the
+                    # call, and the instrument would read empty for a reason
+                    # that has nothing to do with serialization.
+                    "commit": True,
                 },
             )
             done += 1

@@ -109,7 +109,7 @@ La configuración de mayor valor:
 2. **[Obsidian Git](https://github.com/Vinzent03/obsidian-git)** — auto-commit de cambios del vault en un horario programado (5–10 min recomendado)
 3. **Hive** — conecta tu vault con cualquier asistente de IA vía MCP
 
-Tu asistente escribe en el vault → Obsidian Git hace auto-commit → en la siguiente sesión, todo está ahí. Sin sincronización manual. Para flujos con muchas escrituras, combina `vault_write(commit=False)` con el plugin — Hive difiere cada commit, el plugin los agrupa; ver [Configuración → Configuración recomendada](/es/configuration/#configuración-recomendada).
+Tu asistente escribe en el vault → Obsidian Git hace auto-commit → en la siguiente sesión, todo está ahí. Sin sincronización manual. Los flujos con muchas escrituras no necesitan flags extra: Hive difiere los commits a un tick del reconciler por defecto, y puede cederle el commit al plugin por completo; ver [Configuración → Configuración recomendada](/es/configuration/#configuración-recomendada).
 
 > Hive funciona con cualquier directorio de Markdown — Obsidian es recomendado, no obligatorio.
 

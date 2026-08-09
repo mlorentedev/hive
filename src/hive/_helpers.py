@@ -16,6 +16,7 @@ import threading
 import time
 from collections import deque
 from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -1488,8 +1489,14 @@ def _git_commit(
     vault_path: Path,
     rel_paths: list[Path],
     message: str,
-) -> None:
+) -> bool:
     """Stage one or more files and commit them in a single git invocation.
+
+    Returns ``True`` when a commit was created, ``False`` on any failure
+    (lock timeout, git error, external termination). The boolean is what
+    the ADR-018 reconciler predicates its drop-on-failure branch on; every
+    pre-existing caller ignores it and keeps the best-effort contract
+    below unchanged — failures are still logged and never raised.
 
     Accepts a list of paths so a multi-write tool (``vault_patch`` with N
     patches, ``capture_lesson`` batch with N lessons) issues exactly one
@@ -1519,7 +1526,7 @@ def _git_commit(
     """
     if not rel_paths:
         _log.debug("git commit no-op: empty path list")
-        return
+        return False
     safe_msg = message.replace("\n", " ").replace("\r", " ")
     path_strs = [str(p) for p in rel_paths]
     if not _acquire_with_telemetry(_GIT_LOCK, "_GIT_LOCK"):
@@ -1528,7 +1535,7 @@ def _git_commit(
             path_strs,
             _lock_timeout(),
         )
-        return
+        return False
     try:
         try:
             with _filelock_with_telemetry(_git_filelock(vault_path), "_git_filelock"):
@@ -1542,7 +1549,7 @@ def _git_commit(
                         cause,
                         err.strip(),
                     )
-                    return
+                    return False
                 rc, _, err = _run_git(_commit_args(safe_msg), vault_path)
                 if rc != 0:
                     cause = "external_termination" if rc == RC_EXTERNAL_TERMINATION else "git_error"
@@ -1553,6 +1560,8 @@ def _git_commit(
                         cause,
                         err.strip(),
                     )
+                    return False
+                return True
         except filelock.Timeout:
             _log.warning(
                 "git commit skipped for %s: inter-process lock timeout (%ds)",
@@ -1567,6 +1576,7 @@ def _git_commit(
             )
     finally:
         _GIT_LOCK.release()
+    return False
 
 
 def _git_commit_all(
@@ -1613,6 +1623,145 @@ def _git_commit_all(
             return "error", f"unexpected: {type(exc).__name__}: {exc}"
     finally:
         _GIT_LOCK.release()
+
+
+# ── Uncommitted-path enumeration (ADR-018 §3 — AC9 + AC11) ──────────────
+#
+# `--no-optional-locks` is load-bearing, not tidiness: a plain `git status`
+# refreshes the index and takes `.git/index.lock`, so an unflagged reporter
+# would contend with the reconciler's commit — and at daemon boot it could
+# re-create the very lock `_startup_self_heal` exists to clear.
+#
+# `-z` because porcelain v1 quotes paths with special characters under
+# `core.quotePath`; NUL-separation sidesteps unquoting entirely. `-uall`
+# expands untracked directories, which the default collapses to one entry —
+# a new folder of 50 orphaned notes must not report as a single pending path.
+_UNCOMMITTED_STATUS_ARGS = [
+    "--no-optional-locks",
+    "status",
+    "--porcelain",
+    "-z",
+    "--untracked-files=all",
+]
+# "XY PATH" — two status columns, a space, then at least one path character.
+_MIN_PORCELAIN_ENTRY_LEN = 4
+
+
+@dataclass(frozen=True)
+class UncommittedPath:
+    """One vault path that is on disk with no commit behind it.
+
+    ``mtime`` is ``None`` for a path git reports but cannot be stat'd — a
+    deletion, most often. Such a path still *counts*; it just cannot
+    contribute an age.
+    """
+
+    rel_path: str
+    status: str
+    mtime: float | None
+
+
+def _path_mtime(path: Path) -> float | None:
+    """Modification time, or ``None`` when the file cannot be stat'd."""
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
+def _parse_porcelain_z(payload: str, vault_path: Path) -> list[UncommittedPath]:
+    """Parse ``git status --porcelain -z`` into one entry per path.
+
+    Renames and copies emit their *source* path as a second NUL-terminated
+    field right after the entry. It must be consumed explicitly: leave it in
+    the stream and it is read as the next ``XY PATH`` record, which skews
+    every path after it rather than failing loudly.
+    """
+    fields = payload.split("\0")
+    found: list[UncommittedPath] = []
+    index = 0
+    while index < len(fields):
+        entry = fields[index]
+        index += 1
+        # The final NUL leaves a trailing empty field; so would any garbage.
+        if len(entry) < _MIN_PORCELAIN_ENTRY_LEN:
+            continue
+        status = entry[:2]
+        rel_path = entry[3:]
+        if "R" in status or "C" in status:
+            index += 1  # discard the source path
+        found.append(
+            UncommittedPath(
+                rel_path=rel_path,
+                status=status,
+                mtime=_path_mtime(vault_path / rel_path),
+            ),
+        )
+    return found
+
+
+def uncommitted_paths(vault_path: Path) -> list[UncommittedPath] | None:
+    """Vault paths awaiting a commit, or ``None`` when git could not say.
+
+    ``None`` is not an empty list, and the distinction is the whole point.
+    With ADR-018 §3 refusing to self-heal, this report is the *entire*
+    recovery signal for a path dropped by a failed flush (AC14) or orphaned
+    by a hard kill — so answering "clean" when git actually failed would
+    turn a visible backlog into silent data rot.
+
+    No provenance filtering, deliberately: a path is reported whoever wrote
+    it. That is exactly what makes report-only safe where committing is not,
+    and it keeps the enumerator free of any ``ServerContext`` so daemon
+    startup can call it before one exists.
+
+    Missing ``.git`` short-circuits rather than letting git walk upwards —
+    a vault nested inside an unrelated repo would otherwise report that
+    repo's state, with paths relative to the wrong root.
+    """
+    if not (vault_path / ".git").exists():
+        return None
+    try:
+        rc, out, err = _run_git(_UNCOMMITTED_STATUS_ARGS, vault_path)
+    except Exception as exc:  # noqa: BLE001
+        # Broad by policy: git invocations raise FileNotFoundError and worse
+        # on Windows, and an unreadable report must never break its caller.
+        _log.warning("uncommitted-path enumeration failed for %s: %s", vault_path, exc)
+        return None
+    if rc != 0:
+        _log.warning(
+            "uncommitted-path enumeration failed for %s rc=%s err=%s",
+            vault_path,
+            rc,
+            err.strip() or "<empty>",
+        )
+        return None
+    return _parse_porcelain_z(out, vault_path)
+
+
+def uncommitted_summary(
+    vault_path: Path,
+    *,
+    now: float | None = None,
+) -> tuple[int | None, float | None]:
+    """``(count, oldest_age_s)`` for the uncommitted-path report.
+
+    Both are ``None`` when enumeration failed, preserving the unknown/clean
+    distinction its callers render. ``oldest_age_s`` alone is ``None`` when
+    nothing pending could be stat'd.
+
+    Age comes from mtime because it is the only provenance-free signal
+    available — anything sharper needs the write-path persistence ADR-018 §3
+    rejects. Known skew: re-editing a pending file advances its mtime, so
+    the reported age *under*estimates how long the commit has been owed.
+    """
+    found = uncommitted_paths(vault_path)
+    if found is None:
+        return None, None
+    mtimes = [p.mtime for p in found if p.mtime is not None]
+    if not mtimes:
+        return len(found), None
+    reference = time.time() if now is None else now
+    return len(found), max(0.0, reference - min(mtimes))
 
 
 def _is_external_committer_healthy(

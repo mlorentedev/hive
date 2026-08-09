@@ -150,9 +150,29 @@ Los problemas se categorizan como `[error]` o `[warning]` con ruta del archivo y
 
 **Bloque de runtime** (`include_runtime=True`, opt-in): Diagnósticos dinámicos al final del reporte — uptime en segundos, número + nombres de tools MCP registrados (sanity check de que ningún módulo falló al registrarse), y snapshot del presupuesto OpenRouter (`spent_usd`, `cap_usd`, `period`). Independiente de `include_usage`; ambos pueden combinarse en una sola llamada.
 
+Dos bloques ahí informan sobre los [commits diferidos](#commits-diferidos-semántica-de-ack). `commit_queue` da `depth`, `last_flush_age_s` y `tick_s` — la profundidad solo es interpretable frente al tick que se supone que la está vaciando, así que un reconciler atascado se ve como una profundidad que sobrevive a varios ticks. `uncommitted` da `count` y `oldest_age_s` de las rutas del vault que siguen esperando commit; `null` ahí significa que git no pudo responder, que no es la misma respuesta que `0`. Los dos se solapan a mitad de tick, y eso es cierto — una ruta encolada está realmente sin commitear en disco.
+
+## Commits diferidos (semántica de ACK)
+
+**Cambio incompatible — sale en una release mayor.** Que `vault_write` o `vault_patch` devuelvan con éxito ya no significa que exista un commit.
+
+El commit salió del camino de escritura. Una escritura aterriza en disco, su ruta se encola, y un hilo reconciler vacía la cola en **un commit por tick** (`HIVE_COMMIT_TICK_S`, 5s por defecto) en vez de un commit por escritura. La tasa de commits pasa a ser función del tick y no del volumen de escrituras, que es lo que levanta el techo de rendimiento: los commits de git contra un mismo repositorio se serializan, así que la única forma de ir más rápido es commitear menos veces.
+
+| Si quieres | Pasa |
+|---|---|
+| El comportamiento síncrono anterior | `commit=True` — commitea antes de devolver |
+| El comportamiento por defecto | nada — se encola y se commitea en el siguiente tick |
+| Hacer flush ya | [`vault_commit`](#vault_commit) |
+
+Lo que garantiza el comportamiento por defecto es estrecho, y a propósito: **la escritura llegó a disco antes de que su ruta se encolara.** Todo lo posterior es best-effort. Un tick puede legítimamente no producir ningún commit (ver [integración con obsidian-git](/es/guides/obsidian-git-integration/)), y un proceso muerto antes de su tick deja la ruta en disco sin commitear.
+
+`commit=False` ya no significa "que siga sin commitear hasta que yo haga flush" — ahora es un alias del comportamiento por defecto. El modo de diferido indefinido está **eliminado**, no conservado. Para lo que existía — agrupar muchas escrituras y pagar un solo commit — es justo lo que la cola hace ahora de forma automática y sin configuración.
+
+**Nada recupera automáticamente un commit perdido.** Una ruta huérfana espera a la siguiente escritura sobre ese vault, a un `vault_commit` explícito, o a un committer externo. Mientras tanto sigue visible bajo `uncommitted` en [`vault_health(include_runtime=True)`](#vault_health) — el número y la edad de la más antigua. Ese reporte es la señal de recuperación, no un adorno, así que ojo: `count: null` significa que git no pudo responder, que no es la misma respuesta que `count: 0`.
+
 ## vault_write
 
-Crea, agrega o reemplaza archivos del vault con validación de frontmatter. Hace auto-commit a git por defecto; pasa `commit=False` para diferir el commit y hacer flush de un lote más tarde vía [`vault_commit`](#vault_commit).
+Crea, agrega o reemplaza archivos del vault con validación de frontmatter. El commit se [difiere al siguiente tick](#commits-diferidos-semántica-de-ack); pasa `commit=True` para commitear de forma síncrona antes de devolver.
 
 ```python
 # Agregar a un archivo existente
@@ -185,7 +205,7 @@ vault_write(
 - **replace**: Reemplaza el archivo completo. Requiere frontmatter YAML válido con `id`, `type`, `status`
 - **create**: Crea un nuevo archivo. Auto-genera frontmatter con `id`, `type`, `status: draft`, `created: hoy`
 
-Todas las operaciones hacen auto-commit a git por defecto. Pasa `commit=False` para diferir el commit — el archivo se escribe en disco pero `git status` lo seguirá mostrando como modificado. Haz flush de un lote más tarde con [`vault_commit`](#vault_commit), o deja que un committer externo (p. ej. el auto-commit de obsidian-git) lo recoja. Ver [Configuración → Configuración recomendada](/es/configuration/#configuración-recomendada) para el contrato de durabilidad.
+Las tres operaciones difieren su commit al siguiente tick del reconciler. El archivo está en disco cuando la llamada devuelve; `git status` lo muestra como modificado hasta que salta el tick. Pasa `commit=True` para commitear antes de devolver, haz flush ya con [`vault_commit`](#vault_commit), o deja que un committer externo (p. ej. el auto-commit de obsidian-git) lo recoja — ver [Commits diferidos](#commits-diferidos-semántica-de-ack) para el contrato completo y [Configuración → Configuración recomendada](/es/configuration/#configuración-recomendada) para la durabilidad.
 
 ## vault_patch
 
@@ -211,17 +231,19 @@ vault_patch(
 )
 ```
 
-Reemplaza exactamente una ocurrencia de `find` con `replace`. Rechaza coincidencias ambiguas — si `find` aparece más de una vez, la operación falla con un error pidiendo más contexto. Usa coincidencia en cascada de 3 pasadas: exacta → solo cuerpo → normalizada por espacios. Auto-commit a git por defecto; pasa `commit=False` para diferir el commit (mismo contrato que `vault_write`).
+Reemplaza exactamente una ocurrencia de `find` con `replace`. Rechaza coincidencias ambiguas — si `find` aparece más de una vez, la operación falla con un error pidiendo más contexto. Usa coincidencia en cascada de 3 pasadas: exacta → solo cuerpo → normalizada por espacios. El commit se [difiere al siguiente tick](#commits-diferidos-semántica-de-ack), mismo contrato que `vault_write`; pasa `commit=True` para commitear de forma síncrona.
 
 ## vault_commit
 
-Hace flush de todas las escrituras pendientes en un único commit de git. Compañera de `vault_write(commit=False)` y `vault_patch(commit=False)`.
+Hace flush del árbol de trabajo en un único commit de git, sin esperar a un tick.
 
 ```python
 vault_commit(message="vault: checkpoint fin de sesión")
 ```
 
 Stage todo lo modificado en el vault (`git add -A`) y crea un único commit. Devuelve el nuevo SHA, un aviso de árbol limpio si no hay nada modificado, o un error legible. Idealmente combinado con el plugin obsidian-git (ver [Configuración → Configuración recomendada](/es/configuration/#configuración-recomendada)).
+
+Este es el **único** camino que barre el árbol de trabajo entero, y es deliberado: hace stage de ediciones que hive nunca hizo, incluido tu propio trabajo a medias. Una persona que pide un flush ha consentido eso; un temporizador no, y por eso el reconciler solo commitea rutas que él mismo encoló. Es además el remedio para todo lo que el reporte de [`vault_health`](#vault_health) muestre como sin commitear, ya que nada de eso se resuelve solo.
 
 ## vault_delete
 
@@ -236,7 +258,9 @@ vault_delete(
 )
 ```
 
-Elimina un fichero y commitea el borrado, de modo que sigue siendo recuperable vía `git revert` / `git show`. **Solo ficheros** — los directorios se rechazan. Una ruta inexistente es un error, salvo que se pase `idempotency_key`, en cuyo caso un reintento sobre un fichero ya eliminado es un no-op con éxito. Pasa `commit=False` para diferir el commit (mismo contrato de durabilidad que `vault_write`).
+Elimina un fichero y commitea el borrado, de modo que sigue siendo recuperable vía `git revert` / `git show`. **Solo ficheros** — los directorios se rechazan. Una ruta inexistente es un error, salvo que se pase `idempotency_key`, en cuyo caso un reintento sobre un fichero ya eliminado es un no-op con éxito.
+
+`vault_delete` es la única tool de escritura que **no** pasó a commits diferidos. Se queda fuera de la cola por completo y sigue commiteando de forma síncrona por defecto, porque una granularidad de commit más gruesa es justo lo que debilitaría su garantía de recuperabilidad: un borrado y una recreación dentro del mismo tick colapsan en un único estado, y no queda nada a lo que hacer `git revert`. Por eso `commit=False` aquí deja el borrado sin commitear y sin cola detrás — haz flush tú mismo con [`vault_commit`](#vault_commit).
 
 ## capture_lesson
 

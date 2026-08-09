@@ -60,7 +60,20 @@ def _commit_count(vault: Path) -> int:
 
 @pytest.mark.asyncio
 class TestCommitFalseLeavesFileDirty:
-    """vault_write(commit=False) / vault_patch(commit=False) skip git commit."""
+    """vault_write(commit=False) / vault_patch(commit=False) skip git commit.
+
+    The *call path* contract these tests were written for is unchanged and
+    still asserted: no commit happens while the tool runs, and the file is
+    dirty when it returns.
+
+    What ADR-018 §4 changed is the promise made afterwards. HIVE-104's
+    ``commit=False`` meant "held indefinitely until you call
+    ``vault_commit``"; that indefinite-deferral mode is removed, and the
+    path is now handed to the reconciler, which commits it on its next
+    tick. The response says so. Left in this class rather than moved,
+    because "commit=False does not commit here" is still exactly what is
+    being verified.
+    """
 
     async def test_vault_write_commit_false_leaves_file_dirty(
         self,
@@ -84,8 +97,8 @@ class TestCommitFalseLeavesFileDirty:
         assert _commit_count(git_vault) == before
         # File is dirty in working tree
         assert "11-tasks.md" in _porcelain(git_vault)
-        # Response signals uncommitted state
-        assert "uncommitted" in result.lower()
+        # Response signals a commit is owed but not yet made (ADR-018 §4).
+        assert "queued" in result.lower()
 
     async def test_vault_patch_commit_false_leaves_file_dirty(
         self,
@@ -107,12 +120,22 @@ class TestCommitFalseLeavesFileDirty:
         )
         assert _commit_count(git_vault) == before
         assert "11-tasks.md" in _porcelain(git_vault)
-        assert "uncommitted" in result.lower()
+        assert "queued" in result.lower()
 
-    async def test_vault_write_default_commits(self, git_vault: Path) -> None:
-        """Default commit=True must keep current behavior (additive change)."""
+    async def test_vault_write_default_defers(self, git_vault: Path) -> None:
+        """The default no longer commits — ADR-018 §4 reversed this deliberately.
+
+        HIVE-104 shipped deferral as an opt-in and measured 4.8x/10.4x, and
+        agents still avoided the MCP for writes. The measured problem was
+        caused by the *default*, so the default is what changed: a successful
+        write no longer implies a commit exists.
+
+        The write still reaches git — the reconciler commits it on its next
+        tick, asserted here by flushing explicitly rather than by sleeping.
+        """
         before = _commit_count(git_vault)
         mcp = create_server(vault_path=git_vault)
+        ctx = mcp._hive_ctx  # type: ignore[attr-defined]
         await mcp.call_tool(
             "vault_write",
             {
@@ -122,8 +145,15 @@ class TestCommitFalseLeavesFileDirty:
                 "content": "\n- [ ] task\n",
             },
         )
+        # No commit in the call path, and the file is dirty on return.
+        assert _commit_count(git_vault) == before
+        assert _porcelain(git_vault) != ""
+
+        # But a commit is owed, and the tick delivers it.
+        assert ctx.reconciler.flush_now() is True
         assert _commit_count(git_vault) == before + 1
         assert _porcelain(git_vault) == ""
+        ctx.reconciler.close()
 
 
 @pytest.mark.asyncio

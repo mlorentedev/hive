@@ -27,6 +27,38 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+def _contention_messages(caplog: pytest.LogCaptureFixture, lock_name: str) -> list[str]:
+    """``mcp.lock_contention`` messages for *lock_name* only.
+
+    Scoping to the lock under test is load-bearing, not tidiness. ``caplog``
+    captures the whole ``hive._helpers`` stream for the process, across every
+    thread — and these tests assert an exact record *count*. Filtering on
+    ``mcp.lock_contention`` alone therefore makes them hostage to any
+    concurrent acquire anywhere in the same interpreter: a background
+    reconciler or outbox thread taking ``_git_filelock`` mid-window turns an
+    expected 1 into a 2 and fails a test that did nothing wrong.
+
+    That is not hypothetical. ``test_filelock_with_telemetry_timeout_emits_and_reraises``
+    failed exactly once under the full ``make check`` suite while passing
+    alone, in a two-file run, and in three subsequent full runs (two plain,
+    one under coverage) — order- and timing-dependent, never reproduced.
+
+    The trailing space matches the ``lock=%s waited_ms=%d`` format, so
+    ``_TEST_LOCK`` cannot match a longer name that merely starts with it.
+
+    Note this narrows *which* records are counted, never how many are
+    required: a genuine regression that drops or duplicates this lock's own
+    record still fails, and a failure caused by something other than a
+    foreign record (a missing ``Timeout``, a broken logger chain) is
+    untouched by the scoping.
+    """
+    return [
+        msg
+        for r in caplog.records
+        if "mcp.lock_contention" in (msg := r.getMessage()) and f"lock={lock_name} " in msg
+    ]
+
+
 def test_lock_timeout_reads_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """`_lock_timeout()` returns ``settings.lock_timeout_s`` (env-tunable)."""
     monkeypatch.setenv("HIVE_LOCK_TIMEOUT_S", "42")
@@ -48,10 +80,9 @@ def test_acquire_with_telemetry_success_emits_log(
         finally:
             lock.release()
 
-    matching = [r for r in caplog.records if "mcp.lock_contention" in r.getMessage()]
+    matching = _contention_messages(caplog, "_TEST_LOCK")
     assert len(matching) == 1, f"expected 1 lock_contention log, got {len(matching)}"
-    msg = matching[0].getMessage()
-    assert "lock=_TEST_LOCK" in msg
+    msg = matching[0]
     assert "abandoned=false" in msg
     assert "waited_ms=" in msg
 
@@ -73,10 +104,9 @@ def test_acquire_with_telemetry_timeout_emits_abandoned_true(
     finally:
         lock.release()
 
-    matching = [r for r in caplog.records if "mcp.lock_contention" in r.getMessage()]
+    matching = _contention_messages(caplog, "_TEST_LOCK")
     assert len(matching) == 1
-    msg = matching[0].getMessage()
-    assert "lock=_TEST_LOCK" in msg
+    msg = matching[0]
     assert "abandoned=true" in msg
     assert "waited_ms=" in msg
 
@@ -115,10 +145,9 @@ def test_filelock_with_telemetry_success_emits_log(
     ):
         pass  # acquired, do nothing
 
-    matching = [r for r in caplog.records if "mcp.lock_contention" in r.getMessage()]
+    matching = _contention_messages(caplog, "_TEST_FILELOCK")
     assert len(matching) == 1
-    msg = matching[0].getMessage()
-    assert "lock=_TEST_FILELOCK" in msg
+    msg = matching[0]
     assert "abandoned=false" in msg
 
 
@@ -141,10 +170,9 @@ def test_filelock_with_telemetry_timeout_emits_and_reraises(
     finally:
         holder.release()
 
-    matching = [r for r in caplog.records if "mcp.lock_contention" in r.getMessage()]
+    matching = _contention_messages(caplog, "_TEST_FILELOCK")
     assert len(matching) == 1
-    assert "lock=_TEST_FILELOCK" in matching[0].getMessage()
-    assert "abandoned=true" in matching[0].getMessage()
+    assert "abandoned=true" in matching[0]
 
 
 # ── Rolling-window stats + compute helpers (HIVE-115 / ADR-009/010) ─────

@@ -1031,6 +1031,10 @@ class TestVaultWrite:
                 "section": "lessons",
                 "operation": "append",
                 "content": "\n## Git test\nCommitted.\n",
+                # commit=True since ADR-018 made deferral the default; this
+                # test is about the commit itself, not about which default
+                # produces it.
+                "commit": True,
             },
         )
         log = subprocess.run(
@@ -1429,6 +1433,10 @@ class TestVaultWriteCreate:
                 "content": "# New\n",
                 "doc_type": "lesson",
                 "operation": "create",
+                # commit=True since ADR-018 made deferral the default; this
+                # test is about the commit itself, not about which default
+                # produces it.
+                "commit": True,
             },
         )
         log = subprocess.run(
@@ -3304,6 +3312,10 @@ class TestVaultPatch:
                     {"find": "- [ ] Task one", "replace": "- [x] Task one"},
                     {"find": "- [x] Task two", "replace": "- [ ] Task two reopened"},
                 ],
+                # commit=True since ADR-018 made deferral the default; this
+                # test is about the commit itself, not about which default
+                # produces it.
+                "commit": True,
             },
         )
 

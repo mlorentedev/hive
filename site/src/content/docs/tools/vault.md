@@ -150,9 +150,29 @@ Issues are categorized as `[error]` or `[warning]` with file path and descriptio
 
 **Runtime block** (`include_runtime=True`, opt-in): Dynamic diagnostics layered after the report — uptime in seconds, count + names of MCP tools currently registered (sanity check that no module failed to register), and the OpenRouter budget snapshot (`spent_usd`, `cap_usd`, `period`). Independent of `include_usage`; both can stack in one call.
 
+Two blocks there report on [deferred commits](#deferred-commits-ack-semantics). `commit_queue` gives `depth`, `last_flush_age_s` and `tick_s` — the depth is only interpretable against the tick that is supposed to be clearing it, so a stalled reconciler shows up as a depth that outlives several ticks. `uncommitted` gives `count` and `oldest_age_s` for vault paths still awaiting a commit; `null` there means git could not answer, which is a different answer from `0`. The two overlap mid-tick, and that is truthful — a queued path really is uncommitted on disk.
+
+## Deferred commits (ACK semantics)
+
+**Breaking change — ships in a major release.** A successful `vault_write` or `vault_patch` no longer means a commit exists.
+
+The commit moved off the write path. A write lands on disk, its path is queued, and a reconciler thread drains the queue into **one commit per tick** (`HIVE_COMMIT_TICK_S`, default 5s) rather than one commit per write. Commit rate is now a function of the tick instead of write volume, which is what lifts the throughput ceiling: git commits against one repository serialize, so the only way to go faster is to commit less often.
+
+| You want | Pass |
+|---|---|
+| The previous synchronous behaviour | `commit=True` — commits before returning |
+| The default | nothing — queued, committed on the next tick |
+| To flush early | [`vault_commit`](#vault_commit) |
+
+What the default guarantees is narrow, deliberately: **the write reached disk before its path was queued.** Everything after that is best-effort. A tick may legitimately produce no commit at all (see [obsidian-git integration](/guides/obsidian-git-integration/)), and a process killed before its tick leaves the path on disk uncommitted.
+
+`commit=False` no longer means "stay uncommitted until I flush" — it is now an alias for the default. The indefinite-deferral mode is **removed**, not preserved. What it existed for — batch many writes, pay for one commit — is what the queue now does automatically and without configuration.
+
+**Nothing recovers a missed commit automatically.** An orphaned path waits for the next write to that vault, an explicit `vault_commit`, or an external committer. It stays visible the whole time under `uncommitted` in [`vault_health(include_runtime=True)`](#vault_health) — count plus the age of the oldest. That report is the recovery signal rather than a nicety, so note that `count: null` means git could not answer, which is not the same answer as `count: 0`.
+
 ## vault_write
 
-Create, append, or replace vault files with frontmatter validation. Auto-commits to git by default; pass `commit=False` to defer the commit and flush a batch later via [`vault_commit`](#vault_commit).
+Create, append, or replace vault files with frontmatter validation. The commit is [deferred to the next tick](#deferred-commits-ack-semantics); pass `commit=True` to commit synchronously before returning.
 
 ```python
 # Append to an existing file
@@ -185,7 +205,7 @@ vault_write(
 - **replace**: Replaces the entire file. Requires valid YAML frontmatter with `id`, `type`, `status`
 - **create**: Creates a new file. Auto-generates frontmatter with `id`, `type`, `status: draft`, `created: today`
 
-All operations auto-commit to git by default. Pass `commit=False` to defer the commit — the file is written to disk but `git status` will still show it dirty. Flush a batch later with [`vault_commit`](#vault_commit), or let an external committer (e.g. obsidian-git auto-commit) pick it up. See [Configuration → Recommended configuration](/configuration/#recommended-configuration) for the durability contract.
+All three operations defer their commit to the next reconciler tick. The file is on disk when the call returns; `git status` shows it dirty until the tick fires. Pass `commit=True` to commit before returning, flush early with [`vault_commit`](#vault_commit), or let an external committer (e.g. obsidian-git auto-commit) take it — see [Deferred commits](#deferred-commits-ack-semantics) for the full contract and [Configuration → Recommended configuration](/configuration/#recommended-configuration) for durability.
 
 ## vault_patch
 
@@ -211,17 +231,19 @@ vault_patch(
 )
 ```
 
-Replaces exactly one occurrence of `find` with `replace`. Rejects ambiguous matches — if `find` appears more than once, the operation fails with an error asking for more context. Uses 3-pass cascading match: exact → body-only → whitespace-normalized. Auto-commits to git by default; pass `commit=False` to defer the commit (same contract as `vault_write`).
+Replaces exactly one occurrence of `find` with `replace`. Rejects ambiguous matches — if `find` appears more than once, the operation fails with an error asking for more context. Uses 3-pass cascading match: exact → body-only → whitespace-normalized. The commit is [deferred to the next tick](#deferred-commits-ack-semantics), same contract as `vault_write`; pass `commit=True` to commit synchronously.
 
 ## vault_commit
 
-Flush every pending write into one git commit. Companion to `vault_write(commit=False)` and `vault_patch(commit=False)`.
+Flush the working tree into one git commit, without waiting for a tick.
 
 ```python
 vault_commit(message="vault: end-of-session checkpoint")
 ```
 
 Stages everything dirty in the vault (`git add -A`) and creates a single commit. Returns the new SHA, a clean-tree notice if nothing is dirty, or a human-readable error. Best paired with the obsidian-git plugin (see [Configuration → Recommended configuration](/configuration/#recommended-configuration)).
+
+This is the **only** path that sweeps the whole working tree, and that is deliberate: it stages edits hive never made, including your own work in progress. A human asking for a flush has consented to that; a timer has not, which is why the reconciler only ever commits paths it queued itself. It is also the remediation for anything the report under [`vault_health`](#vault_health) shows as uncommitted, since nothing clears those automatically.
 
 ## vault_delete
 
@@ -236,7 +258,9 @@ vault_delete(
 )
 ```
 
-Removes one file and commits the deletion, so it stays recoverable via `git revert` / `git show`. **Files only** — directories are rejected. A non-existent path is an error, unless `idempotency_key` is set, in which case a retry against an already-removed file is a no-op success. Pass `commit=False` to defer the commit (same durability contract as `vault_write`).
+Removes one file and commits the deletion, so it stays recoverable via `git revert` / `git show`. **Files only** — directories are rejected. A non-existent path is an error, unless `idempotency_key` is set, in which case a retry against an already-removed file is a no-op success.
+
+`vault_delete` is the one write tool that did **not** move to deferred commits. It opts out of the queue entirely and still commits synchronously by default, because coarser commit granularity is exactly what would weaken its recoverability guarantee: a delete and a recreate inside one tick collapse into a single state, leaving nothing to `git revert` back to. `commit=False` here therefore leaves the deletion uncommitted with no queue behind it — flush it yourself with [`vault_commit`](#vault_commit).
 
 ## capture_lesson
 

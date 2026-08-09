@@ -29,6 +29,7 @@ preserves obsidian-git's lock if the race lands the wrong way.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import signal
@@ -150,6 +151,41 @@ async def _terminate_registry(
             # ValueError fires when communicate is called twice on the
             # same Popen; we accept best-effort drain failure.
             continue
+    return signalled
+
+
+def terminate_registry_sync(
+    registry: list[subprocess.Popen[bytes]],
+    grace_s: float = _DEFAULT_GRACE_S,
+) -> list[int]:
+    """Synchronous twin of :py:func:`_terminate_registry`; same sequence.
+
+    SIGTERM -> ``time.sleep(grace_s)`` -> SIGKILL survivors -> best-effort
+    stdio drain. Returns the PIDs that received a termination signal, which
+    is what :py:func:`_cleanup_index_lock` needs to decide whether a lock
+    file is ours to remove.
+
+    This exists because the ADR-018 reconciler runs in a plain daemon
+    thread with no event loop, so it cannot await the async version. Only
+    the *waiting* differs — the per-OS signalling is
+    :py:func:`_send_terminate` / :py:func:`_send_kill`, shared verbatim,
+    which is where the cross-OS risk actually lives (ADR-018 §2).
+    """
+    signalled: list[int] = []
+    for proc in list(registry):
+        if _send_terminate(proc):
+            signalled.append(proc.pid)
+    if not signalled:
+        return []
+    time.sleep(grace_s)
+    for proc in list(registry):
+        if proc.poll() is None:
+            _send_kill(proc)
+    for proc in list(registry):
+        # ValueError fires when communicate() is called twice on the same
+        # Popen; like the async path we accept a best-effort drain.
+        with contextlib.suppress(subprocess.SubprocessError, OSError, ValueError):
+            proc.communicate(timeout=_DRAIN_TIMEOUT_S)
     return signalled
 
 

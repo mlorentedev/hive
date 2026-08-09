@@ -169,7 +169,29 @@ def _index_lock_is_live(lock_path: Path) -> bool:
 
 
 def _startup_self_heal(vault: Path) -> None:
-    """Clear a stale ``.git/index.lock`` left by a prior unclean exit.
+    """Clear a stale ``.git/index.lock``, then *report* what is uncommitted.
+
+    Two steps that look alike and are not. Clearing the lock is safe ONLY
+    because the caller already holds the singleton ``daemon.lock`` (see
+    :func:`_clear_stale_index_lock`). The report needs no such argument and
+    takes no lock: **startup never commits, in either regime** (ADR-018 §3).
+
+    An earlier draft had daemon-side recovery commit under ``daemon.lock``.
+    Review overturned it: that lock excludes sibling *hives*, not a *human*
+    with a half-edited note open in Obsidian, so recovery could not tell its
+    own orphaned write from someone's work in progress. Distinguishing them
+    needs provenance, and after a crash the queue that knew hive's paths is
+    gone. Reporting is the only resolution that needs no provenance at all —
+    a path is safe to report whoever wrote it — and it leaves daemon and
+    non-daemon startup behaving identically, with nothing for a later reader
+    to mistake for a bug.
+    """
+    _clear_stale_index_lock(vault)
+    _report_uncommitted_paths(vault)
+
+
+def _clear_stale_index_lock(vault: Path) -> None:
+    """Remove a ``.git/index.lock`` left behind by a prior unclean exit.
 
     Safe ONLY because the caller already holds the singleton ``daemon.lock``:
     no sibling hive daemon owns this tree, and we have issued no git op of our
@@ -193,6 +215,35 @@ def _startup_self_heal(vault: Path) -> None:
         _log.warning("hive.daemon.self_heal could not clear index.lock: %s", exc)
         return
     _log.info("hive.daemon.self_heal cleared stale index.lock at %s", lock_path)
+
+
+def _report_uncommitted_paths(vault: Path) -> None:
+    """Log how many vault paths await a commit, and how long the oldest has.
+
+    Count and age only — never the path list. A vault mid-reorganisation can
+    carry hundreds of dirty files, and a boot log that enumerates them buys
+    nothing the two numbers do not already say. ``vault_health`` is where an
+    operator goes for the live figure (AC11); this is the boot-time snapshot.
+
+    Nothing here may block or fail a start, so the import is local (keeping
+    ``_daemon``'s import graph thin, as ``flush_paths`` does with
+    ``_deadline``) and every failure degrades to a warning.
+    """
+    try:
+        from hive._helpers import uncommitted_summary
+
+        count, oldest_age_s = uncommitted_summary(vault)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("hive.daemon.self_heal uncommitted-path report failed: %s", exc)
+        return
+    age_text = "null" if oldest_age_s is None else f"{oldest_age_s:.1f}"
+    _log.info(
+        "hive.daemon.self_heal uncommitted_count=%s oldest_age_s=%s vault=%s "
+        "(reported, never committed — ADR-018 §3)",
+        "null" if count is None else count,
+        age_text,
+        vault,
+    )
 
 
 # ── Restart-on-upgrade: drift detection + cooperative stop (ADR-011 §1) ──

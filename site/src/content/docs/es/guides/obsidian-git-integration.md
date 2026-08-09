@@ -46,7 +46,8 @@ defer ⇔
 |-----------|-----------------------------------------------------|
 | `commit=True`, sin defer | `""` (commiteado inline por hive — sin cambios respecto a pre-PR-4) |
 | `commit=True`, diferido | `" (deferred to obsidian-git; will be picked up on its next tick)"` |
-| `commit=False` (batching manual) | `" (uncommitted — call vault_commit to flush)"` (sin cambios) |
+| por defecto (diferido) | `" (queued — commits on the next reconciler tick)"` |
+| por defecto, sin reconciler corriendo | `" (uncommitted — call vault_commit to flush)"` |
 
 El sufijo de "deferred" hace visible el cambio de comportamiento a los operadores que inspeccionan los logs de las tools — sin flip silencioso de semánticas.
 

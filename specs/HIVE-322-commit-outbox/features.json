@@ -1,0 +1,107 @@
+[
+  {
+    "id": "HIVE-322-commit-outbox-ac1",
+    "behavior": "With the queue enabled, vault_write returns without a git commit in its call path — asserted by test, not by timing.",
+    "verification": "uv run pytest tests/test_commit_queue.py::test_vault_write_deferred_does_not_commit_in_its_call_path tests/test_commit_queue.py::test_vault_write_commit_true_still_commits_synchronously -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-322-commit-outbox-ac2",
+    "behavior": "N writes queued in one process across one tick produce exactly one commit containing exactly those N paths, with no unrelated working-tree file staged.",
+    "verification": "uv run pytest tests/test_commit_queue.py::test_one_tick_produces_one_commit_with_exactly_the_queued_paths tests/test_commit_queue.py::test_reconciler_thread_drains_on_its_own_tick -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-322-commit-outbox-ac3",
+    "behavior": "Commit count is bounded by elapsed-time / tick rather than by write count, in BOTH regimes: threads in one process, and separate processes sharing the vault filelock.",
+    "verification": "uv run pytest 'tests/test_benchmark.py::TestWriteThroughputBenchmark::test_commit_count_is_bounded_by_the_tick_not_the_write_count' -q -s && uv run pytest tests/test_commit_queue_multiprocess.py -m cross_worker -q -s",
+    "state": "pending",
+    "evidence": "The multi-process half is marked cross_worker and is EXCLUDED from the default run (pyproject addopts) and from the required CI contexts, which run tests/test_cross_worker_lock.py only. The explicit `-m cross_worker` above is therefore load-bearing: drop it and this criterion silently verifies nothing."
+  },
+  {
+    "id": "HIVE-322-commit-outbox-ac4",
+    "behavior": "A reconciler flush exceeding its deadline is terminated and logged, leaving no orphaned git process and no stale index.lock.",
+    "verification": "uv run pytest tests/test_commit_queue.py::test_flush_exceeding_deadline_is_terminated tests/test_commit_queue.py::test_flush_within_deadline_commits_and_reports_success -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-322-commit-outbox-ac5",
+    "behavior": "vault_health reports queue depth and last-flush age (plus the tick, without which a depth is uninterpretable); a stalled reconciler is visible there.",
+    "verification": "uv run pytest tests/test_commit_queue.py::test_vault_health_reports_queue_depth_and_last_flush_age -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-322-commit-outbox-ac6",
+    "behavior": "On clean shutdown the queue is drained; nothing queued is silently discarded. Driven through the real ASGI lifespan, the way uvicorn fires it.",
+    "verification": "uv run pytest tests/test_commit_queue.py::test_server_lifespan_shutdown_drains_the_queue -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-322-commit-outbox-ac7",
+    "behavior": "The reconciler never stages a working-tree file it did not queue — the load-bearing ADR-014 invariant, covering both an untracked foreign file and a modification to a tracked one.",
+    "verification": "uv run pytest tests/test_commit_queue.py::test_reconciler_never_stages_a_file_it_did_not_queue -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-322-commit-outbox-ac8",
+    "behavior": "The same path written twice within one tick produces one queue entry and appears once in the resulting commit. Dedup lands at add(), not drain(), so queue depth stays an honest backlog for AC5.",
+    "verification": "uv run pytest tests/test_commit_queue.py::test_queue_dedups_at_enqueue_not_at_drain tests/test_commit_queue.py::test_path_written_twice_in_one_tick_appears_once_in_the_commit tests/test_commit_queue.py::test_enqueue_normalises_absolute_and_relative_to_one_entry -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-322-commit-outbox-ac9",
+    "behavior": "Startup performs no recovery commit in either regime: a dirty working-tree path is left untouched whether or not the daemon lock is held, and is reported instead.",
+    "verification": "uv run pytest tests/test_commit_queue.py::test_startup_self_heal_reports_uncommitted_paths_and_never_commits tests/test_commit_queue.py::test_uncommitted_paths_enumerates_untracked_staged_and_modified tests/test_commit_queue.py::test_uncommitted_paths_parses_a_renamed_entry_without_misaligning -q",
+    "state": "pending",
+    "evidence": "The no-commit half held by construction; the delta is the report. Non-vacuity was shown by injecting an add -A + commit into _startup_self_heal, which fails the test on 'startup moved HEAD'."
+  },
+  {
+    "id": "HIVE-322-commit-outbox-ac10",
+    "behavior": "vault_commit remains the only sweep: an explicit call still flushes the working tree via git add -A, including edits hive never made. A timer never does.",
+    "verification": "uv run pytest tests/test_commit_queue.py::test_vault_commit_still_sweeps_foreign_working_tree_edits -q",
+    "state": "pending",
+    "evidence": "Born green. Two neuters were needed because the two assertions fail differently: narrowing the sweep to hive-written paths fails on 'vault_commit did not commit'; add --update commits happily and fails on the dropped untracked file."
+  },
+  {
+    "id": "HIVE-322-commit-outbox-ac11",
+    "behavior": "vault_health reports the count and oldest age of uncommitted vault paths, and reports UNKNOWN rather than clean when git cannot answer — the distinction that keeps a failed enumeration from reading as a healthy vault.",
+    "verification": "uv run pytest tests/test_commit_queue.py::test_vault_health_reports_uncommitted_count_and_oldest_age tests/test_commit_queue.py::test_vault_health_reports_unknown_rather_than_clean_when_git_fails tests/test_commit_queue.py::test_uncommitted_summary_reports_unknown_rather_than_clean tests/test_commit_queue.py::test_uncommitted_summary_counts_and_ages_a_dirty_tree tests/test_commit_queue.py::test_uncommitted_paths_returns_none_when_enumeration_fails -q",
+    "state": "pending",
+    "evidence": "With AC9 refusing to self-heal this is the entire recovery signal, so the null-vs-zero guard is the criterion rather than an extra. Returning (0, None) on failure fails it on 'a failed enumeration reported as clean'."
+  },
+  {
+    "id": "HIVE-322-commit-outbox-ac12",
+    "behavior": "commit defaults to deferral on both vault_write and vault_patch; commit=True commits before returning; commit=False is indistinguishable from the default; vault_delete commits synchronously regardless of the tick.",
+    "verification": "uv run pytest tests/test_commit_queue.py::test_default_write_defers_and_commit_true_is_the_escape_hatch tests/test_commit_queue.py::test_vault_patch_default_defers tests/test_commit_queue.py::test_vault_delete_commits_synchronously_regardless_of_tick -q",
+    "state": "pending",
+    "evidence": "Breaking change — the PR title carries feat!, since the repo squash-merges and release-please reads the title."
+  },
+  {
+    "id": "HIVE-322-commit-outbox-ac13",
+    "behavior": "The reconciler acquires _git_filelock(vault) around its commit, so a concurrent process cannot interleave a commit into the same drain.",
+    "verification": "uv run pytest tests/test_commit_queue.py::test_reconciler_commit_happens_under_the_git_filelock -q",
+    "state": "pending",
+    "evidence": "Held by construction (_git_commit already wraps both Popens). Asserted from a FOREIGN thread: filelock builds the per-vault singleton thread_local=True, so a same-thread re-entry is free and holding on the flushing thread would have proved nothing. Neutering the filelock fails it on 'flush completed while the filelock was held', not on the commit count."
+  },
+  {
+    "id": "HIVE-322-commit-outbox-ac14",
+    "behavior": "A failed flush drops its drained paths rather than re-queueing them: the queue does not contain those paths afterwards, the failure is logged with the dropped count, and the files surface in AC11's uncommitted-path report.",
+    "verification": "uv run pytest tests/test_commit_queue.py::test_failed_flush_drops_its_paths_and_does_not_requeue -q",
+    "state": "pending",
+    "evidence": "Arrived as an ADR-018 §1 amendment landed in the same PR as the tasks.md freeze, recorded rather than silently applied."
+  },
+  {
+    "id": "HIVE-322-commit-outbox-external-committer",
+    "behavior": "The ADR-010 hand-off survives the queue: with HIVE_AUTO_DEFER_TO_EXTERNAL_COMMITTER satisfied a tick drains WITHOUT committing, leaving the paths for obsidian-git; unsatisfied, the same tick commits. An unevaluable predicate commits rather than defers.",
+    "verification": "uv run pytest tests/test_commit_queue.py::test_tick_defers_to_a_healthy_external_committer_and_commits_otherwise tests/test_commit_queue.py::test_tick_commits_when_the_defer_predicate_cannot_be_evaluated -q",
+    "state": "pending",
+    "evidence": "Not one of AC1-AC14, but a contract the default flip would otherwise have defeated silently: the write path only consults the predicate on its commit=True branch, which the flip made rare."
+  }
+]
