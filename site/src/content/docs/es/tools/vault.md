@@ -160,6 +160,10 @@ Dos bloques ahí informan sobre los [commits diferidos](#commits-diferidos-semá
 
 El commit salió del camino de escritura. Una escritura aterriza en disco, su ruta se encola, y un hilo reconciler vacía la cola en **un commit por tick** (`HIVE_COMMIT_TICK_S`, 5s por defecto) en vez de un commit por escritura. La tasa de commits pasa a ser función del tick y no del volumen de escrituras, que es lo que levanta el techo de rendimiento: los commits de git contra un mismo repositorio se serializan, así que la única forma de ir más rápido es commitear menos veces.
 
+:::caution[El tick tiene un techo de 300s]
+Poner `HIVE_COMMIT_TICK_S` por encima de **300** no ralentiza el reconciler: impide que arranque. A partir de ahí las rutas encoladas solo se commitean en un apagado limpio o con un `vault_commit` explícito, y `vault_health` es lo que muestra crecer el backlog. El servidor registra `mcp.reconciler.auto_flush_disabled` al arrancar cuando ocurre. Si quieres commits poco frecuentes, usa un tick por debajo del techo.
+:::
+
 | Si quieres | Pasa |
 |---|---|
 | El comportamiento síncrono anterior | `commit=True` — commitea antes de devolver |

@@ -33,7 +33,9 @@ _DEFAULT_COMMIT_TICK_S = 5.0
 _DEFAULT_FLUSH_DEADLINE_S = 30.0
 # Above this the loop is assumed to be deliberately disabled (tests pass a
 # large tick to drive flushes explicitly), mirroring the guard the lesson
-# reconciler uses for the same purpose.
+# reconciler uses for the same purpose. It is reachable from the public
+# ``HIVE_COMMIT_TICK_S`` too, so crossing it is announced rather than
+# silent — see the warning in ``CommitReconciler.__init__``.
 _MAX_AUTO_TICK_S = 300.0
 
 
@@ -233,6 +235,20 @@ class CommitReconciler:
                 daemon=True,
             )
             self._thread.start()
+        else:
+            # The ceiling doubles as a test affordance and a production
+            # cliff: ``HIVE_COMMIT_TICK_S`` is documented and settable, so a
+            # plausible "commit every 10 minutes" reaches this branch and
+            # gets no reconciler at all. Deferred paths would then wait for
+            # shutdown or an explicit vault_commit, which is a defensible
+            # mode but a terrible one to enter unknowingly (ADR-018 §3
+            # leaves the report as the only other signal).
+            _log.warning(
+                "mcp.reconciler.auto_flush_disabled tick_s=%.1f max_tick_s=%.1f "
+                "queued paths now commit only on clean shutdown or vault_commit",
+                self._tick_s,
+                _MAX_AUTO_TICK_S,
+            )
 
     @property
     def tick_s(self) -> float:
