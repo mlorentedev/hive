@@ -1,5 +1,25 @@
 # Changelog
 
+## [3.0.0](https://github.com/mlorentedev/hive/compare/v2.0.0...v3.0.0) (2026-08-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **vault:** reject vault_delete(commit=False) instead of deferring it ([#360](https://github.com/mlorentedev/hive/issues/360))
+
+### Bug Fixes
+
+* **vault:** announce when the commit tick ceiling disables auto-flush ([#355](https://github.com/mlorentedev/hive/issues/355)) ([77aaac6](https://github.com/mlorentedev/hive/commit/77aaac60eae51b8b13294b51548ba969bcb0ea9a))
+* **vault:** apply review feedback on the tick-ceiling warning ([#361](https://github.com/mlorentedev/hive/issues/361)) ([1639d14](https://github.com/mlorentedev/hive/commit/1639d14f8cc669e698a5c26dc5b07fc3a8b661f0))
+* **vault:** reject vault_delete(commit=False) instead of deferring it ([#360](https://github.com/mlorentedev/hive/issues/360)) ([d66998e](https://github.com/mlorentedev/hive/commit/d66998e6e33b3e7f5232e7afba6c1f0d2ab13f20))
+* **vault:** stop fabricating a .git directory in a vault without one ([#359](https://github.com/mlorentedev/hive/issues/359)) ([1b0affe](https://github.com/mlorentedev/hive/commit/1b0affe6cf42ab577eb585e1f5b4be18c104ada7))
+* **vault:** warn at startup when the vault carries no git repository ([#358](https://github.com/mlorentedev/hive/issues/358)) ([c9e3cde](https://github.com/mlorentedev/hive/commit/c9e3cde90e959edaced08b5d152437f35c2dcb81))
+
+
+### Documentation
+
+* **lessons:** capture three findings from probing the published 2.0.0 ([#362](https://github.com/mlorentedev/hive/issues/362)) ([2109aa7](https://github.com/mlorentedev/hive/commit/2109aa7cef9e9407026a0f25992c86bfc2d3ee5f))
+
 ## [2.0.0](https://github.com/mlorentedev/hive/compare/v1.43.1...v2.0.0) (2026-08-09)
 
 
