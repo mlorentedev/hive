@@ -266,7 +266,11 @@ vault_delete(
 
 Elimina un fichero y commitea el borrado, de modo que sigue siendo recuperable vía `git revert` / `git show`. **Solo ficheros** — los directorios se rechazan. Una ruta inexistente es un error, salvo que se pase `idempotency_key`, en cuyo caso un reintento sobre un fichero ya eliminado es un no-op con éxito.
 
-`vault_delete` es la única tool de escritura que **no** pasó a commits diferidos. Se queda fuera de la cola por completo y sigue commiteando de forma síncrona por defecto, porque una granularidad de commit más gruesa es justo lo que debilitaría su garantía de recuperabilidad: un borrado y una recreación dentro del mismo tick colapsan en un único estado, y no queda nada a lo que hacer `git revert`. Por eso `commit=False` aquí deja el borrado sin commitear y sin cola detrás — haz flush tú mismo con [`vault_commit`](#vault_commit).
+`vault_delete` es la única tool de escritura que **no** pasó a commits diferidos. Se queda fuera de la cola por completo y commitea **siempre** de forma síncrona, porque una granularidad de commit más gruesa es justo lo que debilitaría su garantía de recuperabilidad: un borrado y una recreación dentro del mismo tick colapsan en un único estado, y no queda nada a lo que hacer `git revert`.
+
+:::caution[Aquí `commit=False` se rechaza]
+Delete no tiene modo diferido en absoluto. Dejar un borrado sin commitear es el modo de diferimiento indefinido que ADR-018 §4 eliminó, y tampoco puede usar la cola — así que `commit=False` devuelve un error explicando por qué, en vez de aceptarse o corregirse en silencio. Omite `commit`, o pasa `commit=True`. Ver la [enmienda del 2026-08-09](https://github.com/mlorentedev/hive/blob/master/docs/adr/adr-018-asynchronous-commit-queue.md) del ADR.
+:::
 
 ## capture_lesson
 

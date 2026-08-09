@@ -13,7 +13,7 @@ created: "2026-08-07"
 
 ## Status
 
-Accepted (2026-08-07). Gates `specs/HIVE-322-commit-outbox/`, which is now unfrozen for implementation. **Amends [ADR-014](adr-014-vault-commit-coordination.md)** — see "The ADR-014 tension" below, which is the load-bearing part of this decision. **Triggers the deferred "2b" evolution of [ADR-013](adr-013-write-idempotency-at-most-once.md)** — see "Relationship to ADR-013" below. The three design questions that blocked this ADR were resolved on 2026-08-07 and are recorded under "Decision".
+Accepted (2026-08-07). **Amended 2026-08-09** — §4 contradicted itself about `vault_delete`; see "Amendment (2026-08-09)" below. Resolves [#353](https://github.com/mlorentedev/hive/issues/353). Gates `specs/HIVE-322-commit-outbox/`, which is now unfrozen for implementation. **Amends [ADR-014](adr-014-vault-commit-coordination.md)** — see "The ADR-014 tension" below, which is the load-bearing part of this decision. **Triggers the deferred "2b" evolution of [ADR-013](adr-013-write-idempotency-at-most-once.md)** — see "Relationship to ADR-013" below. The three design questions that blocked this ADR were resolved on 2026-08-07 and are recorded under "Decision".
 
 Revised the same day, before acceptance, on three points:
 
@@ -176,6 +176,40 @@ Two adjacent mechanisms change meaning with it, and both are part of the same br
 
 - `vault_commit` keeps its current semantics as the explicit flush, and `commit=True` remains available as the synchronous escape hatch. Both ends of the range — commit now, or flush on demand — stay reachable; what changes is which behaviour you get without asking (§4). The one capability genuinely lost is *indefinite* deferral, which §4 records as a deliberate reduction rather than a neutral change.
 - Hive stays commit-only — no push, per ADR-014.
+
+## Amendment (2026-08-09): `vault_delete` cannot defer either
+
+Resolves [#353](https://github.com/mlorentedev/hive/issues/353), found while documenting the shipped change.
+
+### The contradiction
+
+§4 says two things that cannot both hold for `vault_delete(commit=False)`:
+
+1. "`vault_delete` opts out of the queue entirely and stays synchronous."
+2. "The indefinite-deferral mode is therefore **removed**, not preserved… Callers that genuinely need 'on disk, never auto-committed' no longer have a keyword for it."
+
+The code took the first reading and stopped there. `vault_delete` never routes through `_commit_or_queue`, so with `commit=False` the branch `if commit and not should_defer` simply does not fire: the file leaves the disk, nothing is committed, nothing is queued, and the pending deletion sits in the working tree until someone calls `vault_commit`. That is precisely the indefinite-deferral mode sentence (2) says was removed — surviving in the one tool whose selling point is that its effects stay recoverable.
+
+Sentence (1) was written to justify keeping delete **out of the queue**, which remains correct and is not what is being amended. The error was treating "out of the queue" as implying "free to defer indefinitely". Those are different exemptions and only the first was ever argued for.
+
+### Decision
+
+**`vault_delete` commits synchronously, always. `commit=False` is rejected rather than honoured or silently ignored.**
+
+The rejection is explicit because the alternatives are worse in ways this ADR has already been bitten by:
+
+- **Honouring it** preserves exactly the mode §4 removed, in the tool least able to afford it.
+- **Ignoring it silently** would accept a caller's explicit instruction and do the opposite, leaving the truth only in a log line. That is the same shape as the tick-ceiling defect ([#355](https://github.com/mlorentedev/hive/pull/355)), where a documented knob quietly did something other than what it said.
+- **Routing it through the queue** re-opens the collapse §4 rules out: a delete and a recreate inside one tick reduce to a single state, and recoverability is the guarantee this tool sells.
+
+Deleting is not a hot path. The throughput argument that motivates deferral for `vault_write` — many small writes paying one commit each — does not apply to a tool called once per removed file, so there is nothing to trade away here.
+
+### Consequences
+
+- **Breaking.** A call passing `commit=False` returned success and now returns an error string. Callers drop the argument or pass `commit=True`; both give the behaviour they already got whenever the flag was left alone.
+- `commit` stays in the signature rather than being removed. Removing it would make every existing call fail MCP schema validation, which is a much wider break than rejecting the one value that never had a coherent meaning.
+- The error follows the repo's `WHY:`/`FIX:` convention, so a caller who hits it learns why deferral is unavailable here rather than only that it is.
+- §4's other clauses are unchanged: `vault_delete` still opts out of the queue, and still stays synchronous.
 
 ## References
 
