@@ -94,7 +94,7 @@ The separate-processes row is the measurement that substantiates dropping the da
 
 ## Defects found and their disposition
 
-- **`vault_delete`'s `commit=False` is the removed indefinite-deferral mode.** The site docs claimed it carried "the same durability contract as `vault_write`"; it does not, because `vault_delete` never routes through `_commit_or_queue`. The false claim was corrected in the docs and the code was left alone: ADR-018 §4 says both "`vault_delete` opts out of the queue entirely" and "the indefinite-deferral mode is removed", and delete's `commit=False` sits exactly where those two readings disagree. Resolving that is a design change, which the freeze puts behind an ADR amendment. **Needs a ticket.**
+- **`vault_delete`'s `commit=False` is the removed indefinite-deferral mode.** The site docs claimed it carried "the same durability contract as `vault_write`"; it does not, because `vault_delete` never routes through `_commit_or_queue`. The false claim was corrected in the docs and the code was left alone: ADR-018 §4 says both "`vault_delete` opts out of the queue entirely" and "the indefinite-deferral mode is removed", and delete's `commit=False` sits exactly where those two readings disagree. Resolving that is a design change, which the freeze puts behind an ADR amendment. **Ticketed:** [#353](https://github.com/mlorentedev/hive/issues/353).
 - **The `cross_worker` marker description was inaccurate** once a second file joined it ("requires fake-git PATH fixture" is true of only the HIVE-116 lock tests). Fixed in scope, one line in `pyproject.toml`. It is the only diff line outside this feature's obvious footprint and is called out here so the "no unrelated changes" review has something to check against.
 
 ## Promotion candidates

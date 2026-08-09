@@ -61,7 +61,7 @@ created: "2026-08-07"
 
 ## Follow-up (needs a ticket, not resolvable under the freeze)
 
-- [ ] `vault_delete`'s `commit=False` is the **indefinite-deferral mode ADR-018 §4 removed** — it never routes through `_commit_or_queue`, so the path is left uncommitted with no queue behind it. Found while documenting; the false docs claim ("same durability contract as `vault_write`") was corrected, the code was not. §4 says both "`vault_delete` opts out of the queue entirely" and "the indefinite-deferral mode is removed", and this sits exactly where the two readings disagree — so resolving it is a design change and needs an ADR amendment first
+- [x] Ticketed as [#353](https://github.com/mlorentedev/hive/issues/353) (HIVE-353, `bug`, P2, Backlog) — `vault_delete`'s `commit=False` is the **indefinite-deferral mode ADR-018 §4 removed** — it never routes through `_commit_or_queue`, so the path is left uncommitted with no queue behind it. Found while documenting; the false docs claim ("same durability contract as `vault_write`") was corrected, the code was not. §4 says both "`vault_delete` opts out of the queue entirely" and "the indefinite-deferral mode is removed", and this sits exactly where the two readings disagree — so resolving it is a design change and needs an ADR amendment first
 
 ## Machine-readable features
 
