@@ -1122,13 +1122,45 @@ _GIT_FILELOCKS: dict[str, filelock.BaseFileLock] = {}
 _GIT_FILELOCKS_GUARD = threading.Lock()
 
 
+def _filelock_path(vault_path: Path) -> Path:
+    """Where this vault's inter-process write lock file lives.
+
+    Inside ``.git/`` when the vault has one: the lock travels with the repo
+    and sits in the one directory git already ignores. When it does not, the
+    lock moves to the vault root — ``filelock`` builds missing parents on
+    acquire, so the previously unconditional path *created* a ``.git``
+    directory in a vault that had no repository, leaving behind something
+    that answers "yes" to every tool that tests for a repo by looking.
+
+    Deliberately a ``stat`` rather than ``git rev-parse``: this runs on every
+    write, and the question here is only where to put a file. Keying off mere
+    presence also keeps a ``.git`` left behind by an older hive pointing at
+    the path that hive expects, so the two stay mutually exclusive across an
+    upgrade — which asking git would break, since it would call that
+    directory "not a repository" and move the lock.
+
+    Single source of truth for both :func:`_git_filelock` and
+    :func:`evict_filelock`: the two must derive the same key or an eviction
+    silently pops nothing and the deadline supervisor stops unblocking
+    siblings (ADR-012).
+    """
+    if (vault_path / ".git").exists():
+        return vault_path / ".git" / "hive.lock"
+    return vault_path / ".hive.lock"
+
+
 def _git_filelock(vault_path: Path) -> filelock.BaseFileLock:
-    """Inter-process lock file under the vault's .git dir.
+    """Inter-process lock file for the vault — see :func:`_filelock_path`.
 
     Serializes write critical sections across separate hive processes
-    (the threading lock only covers a single process). The lock file
-    lives alongside git's own ``index.lock`` so it travels with the
-    repo and is naturally ignored by git itself.
+    (the threading lock only covers a single process). In a repository the
+    lock file lives alongside git's own ``index.lock`` so it travels with
+    the repo and is naturally ignored by git itself; in a vault without one
+    it sits at the root rather than conjuring a ``.git`` directory.
+
+    The lock is *not* git-specific despite the name: ``vault_write_lock``
+    takes it around every read-modify-write, so it must exist and function
+    in a vault that has no repository at all.
 
     Returns a process-singleton ``FileLock`` instance per vault path so
     nested ``acquire()`` calls from the same thread re-enter cleanly:
@@ -1136,7 +1168,7 @@ def _git_filelock(vault_path: Path) -> filelock.BaseFileLock:
     calls ``_git_commit`` which would otherwise deadlock waiting on its
     own outer hold.
     """
-    key = str(vault_path / ".git" / "hive.lock")
+    key = str(_filelock_path(vault_path))
     with _GIT_FILELOCKS_GUARD:
         lock = _GIT_FILELOCKS.get(key)
         if lock is None:
@@ -1162,8 +1194,14 @@ def evict_filelock(vault_path: Path) -> bool:
     object can acquire as soon as the holder releases. On Windows the
     orphan file persists until the parent process exits (filelock library
     invariant), but no longer blocks new acquires.
+
+    Derives its key through :func:`_filelock_path`, the same helper
+    :func:`_git_filelock` uses. Were the two to compute it independently, a
+    vault without a repository would evict under one path while the lock
+    lived at the other — and this would return False forever while looking
+    like it had worked.
     """
-    key = str(vault_path / ".git" / "hive.lock")
+    key = str(_filelock_path(vault_path))
     with _GIT_FILELOCKS_GUARD:
         lock = _GIT_FILELOCKS.pop(key, None)
     return lock is not None

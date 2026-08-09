@@ -824,6 +824,48 @@ async def test_vault_delete_commits_synchronously_regardless_of_tick(
     ctx.reconciler.close()
 
 
+@_POSIX_ONLY
+@pytest.mark.asyncio
+async def test_vault_delete_rejects_commit_false_and_deletes_nothing(
+    git_vault: Path,
+) -> None:
+    """ADR-018 amendment (2026-08-09), #353: delete has no deferred mode.
+
+    ``commit=False`` on delete was the indefinite-deferral mode §4 removed,
+    surviving in the tool whose guarantee is that its effects stay
+    recoverable: the branch `if commit and not should_defer` simply did not
+    fire, so the file left the disk with nothing committed and nothing
+    queued.
+
+    The file staying on disk is the assertion that matters. Rejecting the
+    call while still performing the delete would trade a silent bad state
+    for a loud one, which is not the same as refusing.
+    """
+    from hive.server import create_server
+
+    mcp = create_server(vault_path=git_vault)
+    ctx = mcp._hive_ctx  # type: ignore[attr-defined]
+    target = git_vault / "10_projects" / "testproject" / "90-lessons.md"
+    assert target.exists(), "fixture precondition"
+
+    before = _rev_count(git_vault)
+    result = _text_of(
+        await mcp.call_tool(
+            "vault_delete",
+            {"project": "testproject", "path": "90-lessons.md", "commit": False},
+        )
+    )
+
+    assert "cannot defer" in result
+    assert "WHY" in result and "FIX" in result
+    assert target.exists(), "a rejected delete must not have unlinked the file"
+    assert _rev_count(git_vault) == before, "nothing should have been committed"
+    assert len(ctx.reconciler.queue) == 0, "and nothing queued"
+    assert not _dirty(git_vault), "the working tree must be untouched"
+
+    ctx.reconciler.close()
+
+
 # ── AC9 — startup reports uncommitted paths and never commits ───────────
 #
 # The enumerator these two ACs share lives in `_helpers.uncommitted_paths`.
@@ -1262,12 +1304,21 @@ def test_tick_above_the_ceiling_disables_auto_flush_and_says_so(
     from hive._commit_queue import _MAX_AUTO_TICK_S, CommitReconciler
 
     with caplog.at_level(logging.WARNING, logger="hive._commit_queue"):
-        disabled = CommitReconciler(git_vault, tick_s=_MAX_AUTO_TICK_S + 1.0)
+        # Just past the ceiling rather than comfortably past it: with `%.1f`
+        # this value rendered as "tick_s=300.0 max_tick_s=300.0", a warning
+        # that reads as though the ceiling had not been crossed. A `+1.0`
+        # probe cannot see that, which is why the margin is 0.04.
+        disabled = CommitReconciler(git_vault, tick_s=_MAX_AUTO_TICK_S + 0.04)
     try:
         assert disabled._thread is None
-        assert any("auto_flush_disabled" in rec.message for rec in caplog.records), [
-            r.message for r in caplog.records
+        warnings = [
+            rec.getMessage() for rec in caplog.records if "auto_flush_disabled" in rec.message
         ]
+        assert warnings, [r.message for r in caplog.records]
+        # The rendered values, not just the event name: a lossy format would
+        # report the configured tick as equal to the ceiling it exceeded.
+        assert "tick_s=300.04" in warnings[0], warnings[0]
+        assert "max_tick_s=300.0" in warnings[0], warnings[0]
     finally:
         disabled.close(drain=False)
 

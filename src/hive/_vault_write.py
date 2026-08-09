@@ -63,6 +63,17 @@ _UNCOMMITTED_SUFFIX = " (uncommitted — call vault_commit to flush)"
 # is running.
 _QUEUED_SUFFIX = " (queued — commits on the next reconciler tick)"
 
+_DELETE_CANNOT_DEFER_MSG = (
+    "vault_delete cannot defer: commit=False is not supported.\n"
+    "WHY: a deletion left uncommitted is the indefinite-deferral mode "
+    "ADR-018 §4 removed, surviving in the one tool whose guarantee is that "
+    "its effects stay recoverable. Delete cannot use the commit queue "
+    "either — a delete and a recreate inside one tick collapse to a single "
+    "state.\n"
+    "FIX: omit `commit`, or pass commit=True. Both give the behaviour a "
+    "call already got whenever the flag was left alone."
+)
+
 # HIVE-116 AC-5: public contract for the partial-state response. Locked
 # 2026-05-27 per ``specs/HIVE-116-stale-lock-after-deadline/proposal.md``
 # R3 resolution. Downstream agents key off the stable substring
@@ -687,10 +698,13 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         Args:
             project: Project slug or '_meta' for cross-project content.
             path: Relative path to the file within the project.
-            commit: If True (default), stage + commit the deletion. If False,
-                unlink on disk but leave the removal staged for a later
-                ``vault_commit`` (or obsidian-git). Same durability contract as
-                ``vault_write``.
+            commit: Must be True (the default). Unlike ``vault_write``, this
+                tool has no deferred mode: it neither uses the commit queue
+                (a delete and a recreate inside one tick would collapse to a
+                single state) nor leaves the removal uncommitted, which is
+                the indefinite deferral ADR-018 §4 removed. ``commit=False``
+                is rejected with an explanation rather than silently
+                upgraded — see the ADR's 2026-08-09 amendment.
             idempotency_key: Optional at-most-once token. If set, a retry with
                 the same key is a no-op after the first delete (ADR-013), which
                 also makes deleting an already-removed file succeed. Empty
@@ -699,6 +713,13 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
         guard = _vault_guard(ctx)
         if guard:
             return track(ctx, "vault_delete", guard, project)
+
+        # Rejected before anything is resolved or unlinked: honouring it would
+        # keep the mode ADR-018 §4 removed alive in the one tool that sells
+        # recoverability, and ignoring it would do the opposite of what the
+        # caller asked while saying so only in a log line.
+        if not commit:
+            return track(ctx, "vault_delete", _DELETE_CANNOT_DEFER_MSG, project, path)
 
         resolved = _resolve_project_dir(ctx.vault, project, ctx.scopes)
         if resolved is None:
