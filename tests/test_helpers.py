@@ -9,14 +9,18 @@ from unittest.mock import MagicMock
 import pytest
 
 from hive._helpers import (
+    _GIT_FILELOCKS,
     _bounded_sync_call,
     _default_scopes,
+    _filelock_path,
     _git_commit,
     _git_commit_all,
+    _git_filelock,
     _match_and_replace,
     _resolve_project_dir,
     _strip_code,
     _vault_guard,
+    evict_filelock,
     find_lesson_heading,
     tool_span,
     vault_startup_warning,
@@ -204,6 +208,57 @@ class TestVaultStartupWarning:
         assert vault_startup_warning(missing, env_set=True) != vault_startup_warning(
             missing, env_set=False
         )
+
+
+class TestFilelockPath:
+    """Tests for _filelock_path — the write lock must not conjure a `.git`.
+
+    The lock is not git-specific despite living there: ``vault_write_lock``
+    takes it around every read-modify-write, so it has to work in a vault
+    with no repository at all. What it must not do is *create* the one
+    directory whose presence every other tool reads as "this is a repo".
+    """
+
+    def test_repository_keeps_the_lock_inside_dot_git(self, git_vault: Path) -> None:
+        """The discriminating half: with a repo the path is unchanged."""
+        assert _filelock_path(git_vault) == git_vault / ".git" / "hive.lock"
+
+    def test_plain_dir_puts_the_lock_at_the_vault_root(self, tmp_path: Path) -> None:
+        """No repository -> the lock lives at the root, not under `.git/`."""
+        assert _filelock_path(tmp_path) == tmp_path / ".hive.lock"
+
+    def test_acquiring_in_a_plain_dir_creates_no_dot_git(self, tmp_path: Path) -> None:
+        """The regression itself: `filelock` builds missing parents on acquire.
+
+        Before the shared path helper the lock was unconditionally
+        ``vault/.git/hive.lock``, so one acquire against a vault with no
+        repository left a `.git/` directory holding a single lock file —
+        a directory that looks like a repository to everything that checks
+        by looking.
+        """
+        lock = _git_filelock(tmp_path)
+        try:
+            with lock.acquire(timeout=10.0):
+                # Asserted while held: filelock unlinks the lock file on
+                # release, so checking afterwards would prove nothing about
+                # where it had been.
+                assert (tmp_path / ".hive.lock").exists()
+                assert not (tmp_path / ".git").exists()
+        finally:
+            evict_filelock(tmp_path)
+        assert not (tmp_path / ".git").exists(), "acquiring the lock fabricated a .git dir"
+
+    def test_evict_agrees_with_acquire_without_a_repository(self, tmp_path: Path) -> None:
+        """Both sides must derive the same key or eviction silently no-ops.
+
+        ``evict_filelock`` returning False while the lock is still cached is
+        the failure mode that matters: the deadline supervisor would stop
+        unblocking siblings and nothing would say so (ADR-012).
+        """
+        _git_filelock(tmp_path)
+        assert str(_filelock_path(tmp_path)) in _GIT_FILELOCKS
+        assert evict_filelock(tmp_path) is True
+        assert str(_filelock_path(tmp_path)) not in _GIT_FILELOCKS
 
 
 class TestToolSpan:
