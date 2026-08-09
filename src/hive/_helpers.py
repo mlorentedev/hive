@@ -332,6 +332,55 @@ _VAULT_MISSING_DEFAULT_MSG = (
 )
 
 
+_VAULT_NOT_A_REPO_MSG = (
+    "Vault path {path} exists but is not a git repository.\n"
+    "WHY: since the asynchronous commit queue landed, a write returns as soon "
+    "as the file is on disk and its path is queued for the reconciler. With no "
+    "repository behind it every flush fails, so writes succeed and are never "
+    "committed — the tool response still says the path is queued.\n"
+    "FIX: run `git init` in the vault root, or point HIVE_VAULT_PATH (alias "
+    "VAULT_PATH) at the vault that already is one. Files are written either "
+    "way; what is lost is the history every vault tool assumes."
+)
+
+
+def vault_is_git_repo(vault_path: Path) -> bool:
+    """Is the vault a git repository?
+
+    Deliberately asks git rather than testing for a ``.git`` directory:
+    :func:`_git_filelock` places its lock at ``vault/.git/hive.lock`` and
+    creates the parent as a side effect, so directory presence stops being
+    evidence of a repository the moment hive has run once against the path.
+
+    Never raises — a broken or absent git binary answers "not a repository",
+    which is the conservative direction: the caller only uses this to decide
+    whether to warn.
+    """
+    try:
+        rc, _, _ = _run_git(["rev-parse", "--git-dir"], vault_path)
+    except Exception:  # noqa: BLE001
+        return False
+    return rc == 0
+
+
+def vault_git_startup_warning(resolved: Path) -> str:
+    """Warn at startup when the vault exists but carries no git repository.
+
+    Sibling of :func:`vault_startup_warning`, kept separate because the two
+    answer different questions and only one can be true at a time — a path
+    that does not exist is not also a non-repository worth reporting.
+
+    This runs once at ``create_server`` time on purpose. The alternative,
+    checking per write so the response suffix could stop promising a commit,
+    would put a git invocation back on the write path that ADR-018 exists to
+    remove — paying on every write to describe a condition that changes once
+    in the life of a vault.
+    """
+    if not resolved.is_dir() or vault_is_git_repo(resolved):
+        return ""
+    return _VAULT_NOT_A_REPO_MSG.format(path=resolved)
+
+
 def vault_startup_warning(resolved: Path, *, env_set: bool) -> str:
     """Return a loud, actionable warning if the resolved vault path is missing
     at startup, or an empty string when it exists.

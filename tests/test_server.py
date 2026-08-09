@@ -843,6 +843,30 @@ class TestVaultHealthRuntime:
         m = re.search(r"obsidian_git_present:\s*(true|false)", result)
         assert m is not None, f"obsidian_git_present field missing in:\n{result}"
 
+    async def test_runtime_block_reports_git_repo_false_without_a_repository(
+        self,
+        mock_vault: Path,
+    ) -> None:
+        """ADR-018: `git_repo` is what makes the two blocks beside it readable.
+
+        Without a repository `uncommitted` is permanently `null` and a
+        `commit_queue` depth that never falls is the expected state rather
+        than a stalled reconciler — indistinguishable until this line says
+        which world the reader is in. `mock_vault` is deliberately not the
+        `git_vault` fixture: it has no repository.
+        """
+        import re
+
+        from hive.server import create_server
+
+        mcp = create_server(mock_vault)
+        result = _text(
+            await mcp.call_tool("vault_health", {"include_runtime": True}),
+        )
+        m = re.search(r"git_repo:\s*(true|false)", result)
+        assert m is not None, f"git_repo field missing in:\n{result}"
+        assert m.group(1) == "false", "a vault with no repository reported git_repo: true"
+
     async def test_runtime_block_obsidian_git_present_when_plugin_active(
         self,
         mock_vault: Path,
