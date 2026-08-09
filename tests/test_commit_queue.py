@@ -1278,3 +1278,46 @@ def test_tick_commits_when_the_defer_predicate_cannot_be_evaluated(
         assert _rev_count(git_vault) == before + 1
     finally:
         reconciler.close(drain=False)
+
+
+# ── The auto-flush ceiling, which is also a public knob's cliff ──────────
+
+
+def test_tick_above_the_ceiling_disables_auto_flush_and_says_so(
+    git_vault: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A tick past ``_MAX_AUTO_TICK_S`` starts no loop, and announces it.
+
+    The ceiling earns its keep as a test affordance — every reconciler in
+    this file passes ``tick_s=3600.0`` precisely so no background thread
+    races an explicit ``flush_now()``. But ``HIVE_COMMIT_TICK_S`` is public
+    and documented, so a plausible "commit every 10 minutes" reaches the
+    same branch and gets no reconciler at all. Nine tests here depended on
+    that branch and none asserted it, which is how a test affordance stays
+    invisible as a production cliff.
+
+    The second half is what makes this discriminating rather than a
+    restatement of the constructor: *at* the ceiling the loop still starts,
+    so the assertion is about the threshold, not about construction.
+    """
+    from hive._commit_queue import _MAX_AUTO_TICK_S, CommitReconciler
+
+    with caplog.at_level(logging.WARNING, logger="hive._commit_queue"):
+        disabled = CommitReconciler(git_vault, tick_s=_MAX_AUTO_TICK_S + 1.0)
+    try:
+        assert disabled._thread is None
+        assert any("auto_flush_disabled" in rec.message for rec in caplog.records), [
+            r.message for r in caplog.records
+        ]
+    finally:
+        disabled.close(drain=False)
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="hive._commit_queue"):
+        enabled = CommitReconciler(git_vault, tick_s=_MAX_AUTO_TICK_S)
+    try:
+        assert enabled._thread is not None
+        assert not any("auto_flush_disabled" in rec.message for rec in caplog.records)
+    finally:
+        enabled.close(drain=False)

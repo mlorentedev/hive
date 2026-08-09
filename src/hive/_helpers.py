@@ -332,6 +332,55 @@ _VAULT_MISSING_DEFAULT_MSG = (
 )
 
 
+_VAULT_NOT_A_REPO_MSG = (
+    "Vault path {path} exists but is not a git repository.\n"
+    "WHY: since the asynchronous commit queue landed, a write returns as soon "
+    "as the file is on disk and its path is queued for the reconciler. With no "
+    "repository behind it every flush fails, so writes succeed and are never "
+    "committed — the tool response still says the path is queued.\n"
+    "FIX: run `git init` in the vault root, or point HIVE_VAULT_PATH (alias "
+    "VAULT_PATH) at the vault that already is one. Files are written either "
+    "way; what is lost is the history every vault tool assumes."
+)
+
+
+def vault_is_git_repo(vault_path: Path) -> bool:
+    """Is the vault a git repository?
+
+    Deliberately asks git rather than testing for a ``.git`` directory:
+    :func:`_git_filelock` places its lock at ``vault/.git/hive.lock`` and
+    creates the parent as a side effect, so directory presence stops being
+    evidence of a repository the moment hive has run once against the path.
+
+    Never raises — a broken or absent git binary answers "not a repository",
+    which is the conservative direction: the caller only uses this to decide
+    whether to warn.
+    """
+    try:
+        rc, _, _ = _run_git(["rev-parse", "--git-dir"], vault_path)
+    except Exception:  # noqa: BLE001
+        return False
+    return rc == 0
+
+
+def vault_git_startup_warning(resolved: Path) -> str:
+    """Warn at startup when the vault exists but carries no git repository.
+
+    Sibling of :func:`vault_startup_warning`, kept separate because the two
+    answer different questions and only one can be true at a time — a path
+    that does not exist is not also a non-repository worth reporting.
+
+    This runs once at ``create_server`` time on purpose. The alternative,
+    checking per write so the response suffix could stop promising a commit,
+    would put a git invocation back on the write path that ADR-018 exists to
+    remove — paying on every write to describe a condition that changes once
+    in the life of a vault.
+    """
+    if not resolved.is_dir() or vault_is_git_repo(resolved):
+        return ""
+    return _VAULT_NOT_A_REPO_MSG.format(path=resolved)
+
+
 def vault_startup_warning(resolved: Path, *, env_set: bool) -> str:
     """Return a loud, actionable warning if the resolved vault path is missing
     at startup, or an empty string when it exists.
@@ -1073,13 +1122,45 @@ _GIT_FILELOCKS: dict[str, filelock.BaseFileLock] = {}
 _GIT_FILELOCKS_GUARD = threading.Lock()
 
 
+def _filelock_path(vault_path: Path) -> Path:
+    """Where this vault's inter-process write lock file lives.
+
+    Inside ``.git/`` when the vault has one: the lock travels with the repo
+    and sits in the one directory git already ignores. When it does not, the
+    lock moves to the vault root — ``filelock`` builds missing parents on
+    acquire, so the previously unconditional path *created* a ``.git``
+    directory in a vault that had no repository, leaving behind something
+    that answers "yes" to every tool that tests for a repo by looking.
+
+    Deliberately a ``stat`` rather than ``git rev-parse``: this runs on every
+    write, and the question here is only where to put a file. Keying off mere
+    presence also keeps a ``.git`` left behind by an older hive pointing at
+    the path that hive expects, so the two stay mutually exclusive across an
+    upgrade — which asking git would break, since it would call that
+    directory "not a repository" and move the lock.
+
+    Single source of truth for both :func:`_git_filelock` and
+    :func:`evict_filelock`: the two must derive the same key or an eviction
+    silently pops nothing and the deadline supervisor stops unblocking
+    siblings (ADR-012).
+    """
+    if (vault_path / ".git").exists():
+        return vault_path / ".git" / "hive.lock"
+    return vault_path / ".hive.lock"
+
+
 def _git_filelock(vault_path: Path) -> filelock.BaseFileLock:
-    """Inter-process lock file under the vault's .git dir.
+    """Inter-process lock file for the vault — see :func:`_filelock_path`.
 
     Serializes write critical sections across separate hive processes
-    (the threading lock only covers a single process). The lock file
-    lives alongside git's own ``index.lock`` so it travels with the
-    repo and is naturally ignored by git itself.
+    (the threading lock only covers a single process). In a repository the
+    lock file lives alongside git's own ``index.lock`` so it travels with
+    the repo and is naturally ignored by git itself; in a vault without one
+    it sits at the root rather than conjuring a ``.git`` directory.
+
+    The lock is *not* git-specific despite the name: ``vault_write_lock``
+    takes it around every read-modify-write, so it must exist and function
+    in a vault that has no repository at all.
 
     Returns a process-singleton ``FileLock`` instance per vault path so
     nested ``acquire()`` calls from the same thread re-enter cleanly:
@@ -1087,7 +1168,7 @@ def _git_filelock(vault_path: Path) -> filelock.BaseFileLock:
     calls ``_git_commit`` which would otherwise deadlock waiting on its
     own outer hold.
     """
-    key = str(vault_path / ".git" / "hive.lock")
+    key = str(_filelock_path(vault_path))
     with _GIT_FILELOCKS_GUARD:
         lock = _GIT_FILELOCKS.get(key)
         if lock is None:
@@ -1113,8 +1194,14 @@ def evict_filelock(vault_path: Path) -> bool:
     object can acquire as soon as the holder releases. On Windows the
     orphan file persists until the parent process exits (filelock library
     invariant), but no longer blocks new acquires.
+
+    Derives its key through :func:`_filelock_path`, the same helper
+    :func:`_git_filelock` uses. Were the two to compute it independently, a
+    vault without a repository would evict under one path while the lock
+    lived at the other — and this would return False forever while looking
+    like it had worked.
     """
-    key = str(vault_path / ".git" / "hive.lock")
+    key = str(_filelock_path(vault_path))
     with _GIT_FILELOCKS_GUARD:
         lock = _GIT_FILELOCKS.pop(key, None)
     return lock is not None
