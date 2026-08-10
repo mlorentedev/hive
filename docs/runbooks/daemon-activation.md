@@ -39,6 +39,13 @@ hive service --help          # confirm the subcommand exists (>= 1.32.0)
 The `hive` console script must resolve to the upgraded tool (`which hive` /
 `where hive`).
 
+On Windows, this bootstraps the managed installation. Use `hive self-upgrade
+[version]` for later upgrades; the version is optional and defaults to the
+latest PyPI release. It creates a versioned runtime and atomically switches the
+active junction instead of replacing files in use. Open a new terminal after
+the first managed upgrade so the launcher added to the user `PATH` is available.
+On Linux and macOS, later upgrades use `uv tool upgrade hive-vault`.
+
 ### 2. Install + start the service
 
 ```bash
@@ -116,8 +123,9 @@ cp "$BK" "$HOME/.claude.json"          # restore the uvx hive-vault entry
   `EnvironmentFile=-~/.config/hive/hive.env` for secrets. Windows Scheduled
   Tasks inherit the user-profile environment, so a user-level `VAULT_PATH` (or
   the default `~/Projects/knowledge`) is used as-is.
-- **Restart-on-upgrade.** Once supervised, `uv tool upgrade hive-vault` is
-  picked up automatically: the daemon polls its installed version and, on
+- **Restart-on-upgrade.** Once supervised, a platform-appropriate upgrade
+  (`uv tool upgrade hive-vault` on Linux/macOS; `hive self-upgrade` on Windows)
+  is picked up automatically: the daemon polls its installed version and, on
   drift, exits `75` so `Restart=on-failure` / `RestartOnFailure` relaunches into
   the new code. No manual restart needed.
 - **Fleet rollout.** Repeat per machine, or use the dotfiles `setup-*.sh`

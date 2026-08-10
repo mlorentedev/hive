@@ -69,7 +69,8 @@ lo relance con el nuevo código. Sin reinicio manual, y sin añadir latencia al
 arranque del cliente.
 
 ```
-uv tool upgrade hive-vault        # la nueva versión aterriza en disco
+Linux / macOS: uv tool upgrade hive-vault
+Windows:       hive self-upgrade [version]
         │
         ▼
 hive serve detecta el drift       # dentro de HIVE_UPGRADE_POLL_S
@@ -79,10 +80,12 @@ exit 75  ──►  el supervisor reinicia  ──►  el daemon corre la nueva 
 ```
 
 Así, el *mecanismo* de actualización vive en el paquete; **cada cuánto
-actualizas es una política de despliegue** que tú controlas — p. ej. un
-`uv tool upgrade hive-vault` periódico (un timer de systemd `--user` o una tarea
-programada de Windows). El daemon adopta lo que haya en disco en su siguiente
-sondeo.
+actualizas es una política de despliegue** que tú controlas. Linux y macOS
+pueden usar un `uv tool upgrade hive-vault` periódico (por ejemplo, un timer de
+systemd `--user`). En Windows, usa `hive self-upgrade` de forma deliberada; crea
+un runtime versionado y cambia la junction activa de forma atómica en lugar de
+reemplazar archivos que podrían estar en uso. El daemon adopta la versión
+instalada en su siguiente sondeo.
 
 Una parada por señal (graceful) o una instalación rechazada salen con `0`, que
 bajo `Restart=on-failure` **no** dispara un relanzamiento — solo el camino de

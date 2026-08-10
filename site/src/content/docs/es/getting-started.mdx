@@ -74,6 +74,26 @@ Registra siempre Hive a nivel de **usuario** (no de proyecto) para que funcione 
 
 El flag `--upgrade` asegura que siempre obtengas la última versión de PyPI al iniciar cada sesión. `uvx` gestiona el entorno Python automáticamente.
 
+## Actualizar una instalación persistente
+
+Las configuraciones con `uvx` anteriores resuelven la versión actual en cada nueva sesión. Si
+usas una instalación persistente para el [modo daemon](/hive/es/guides/daemon-mode/), actualízala
+de forma deliberada:
+
+```bash
+# Linux / macOS
+uv tool upgrade hive-vault
+
+# Windows (la versión es opcional; al omitirla se selecciona la última versión de PyPI)
+hive self-upgrade [version]
+```
+
+En Windows, `self-upgrade` construye la nueva release junto a los archivos activos y cambia el
+runtime gestionado de forma atómica, sin modificar archivos retenidos por un proceso de Hive en
+ejecución. Abre una terminal nueva tras la primera actualización gestionada para disponer del
+launcher añadido a tu `PATH` de usuario. Inicia una nueva sesión MCP tras cualquier actualización;
+una sesión existente mantiene su proceso de servidor actual.
+
 ## Primera Consulta
 
 Una vez registrado, tu asistente de IA puede usar las herramientas de Hive. Prueba preguntando:

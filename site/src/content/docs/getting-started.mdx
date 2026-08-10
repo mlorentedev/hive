@@ -74,6 +74,24 @@ Always register Hive at **user scope** (not project scope) so it works across al
 
 The `--upgrade` flag ensures you always get the latest version from PyPI on each session start. `uvx` handles the Python environment automatically.
 
+## Updating a persistent installation
+
+The `uvx` configurations above resolve the current release for each new session. If you use a
+persistent installation for [daemon mode](/hive/guides/daemon-mode/), upgrade it deliberately:
+
+```bash
+# Linux / macOS
+uv tool upgrade hive-vault
+
+# Windows (the version is optional; omitted selects the latest PyPI release)
+hive self-upgrade [version]
+```
+
+On Windows, `self-upgrade` builds the new release beside the active files and atomically switches
+the managed runtime, so it does not modify files held by a running Hive process. Open a new
+terminal after the first managed upgrade so the launcher added to your user `PATH` is available.
+Start a new MCP session after any upgrade; an existing session keeps its current server process.
+
 ## First Query
 
 Once registered, your AI assistant can use Hive tools. Try asking:
