@@ -54,11 +54,11 @@ Non-blocking, decided:
 - [x] **AC4** — With neither a layout nor a PATH hit, `<python> -m hive.server` is returned.
 - [x] **AC5** — The probe answers `False` on any subprocess failure and never propagates (AGENTS.md broad-`Exception` rule; Windows raises `OSError` variants here, not `CalledProcessError`).
 - [x] **AC6** — A `current` junction pointing at a half-built version (no launcher inside) does not win.
-- [ ] **AC7** *(PR2)* — After `hive self-upgrade` on a machine with no prior install, `hive --version` works from a **fresh** shell (an already-open shell is out of contract — see ADR-019 Consequences).
-- [ ] **AC8** *(PR2)* — An upgrade repoints `current` and requires no launcher rewrite; launcher installation is idempotent, and repeated upgrades add no duplicate `PATH` entries.
-- [ ] **AC9** *(PR2)* — Hive never writes to or deletes from `~/.local/bin`. Asserted explicitly, because the rejected option C did exactly that and the boundary is the decision.
-- [ ] **AC10** *(PR2)* — With a `hive*` on `PATH` that fails `_executes()`, install reports it and names `dotf doctor --fix`, without modifying it.
-- [ ] **AC11** *(PR2)* — `%LOCALAPPDATA%\hive\bin` is **prepended** to the User `PATH`, not appended, so a stale `~/.local/bin` entry does not win on ordering.
+- [ ] **AC7** *(PR2)* — After `hive self-upgrade` on a machine with no prior install, `hive --version` works from a **fresh** shell (an already-open shell is out of contract — see ADR-019 Consequences). **Still open: a statement about the Windows shell's environment, answerable only on the Windows box.**
+- [x] **AC8** *(PR2)* — An upgrade repoints `current` and requires no launcher rewrite; launcher installation is idempotent, and repeated upgrades add no duplicate `PATH` entries.
+- [x] **AC9** *(PR2)* — Hive never writes to or deletes from `~/.local/bin`. Asserted explicitly, because the rejected option C did exactly that and the boundary is the decision.
+- [x] **AC10** *(PR2)* — With a `hive*` on `PATH` that fails `_executes()`, install reports it and names `dotf doctor --fix`, without modifying it.
+- [x] **AC11** *(PR2)* — `%LOCALAPPDATA%\hive\bin` is **prepended** to the User `PATH`, not appended, so a stale `~/.local/bin` entry does not win on ordering.
 
 ## References
 

@@ -36,21 +36,32 @@ created: "2026-08-07"
 
 - [x] **GATE: decide the launcher directory** — resolved by ADR-019: hive owns `%LOCALAPPDATA%\hive\bin`, prepended to the User PATH, and never touches `~/.local/bin`. The spec's original criterion (*"which one `hive service install` can make work without a shell restart"*) was aimed at the wrong consumer — service install uses an absolute path and never reads PATH.
 - [x] **ADR-019 accepted** (2026-08-07) — was **gating**; PR2 is now free to start
-- [ ] [P] [AC9] Write failing test: no install path writes to or deletes from `~/.local/bin` (guards the rejected option C — the boundary *is* the decision)
-- [ ] [P] [AC10] Write failing test: a `hive*` on PATH failing `_executes()` is reported and named alongside `dotf doctor --fix`, and is left unmodified
-- [ ] [P] [AC11] Write failing test: the hive bin dir is **prepended** to the User PATH, not appended
-- [ ] [P] [AC8] Write failing test: re-running install is idempotent — no duplicate `PATH` entries, no rewritten shim
-- [ ] [AC7] Write a `hive.cmd` shim into `%LOCALAPPDATA%\hive\bin` dispatching through `current`, as part of `self_upgrade` and first install
-- [ ] [AC11] Prepend the directory to the User `PATH` (User-scope env var; no admin)
-- [ ] [AC10] Probe other `hive*` PATH entries with `_executes()` and warn on failure — detect only, never delete (ADR-019 Decision 4)
-- [ ] [AC7] Verify on Windows from a **fresh** shell; an already-open shell is explicitly out of contract
-- [ ] Author `features.json` now that the criteria set is complete (AC1-AC11)
-- [ ] Then flip ADR-015 -> `accepted` (its AC-3) and unblock dotfiles#791 PR2
+- [x] [P] [AC9] Write failing test: no install path writes to or deletes from `~/.local/bin` (guards the rejected option C — the boundary *is* the decision)
+- [x] [P] [AC10] Write failing test: a `hive*` on PATH failing `_executes()` is reported and named alongside `dotf doctor --fix`, and is left unmodified
+- [x] [P] [AC11] Write failing test: the hive bin dir is **prepended** to the User PATH, not appended
+- [x] [P] [AC8] Write failing test: re-running install is idempotent — no duplicate `PATH` entries, no rewritten shim
+- [x] [AC7] Write a `hive.cmd` shim into `%LOCALAPPDATA%\hive\bin` dispatching through `current`, as part of `self_upgrade` and first install
+- [x] [AC11] Prepend the directory to the User `PATH` (User-scope env var; no admin)
+- [x] [AC10] Probe other `hive*` PATH entries with `_executes()` and warn on failure — detect only, never delete (ADR-019 Decision 4)
+- [ ] [AC7] Verify on Windows from a **fresh** shell; an already-open shell is explicitly out of contract — **the one task this Linux box cannot run**
+- [x] Author `features.json` now that the criteria set is complete (AC1-AC11)
+- [ ] Then flip ADR-015 -> `accepted` (its AC-3) and unblock dotfiles#791 PR2 — gated on the hardware run above
+
+### Decided while implementing PR2
+
+- [x] **Launcher install must not fail an upgrade.** By the time it runs, `current` already
+      selects the new version and the supervisor will restart into it; rolling a working swap
+      back over a refused registry write would trade a real upgrade for a cosmetic one. Logged,
+      not raised.
+- [x] **Upgrade *policy* was still undecided** and is not what ADR-019 settles — ADR-019 says
+      where a launcher lives, not what may trigger an upgrade. Closed by
+      [ADR-020](../../docs/adr/adr-020-client-upgrade-policy.md): hive notifies and offers, never
+      auto-applies, with auto-apply gated on tool-contract versioning.
 
 ## Closing
 
 - [x] Every PR1 acceptance criterion is covered by at least one test
-- [ ] Every acceptance criterion has a matching entry in `features.json` — deferred to PR2, when the criteria set is complete
+- [x] Every acceptance criterion has a matching entry in `features.json` (AC1-AC11 → f1-f10; AC7 is `manual:` and names what only hardware can answer)
 - [x] Type checks pass
 - [x] Lint passes
 - [x] No unrelated changes in the diff (no scope creep)

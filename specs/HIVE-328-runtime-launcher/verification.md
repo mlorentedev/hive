@@ -13,7 +13,56 @@ created: "2026-08-07"
 - [x] AC4 (module-invocation fallback) -> `test_resolve_exec_falls_back_to_module_invocation`
 - [x] AC5 (probe never propagates) -> `test_executes_treats_any_probe_failure_as_not_runnable`
 - [x] AC6 (half-built layout does not win) -> `test_resolve_exec_ignores_a_layout_whose_launcher_is_missing`
-- [ ] AC7, AC8 -> PR2, blocked on the launcher-directory decision
+- [ ] AC7 (fresh shell resolves `hive` after an upgrade) -> **open**, hardware-only; see "What PR2 cannot verify here"
+- [x] AC8 (upgrade needs no launcher rewrite; install is idempotent) -> `test_launcher_survives_a_repoint_without_being_rewritten`, `test_install_launcher_rewrites_nothing_on_a_second_run`, `test_prepend_user_path_is_idempotent`
+- [x] AC9 (never writes to or deletes from `~/.local/bin`) -> `test_install_launcher_never_touches_local_bin`, `test_launcher_lives_in_a_hive_owned_dir_beside_the_runtime`
+- [x] AC10 (dead `hive*` reported, named with `dotf doctor --fix`, left unmodified) -> `test_orphaned_launchers_reports_a_dead_hive_without_modifying_it`, `test_orphaned_launchers_ignores_a_healthy_hive`, `test_orphaned_launchers_skips_hives_own_directory`, `test_orphan_warning_names_the_path_and_the_repair_command`
+- [x] AC11 (prepended, not appended) -> `test_prepend_user_path_puts_hives_dir_first`
+- [x] POSIX boundary (ADR-019 is Windows-only) -> `test_install_launcher_is_an_explicit_noop_off_windows`
+
+## What PR2 cannot verify here, and why that is stated rather than papered over
+
+AC7 says *"`hive --version` works from a fresh shell"*. That is a claim about the Windows shell's
+environment, and this session ran on Linux — so it stays unticked, its `features.json` entry stays
+`manual:`, ADR-015 stays `proposed`, and #328 stays open. The alternative, ticking it from a mocked
+Windows, would assert exactly the thing no mock can know.
+
+What *is* host-independent is every mechanism AC7 rests on, and each is pinned by a test: where the
+shim goes (AC9), what it contains and that it dispatches through `current` (AC8), that a repeat
+install rewrites nothing (AC8), and that the `PATH` entry is prepended rather than appended (AC11).
+The forced-Windows fixture stubs exactly three seams — `sys.platform` and the two `winreg`
+accessors — so the *policy* (prepend, deduplicate, never append) runs on every push and only the
+registry call itself waits for hardware.
+
+## Test status (PR2, this session)
+
+```
+$ uv run pytest tests/ -q
+884 passed, 2 skipped, 63 deselected in 223.02s
+
+$ uv run ruff check src/ tests/
+All checks passed!
+
+$ uv run ruff format --check src/ tests/
+71 files already formatted
+
+$ uv run mypy --strict src/
+Success: no issues found in 30 source files
+```
+
+The 12 new tests were confirmed **red before the implementation existed** (`AttributeError` on
+each new symbol), not merely green afterwards.
+
+## A defect the tests caught before it could ship
+
+The first `install_launcher` wrote the shim with `write_text` and compared with `read_text`, and
+`test_install_launcher_rewrites_nothing_on_a_second_run` failed on an mtime that kept moving. The
+cause is text-mode newline translation in both directions: the renderer emits `CRLF` because a
+`.cmd` needs it, reading translates it back to `\n` so the idempotency check could never match, and
+on Windows *writing* would have expanded `\n` to `os.linesep` and produced `\r\r\n` — a malformed
+batch file. Fixed by making the shim a byte-exact artifact (`read_bytes`/`write_bytes`). Worth
+recording because the visible symptom (a moving mtime) was the harmless half; the corrupt-on-Windows
+half would have shipped silently on the one platform that runs this code.
 
 ## The failure this closes, observed on real hardware (2026-08-07)
 

@@ -19,6 +19,7 @@ primitive (``mklink /J``) is validated by real hardware — mirroring how
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
@@ -29,8 +30,20 @@ import httpx
 
 from hive._helpers import _subprocess_run_kwargs
 
+_log = logging.getLogger(__name__)
+
 CURRENT_LINK_NAME = "current"
 _STAGING_LINK_NAME = ".current.staging"
+
+# The launcher a human's shell resolves (ADR-019). A `.cmd`, not a `.exe`,
+# because hive has no compiler in the install path — and `.cmd` is on PATHEXT.
+LAUNCHER_NAME = "hive.cmd"
+
+# Windows semantics, asserted rather than inherited from the host. `prepend_user_path`
+# writes a *Windows registry* value, so `;` and case-insensitivity apply no matter
+# which OS the interpreter is on — using `os.pathsep`/`os.path.normcase` here would
+# make the function behave one way in production and another under test.
+_WINDOWS_PATH_SEP = ";"
 
 # PyPI's per-project JSON API — ``info.version`` is the newest published release.
 # Bounded so a wedged/slow PyPI fails fast instead of hanging the trigger; the
@@ -78,6 +91,23 @@ def current_link() -> Path:
 def _staging_link() -> Path:
     """Scratch reparse-point name used to stage a new junction before the flip."""
     return runtime_root() / _STAGING_LINK_NAME
+
+
+def launcher_dir() -> Path:
+    """Directory hive owns for its ``PATH`` launcher — ``%LOCALAPPDATA%\\hive\\bin``.
+
+    Derived from ``runtime_root().parent`` rather than reading ``LOCALAPPDATA``
+    a second time, so the one existing ``HIVE_RUNTIME_ROOT`` seam relocates the
+    launcher along with the versions it dispatches to. A test that overrides the
+    root therefore cannot write a shim into the developer's real profile, and an
+    install relocated off the default keeps its two halves together.
+
+    ADR-019: hive owns this directory outright and never writes to ``~/.local/bin``,
+    which uv owns. Joint ownership was rejected because ``PATHEXT`` resolves
+    ``.EXE`` before ``.CMD`` — a ``hive.cmd`` written beside a leftover
+    ``hive.exe`` would change nothing observable.
+    """
+    return runtime_root().parent / "bin"
 
 
 # ── the OS-specific swap primitive (real on the host; mocked in unit tests) ──
@@ -356,6 +386,199 @@ def _gc_other_versions(keep: str) -> list[str]:
     return deferred
 
 
+# ── the PATH launcher (HIVE-328 PR2 / ADR-019) ───────────────────────────
+
+
+def _launcher_target() -> Path:
+    """The executable the shim dispatches to, addressed *through* ``current``.
+
+    Naming the junction rather than a concrete ``versions/<v>`` dir is the entire
+    reason A3 exists: an upgrade repoints one link and every consumer follows,
+    unrewritten. A shim naming the version would need regenerating on every
+    upgrade and would be stale for the whole window in between.
+    """
+    return current_link() / "Scripts" / "hive.exe"
+
+
+def render_launcher_script(target: Path) -> str:
+    """The ``hive.cmd`` body — a pure renderer, so its contents are testable off
+    Windows.
+
+    Deliberately two lines. Nothing may follow the dispatch, because ``cmd``
+    reports the *last* command's ``ERRORLEVEL`` and hive's exit codes are load
+    bearing: the daemon returns 75 to ask its supervisor for a restart-on-upgrade,
+    and a trailing ``echo`` here would overwrite that with 0 and strand the
+    daemon on the old version.
+    """
+    return f'@echo off\r\n"{target}" %*\r\n'
+
+
+def _windows_path_key(value: str) -> str:
+    """Comparison key for a Windows ``PATH`` entry.
+
+    Windows resolves paths case-insensitively and accepts either separator, so
+    ``C:\\Hive\\Bin``, ``c:/hive/bin`` and ``c:\\hive\\bin\\`` are one directory
+    and must deduplicate as one. Spelled out rather than delegated to
+    ``os.path.normcase``, which is the identity function off Windows and would
+    silently stop deduplicating under test.
+    """
+    return value.replace("/", "\\").rstrip("\\").lower()
+
+
+def _read_user_path() -> str:
+    """The User (``HKCU``) ``PATH``, or ``""`` when unset. A test seam: this is
+    the only launcher code that cannot exist off Windows."""
+    if sys.platform != "win32":  # pragma: no cover — stubbed in tests, unreachable in prod
+        return ""
+    import winreg
+
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+        try:
+            value, _kind = winreg.QueryValueEx(key, "Path")
+        except FileNotFoundError:
+            return ""
+        return str(value)
+
+
+def _write_user_path(value: str) -> None:
+    """Replace the User ``PATH``.
+
+    Written as ``REG_EXPAND_SZ``, never ``REG_SZ``: a user ``PATH`` routinely
+    contains entries like ``%USERPROFILE%\\.local\\bin``, and storing it as a
+    plain string freezes those percent-signs as literal text — silently breaking
+    every unrelated entry that relied on expansion.
+    """
+    if sys.platform != "win32":  # pragma: no cover — stubbed in tests, unreachable in prod
+        return
+    import winreg
+
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as key:
+        winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, value)
+
+
+def _broadcast_env_change() -> None:
+    """Tell running processes the environment changed (``WM_SETTINGCHANGE``).
+
+    Load bearing for ADR-019's accepted cost. New processes read ``PATH`` from
+    the registry only if their *parent* has refreshed — without this broadcast
+    Explorer keeps handing every newly-opened terminal its stale copy, and
+    "open a new terminal" would not work until the next logout. Best-effort: a
+    failed broadcast costs a logout, never a failed install.
+    """
+    if sys.platform != "win32":  # pragma: no cover — stubbed in tests, unreachable in prod
+        return
+    import ctypes
+
+    hwnd_broadcast = 0xFFFF
+    wm_settingchange = 0x1A
+    smto_abortifhung = 0x0002
+    try:
+        ctypes.windll.user32.SendMessageTimeoutW(
+            hwnd_broadcast, wm_settingchange, 0, "Environment", smto_abortifhung, 5000, None
+        )
+    except Exception:  # noqa: BLE001 — cosmetic refresh; never fail an install over it
+        _log.debug("mcp.launcher.broadcast_failed", exc_info=True)
+
+
+def prepend_user_path(directory: Path) -> bool:
+    """Prepend *directory* to the User ``PATH``; return whether anything changed.
+
+    **Prepend, never append** (AC11). The machine that motivated this work still
+    has a dead ``hive.exe`` in ``~/.local/bin``, and under ``PATHEXT`` an appended
+    entry would lose that lookup forever — ordering is the whole mechanism.
+
+    **Idempotent** (AC8): an entry already present anywhere is left where it is.
+    An upgrade runs this every time, so a version that re-prepended would grow
+    the User ``PATH`` without bound, and a ``PATH`` that overruns its length
+    ceiling is a far worse failure than a launcher that is merely second in line.
+    """
+    existing = [entry for entry in _read_user_path().split(_WINDOWS_PATH_SEP) if entry]
+    wanted = _windows_path_key(str(directory))
+    if any(_windows_path_key(entry) == wanted for entry in existing):
+        return False
+    _write_user_path(_WINDOWS_PATH_SEP.join([str(directory), *existing]))
+    _broadcast_env_change()
+    return True
+
+
+def orphaned_launchers(skip: Path) -> list[str]:
+    """Every ``hive`` on ``PATH`` that cannot start, excluding hive's own dir.
+
+    ADR-019 decision 4 — **detect and warn, never delete**. Removing an orphaned
+    uv trampoline is dotfiles#574's job; hive deleting another tool's artifact is
+    a different class of act from installing its own, and repairing once would
+    not stop the next ``uv tool install`` from recreating it.
+
+    *skip* is hive's own launcher directory, excluded because probing the shim
+    during a first install — or any window where ``current`` is mid-flip —
+    legitimately fails, and reporting hive's own launcher as someone else's
+    orphan would be actively misleading.
+    """
+    from hive._service import _executes
+
+    owned = _windows_path_key(str(skip))
+    found: list[str] = []
+    seen: set[str] = set()
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry or _windows_path_key(entry) == owned:
+            continue
+        hit = shutil.which("hive", path=entry)
+        if hit is None or hit in seen:
+            continue
+        seen.add(hit)
+        if not _executes(hit):
+            found.append(hit)
+    return found
+
+
+def render_orphan_warning(paths: list[str]) -> str:
+    """An actionable report for launchers hive has decided not to touch.
+
+    Carries WHAT and the FIX (``pattern-agent-oriented-errors``): the concrete
+    path, not "a launcher", and the command that clears it — because hive has
+    deliberately given up the ability to clear it itself, so a message without
+    the escape hatch would leave the reader stuck.
+    """
+    listed = ", ".join(paths)
+    return (
+        f"hive: found a `hive` on PATH that does not start: {listed}. "
+        "This is typically an orphaned uv trampoline left by a removed "
+        "`uv tool install`. Hive's own launcher is prepended, so a NEW shell "
+        "resolves hive correctly, but the dead entry stays until it is removed. "
+        "Hive does not delete files another tool created — run `dotf doctor --fix`."
+    )
+
+
+def install_launcher() -> Path | None:
+    """Install the ``PATH`` launcher; return its path, or ``None`` off Windows.
+
+    POSIX is an explicit no-op, not an oversight (ADR-019, "Why this is
+    Windows-only"): ``~/.local/bin`` is already on ``PATH`` there and nothing
+    locks an in-use file, so ``uv tool`` remains the install model. Writing a
+    launcher anyway would add a second, unowned way to resolve ``hive`` on a
+    platform that never asked for one.
+
+    An unchanged shim is left untouched rather than rewritten — on Windows a
+    rewrite can fail outright while another process holds the file open, which
+    would turn a successful upgrade into a failed one for no gain.
+    """
+    if sys.platform != "win32":
+        return None
+    bin_dir = launcher_dir()
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    shim = bin_dir / LAUNCHER_NAME
+    # Bytes, not text, on both sides. The renderer emits CRLF because that is
+    # what a `.cmd` needs, and text mode would mangle it in both directions:
+    # writing translates `\n` to `os.linesep`, so on Windows the CRLF becomes
+    # `\r\r\n`; reading translates it back to `\n`, so the idempotency check
+    # would never match and every upgrade would rewrite the shim.
+    body = render_launcher_script(_launcher_target()).encode("utf-8")
+    if not shim.exists() or shim.read_bytes() != body:
+        shim.write_bytes(body)
+    prepend_user_path(bin_dir)
+    return shim
+
+
 def self_upgrade(version: str) -> str | None:
     """Upgrade the install to *version* without ever touching in-use files
     (HIVE-267 / ADR-015 mechanism A3); return the PREVIOUS version (``None`` on a
@@ -383,5 +606,21 @@ def self_upgrade(version: str) -> str | None:
     if not version_path(version).is_dir():
         build_version(version)  # raises RuntimeError on failure — current untouched
     repoint(version)  # stage-then-flip — raises on failure — previous stays pointed-to
+    # The launcher is what makes a completed upgrade reachable to a human typing
+    # `hive` (ADR-019). Deliberately NOT allowed to fail the upgrade: by this
+    # point `current` already selects the new version and the supervisor will
+    # restart into it, so a refused registry write or a locked shim costs PATH
+    # convenience — rolling the swap back over it would trade a working upgrade
+    # for a cosmetic one.
+    try:
+        install_launcher()
+    except OSError as exc:
+        _log.warning(
+            "mcp.launcher.install_failed error=%s "
+            "the upgrade succeeded and `current` selects %s; only the PATH shim is missing. "
+            "Re-run `hive self-upgrade` once the cause is cleared.",
+            exc,
+            version,
+        )
     _gc_other_versions(keep=version)
     return previous
