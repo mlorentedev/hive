@@ -1,0 +1,79 @@
+[
+  {
+    "id": "HIVE-328-runtime-launcher-f1",
+    "behavior": "_resolve_exec() prefers the A3 layout over an arbitrary PATH hit and returns the path through `current`, not a concrete versions/<v> dir, so the registered command survives an upgrade unrewritten (AC1).",
+    "verification": "uv run pytest tests/test_service.py::test_resolve_exec_prefers_the_a3_layout_over_an_arbitrary_path_hit -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-328-runtime-launcher-f2",
+    "behavior": "A PATH hit that cannot start is not selected; resolution falls through to the module invocation rather than handing the supervisor a dead binary (AC2).",
+    "verification": "uv run pytest tests/test_service.py::test_resolve_exec_rejects_a_path_hit_that_cannot_start -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-328-runtime-launcher-f3",
+    "behavior": "A healthy PATH hit is still selected when no layout exists — no regression for plain uv-tool installs (AC3) — and with neither layout nor PATH hit, `<python> -m hive.server` is returned (AC4).",
+    "verification": "uv run pytest tests/test_service.py::test_resolve_exec_accepts_a_path_hit_that_starts tests/test_service.py::test_resolve_exec_falls_back_to_module_invocation -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-328-runtime-launcher-f4",
+    "behavior": "The _executes probe answers False on any subprocess failure and never propagates, and a `current` pointing at a half-built version with no launcher inside does not win (AC5, AC6).",
+    "verification": "uv run pytest tests/test_service.py::test_executes_treats_any_probe_failure_as_not_runnable tests/test_service.py::test_resolve_exec_ignores_a_layout_whose_launcher_is_missing -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-328-runtime-launcher-f5",
+    "behavior": "After `hive self-upgrade` on a machine with no prior install, `hive --version` works from a FRESH shell; an already-open shell is out of contract (AC7).",
+    "verification": "manual: real non-admin Windows box. Every host-independent mechanism AC7 rests on — shim location, contents, dispatch through `current`, and the PATH write — is covered by f6-f9; what only hardware can answer is whether a new shell resolves it.",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-328-runtime-launcher-f6",
+    "behavior": "An upgrade repoints `current` and requires no launcher rewrite; launcher installation is idempotent, and repeated upgrades add no duplicate PATH entries (AC8).",
+    "verification": "uv run pytest tests/test_runtime.py::test_launcher_survives_a_repoint_without_being_rewritten tests/test_runtime.py::test_install_launcher_rewrites_nothing_on_a_second_run tests/test_runtime.py::test_prepend_user_path_is_idempotent -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-328-runtime-launcher-f7",
+    "behavior": "Hive never writes to or deletes from ~/.local/bin — the boundary that rules out rejected option C (AC9).",
+    "verification": "uv run pytest tests/test_runtime.py::test_install_launcher_never_touches_local_bin tests/test_runtime.py::test_launcher_lives_in_a_hive_owned_dir_beside_the_runtime -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-328-runtime-launcher-f8",
+    "behavior": "A `hive*` on PATH that fails _executes() is reported and named alongside `dotf doctor --fix`, and is left unmodified; a healthy one and hive's own directory are not reported (AC10).",
+    "verification": "uv run pytest tests/test_runtime.py -k orphan -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-328-runtime-launcher-f9",
+    "behavior": "The hive bin dir is PREPENDED to the User PATH, not appended, so a stale ~/.local/bin entry does not win on ordering (AC11).",
+    "verification": "uv run pytest tests/test_runtime.py::test_prepend_user_path_puts_hives_dir_first -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-328-runtime-launcher-f11",
+    "behavior": "An upgrade installs the launcher, and does so after `current` is flipped; a launcher install that raises leaves the upgrade successful — the return value, the flipped junction, and the GC all survive it.",
+    "verification": "uv run pytest tests/test_runtime.py::test_self_upgrade_installs_the_launcher_after_repointing tests/test_runtime.py::test_a_failed_launcher_install_does_not_fail_the_upgrade -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-328-runtime-launcher-f10",
+    "behavior": "On POSIX the launcher install is an explicit no-op: ADR-019 is Windows-only, and a second unowned way to resolve `hive` must not appear on a platform where uv tool remains the install model.",
+    "verification": "uv run pytest tests/test_runtime.py::test_install_launcher_is_an_explicit_noop_off_windows -q",
+    "state": "pending",
+    "evidence": ""
+  }
+]

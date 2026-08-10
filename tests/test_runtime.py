@@ -581,3 +581,357 @@ def test_cli_dispatch_routes_self_upgrade(monkeypatch: pytest.MonkeyPatch) -> No
     )
     assert server._dispatch(["self-upgrade", "1.41.7"]) == 0
     assert seen["version"] == "1.41.7"
+
+
+# ── the PATH launcher (HIVE-328 PR2 / ADR-019) ───────────────────────────
+#
+# AC7 ("`hive --version` works from a fresh shell after an upgrade") is the one
+# criterion these cannot reach: it is a statement about the Windows shell's
+# environment, and only real Windows hardware can answer it. What IS host-
+# independent is every mechanism AC7 rests on — where the shim goes, what it
+# contains, that it resolves through `current`, and how the PATH entry is
+# written — so those are pinned here and AC7 stays a hardware task.
+
+
+@pytest.fixture
+def windows_launcher(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    """Force the Windows install path onto a POSIX test host.
+
+    Three seams are stubbed, and each is a real boundary rather than a
+    convenience: ``sys.platform`` selects the branch, and the two ``winreg``
+    accessors are the only code in the launcher that cannot exist off Windows.
+    Stubbing the registry with a dict keeps the *policy* — prepend, deduplicate,
+    never append — under test on every push, leaving only the registry call
+    itself for the hardware run.
+
+    Yields the fake registry so a test can seed a pre-existing ``PATH`` and read
+    back what the launcher wrote.
+    """
+    from hive import _runtime
+
+    monkeypatch.setattr(_runtime.sys, "platform", "win32")
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path / "hive" / "runtime"))
+    registry = {"Path": ""}
+    monkeypatch.setattr(_runtime, "_read_user_path", lambda: registry["Path"])
+    monkeypatch.setattr(_runtime, "_write_user_path", lambda value: registry.update(Path=value))
+    monkeypatch.setattr(_runtime, "_broadcast_env_change", lambda: None)
+    return registry
+
+
+def test_launcher_lives_in_a_hive_owned_dir_beside_the_runtime(windows_launcher, tmp_path) -> None:
+    """ADR-019 decision: hive owns ``%LOCALAPPDATA%\\hive\\bin``.
+
+    Deriving it from ``runtime_root().parent`` rather than reading LOCALAPPDATA
+    a second time means the existing ``HIVE_RUNTIME_ROOT`` seam relocates the
+    launcher too — one override moves the whole install, so a test can never
+    write a shim into the developer's real profile.
+    """
+    from hive import _runtime
+
+    assert _runtime.launcher_dir() == tmp_path / "hive" / "bin"
+
+
+def test_install_launcher_never_touches_local_bin(
+    windows_launcher,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """AC9 — hive never writes to or deletes from ``~/.local/bin``.
+
+    This is the boundary that *is* the decision: rejected option C had hive
+    replacing a dead ``hive*`` in uv's directory, and ADR-019 ruled that out on
+    the grounds that hive should not delete another tool's artifact. Asserted
+    against a home directory seeded with exactly the orphan option C would have
+    seized, so the test fails if that behaviour is ever reintroduced.
+    """
+    from hive import _runtime
+
+    home = tmp_path / "home"
+    local_bin = home / ".local" / "bin"
+    local_bin.mkdir(parents=True)
+    orphan = local_bin / "hive.exe"
+    orphan.write_text("dead uv trampoline", encoding="utf-8")
+    monkeypatch.setattr(_runtime.Path, "home", staticmethod(lambda: home))
+
+    _runtime.install_launcher()
+
+    assert orphan.read_text(encoding="utf-8") == "dead uv trampoline"
+    assert sorted(p.name for p in local_bin.iterdir()) == ["hive.exe"]
+
+
+def test_install_launcher_is_an_explicit_noop_off_windows(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """ADR-019 is Windows-only, in as many words: on POSIX ``~/.local/bin`` is
+    already on PATH and there is no in-use-file lock, so ``uv tool`` stays the
+    install model. A launcher installed here would be a second, unowned way to
+    resolve ``hive`` on a platform that never asked for one."""
+    from hive import _runtime
+
+    monkeypatch.setattr(_runtime.sys, "platform", "linux")
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path / "runtime"))
+
+    assert _runtime.install_launcher() is None
+    assert not _runtime.launcher_dir().exists()
+
+
+def test_launcher_script_dispatches_through_the_current_junction(windows_launcher) -> None:
+    """The property A3 exists for: the shim names ``current``, not a concrete
+    ``versions/<v>`` dir, so repointing the junction redirects the shim and an
+    upgrade needs no launcher rewrite (AC8). A shim naming the version would
+    have to be regenerated on every upgrade — and would be stale for the whole
+    window between the repoint and that regeneration."""
+    from hive import _runtime
+
+    body = _runtime.render_launcher_script(_runtime._launcher_target())
+
+    assert "current" in body
+    assert "versions" not in body
+    assert body.startswith("@echo off")
+    # `%*` forwards every argument; without it `hive self-upgrade 3.0.0` would
+    # reach the real executable as a bare `hive`.
+    assert "%*" in body
+
+
+def test_launcher_survives_a_repoint_without_being_rewritten(
+    windows_launcher,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC8, stated as the observable rather than the mechanism: install, upgrade,
+    and the shim on disk is byte-identical. This is what makes the launcher
+    compose with A3 instead of becoming a second thing an upgrade must remember
+    to update.
+
+    The shim is installed under Windows semantics and the junction is then
+    flipped under POSIX ones — the same split every repoint test in this file
+    uses, because ``mklink`` is a ``cmd`` builtin that does not exist here while
+    a symlink shares the one property the swap relies on (it redirects without
+    copying).
+    """
+    from hive import _runtime
+
+    shim = _runtime.install_launcher()
+    assert shim is not None
+    first = shim.read_bytes()
+
+    # A repoint changes what `current` selects; it must not change the shim.
+    monkeypatch.setattr(_runtime.sys, "platform", "linux")
+    _runtime.version_path("3.0.0").mkdir(parents=True)
+    _runtime.repoint("3.0.0")
+
+    assert _runtime.current_version() == "3.0.0"
+    assert shim.read_bytes() == first
+
+
+def test_prepend_user_path_puts_hives_dir_first(windows_launcher) -> None:
+    """AC11 — prepended, never appended.
+
+    Ordering is the whole point on the machine that motivated this work: a stale
+    ``~/.local/bin`` holding a dead ``hive.exe`` is still on PATH, and under
+    PATHEXT an appended entry would lose to it forever. Prepending is what makes
+    hive's launcher win a lookup that the orphan would otherwise answer.
+    """
+    from hive import _runtime
+
+    windows_launcher["Path"] = r"C:\Users\u\.local\bin;C:\Windows\system32"
+    bin_dir = _runtime.launcher_dir()
+
+    assert _runtime.prepend_user_path(bin_dir) is True
+    entries = windows_launcher["Path"].split(";")
+    assert entries[0] == str(bin_dir)
+    assert r"C:\Users\u\.local\bin" in entries  # nothing removed — detect, never delete
+
+
+def test_prepend_user_path_is_idempotent(windows_launcher) -> None:
+    """AC8 — repeated upgrades must not accumulate PATH fragments.
+
+    An upgrade runs this every time, so a non-idempotent version would grow the
+    User PATH without bound; PATH has a length ceiling, and a truncated PATH is
+    a far worse failure than a missing launcher. Comparison is normcase'd
+    because Windows paths are case-insensitive and a differently-cased duplicate
+    is still a duplicate.
+    """
+    from hive import _runtime
+
+    bin_dir = _runtime.launcher_dir()
+    assert _runtime.prepend_user_path(bin_dir) is True
+    after_first = windows_launcher["Path"]
+
+    assert _runtime.prepend_user_path(bin_dir) is False
+    assert windows_launcher["Path"] == after_first
+
+    # Cased differently by a hand edit, but the same directory.
+    windows_launcher["Path"] = str(bin_dir).upper() + r";C:\Windows"
+    assert _runtime.prepend_user_path(bin_dir) is False
+
+
+def test_install_launcher_rewrites_nothing_on_a_second_run(windows_launcher) -> None:
+    """AC8 at the file level: an unchanged shim is left alone rather than
+    rewritten. Rewriting an identical file would touch its mtime on every
+    upgrade and, on Windows, can fail outright while another process holds the
+    shim open."""
+    from hive import _runtime
+
+    shim = _runtime.install_launcher()
+    assert shim is not None
+    before = shim.stat().st_mtime_ns
+
+    assert _runtime.install_launcher() == shim
+    assert shim.stat().st_mtime_ns == before
+
+
+# ── detect-and-warn on a foreign, dead `hive` (AC10 / ADR-019 decision 4) ──
+#
+# Deliberately NOT run under the forced-win32 fixture: the probe is real
+# subprocess execution, so a genuine POSIX script proves the mechanism rather
+# than a mock agreeing with itself. What is Windows-specific is which directory
+# hive owns, not whether a `--version` probe can tell a live binary from a dead
+# one.
+
+
+def _fake_hive(directory, *, exit_code: int):
+    """A real, executable ``hive`` that exits with *exit_code* — a live launcher
+    at 0, an orphaned trampoline at anything else."""
+    directory.mkdir(parents=True, exist_ok=True)
+    script = directory / "hive"
+    script.write_text(f"#!/bin/sh\nexit {exit_code}\n", encoding="utf-8")
+    script.chmod(0o755)
+    return script
+
+
+def test_orphaned_launchers_reports_a_dead_hive_without_modifying_it(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """AC10 — report and name the repair; never touch it.
+
+    Option C was rejected partly because hive deleting another tool's artifact
+    is a different class of act from installing its own. Detection stays in
+    scope, removal belongs to dotfiles#574, and this asserts the file is still
+    there afterwards so the boundary is enforced by a test rather than by
+    memory.
+    """
+    from hive import _runtime
+
+    dead = _fake_hive(tmp_path / "orphan", exit_code=1)
+    monkeypatch.setenv("PATH", str(tmp_path / "orphan"))
+
+    found = _runtime.orphaned_launchers(skip=tmp_path / "bin")
+
+    assert found == [str(dead)]
+    assert dead.exists()  # detect, never delete
+
+
+def test_orphaned_launchers_ignores_a_healthy_hive(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """A working ``hive`` on PATH is not an orphan. Warning about it would train
+    the user to ignore the warning, which costs more than the warning buys."""
+    from hive import _runtime
+
+    _fake_hive(tmp_path / "good", exit_code=0)
+    monkeypatch.setenv("PATH", str(tmp_path / "good"))
+
+    assert _runtime.orphaned_launchers(skip=tmp_path / "bin") == []
+
+
+def test_orphaned_launchers_skips_hives_own_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Hive's own shim must never be reported as an orphan.
+
+    On Windows the shim is a ``.cmd`` dispatching through ``current``; during a
+    first install, or any window where ``current`` is mid-flip, probing it can
+    legitimately fail. Reporting hive's own launcher as an orphaned trampoline —
+    and telling the user to run ``dotf doctor --fix`` on it — would be actively
+    misleading, so the owned directory is excluded by construction.
+    """
+    from hive import _runtime
+
+    _fake_hive(tmp_path / "bin", exit_code=1)
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+
+    assert _runtime.orphaned_launchers(skip=tmp_path / "bin") == []
+
+
+def test_self_upgrade_installs_the_launcher_after_repointing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """The wiring, asserted rather than assumed: an upgrade is what installs the
+    launcher, and it does so AFTER the flip — a shim advertised before ``current``
+    has moved would, for that window, point a human at the version being
+    replaced."""
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    from hive import _runtime
+
+    _seed_version(_runtime, "1.41.5")
+    _runtime.repoint("1.41.5")
+
+    selected_when_called: list[str | None] = []
+    monkeypatch.setattr(
+        _runtime,
+        "install_launcher",
+        lambda: selected_when_called.append(_runtime.current_version()),
+    )
+    monkeypatch.setattr(
+        _runtime,
+        "build_version",
+        lambda version, package="hive-vault": _seed_version(_runtime, version),
+    )
+
+    _runtime.self_upgrade("1.41.6")
+
+    assert selected_when_called == ["1.41.6"]
+
+
+def test_a_failed_launcher_install_does_not_fail_the_upgrade(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """The decision this codifies: by the time the launcher runs, ``current``
+    already selects the new version and the supervisor will restart into it, so a
+    refused registry write or a shim held open by another process costs PATH
+    convenience and nothing else. Letting it propagate would turn a completed,
+    correct upgrade into a reported failure — and tempt a caller into rolling
+    back a swap that was never in doubt.
+
+    Asserted on all three survivors: the return value, the flipped junction, and
+    the GC that runs *after* the launcher step and would be skipped if the
+    exception escaped.
+    """
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    from hive import _runtime
+
+    _seed_version(_runtime, "1.41.5")
+    _runtime.repoint("1.41.5")
+
+    def _refused() -> None:
+        raise OSError("Access is denied")
+
+    monkeypatch.setattr(_runtime, "install_launcher", _refused)
+    monkeypatch.setattr(
+        _runtime,
+        "build_version",
+        lambda version, package="hive-vault": _seed_version(_runtime, version),
+    )
+
+    assert _runtime.self_upgrade("1.41.6") == "1.41.5"
+    assert _runtime.current_version() == "1.41.6"
+    assert not _runtime.version_path("1.41.5").exists()  # GC still ran
+
+
+def test_orphan_warning_names_the_path_and_the_repair_command() -> None:
+    """AC10's other half: a report the reader can act on. Per
+    ``pattern-agent-oriented-errors`` the message carries WHAT is broken (the
+    concrete path, not "a launcher") and the FIX (``dotf doctor --fix``), since
+    hive has deliberately given up the ability to repair it itself."""
+    from hive import _runtime
+
+    message = _runtime.render_orphan_warning([r"C:\Users\u\.local\bin\hive.exe"])
+
+    assert r"C:\Users\u\.local\bin\hive.exe" in message
+    assert "dotf doctor --fix" in message

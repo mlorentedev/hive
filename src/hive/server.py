@@ -791,6 +791,15 @@ def _run_self_upgrade(argv: list[str]) -> int:
         print(f"hive self-upgrade: already on {version}; nothing to do.")
     else:
         print(f"hive self-upgrade: switched {previous or 'none'} -> {version}.")
+    # Reported after the outcome and on stderr, never instead of it: a launcher
+    # note must not be mistaken for the upgrade's own result, and the exit code
+    # stays 0 because a foreign dead binary is not this upgrade's failure.
+    # Runs on every platform — ADR-019 scopes the *launcher* to Windows, but a
+    # `hive` on PATH that cannot start is worth reporting anywhere, and on POSIX
+    # the healthy uv-installed one simply passes the probe and stays silent.
+    orphans = _runtime.orphaned_launchers(skip=_runtime.launcher_dir())
+    if orphans:
+        print(_runtime.render_orphan_warning(orphans), file=sys.stderr)
     return 0
 
 
