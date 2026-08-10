@@ -63,6 +63,13 @@
     "evidence": ""
   },
   {
+    "id": "HIVE-328-runtime-launcher-f11",
+    "behavior": "An upgrade installs the launcher, and does so after `current` is flipped; a launcher install that raises leaves the upgrade successful — the return value, the flipped junction, and the GC all survive it.",
+    "verification": "uv run pytest tests/test_runtime.py::test_self_upgrade_installs_the_launcher_after_repointing tests/test_runtime.py::test_a_failed_launcher_install_does_not_fail_the_upgrade -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
     "id": "HIVE-328-runtime-launcher-f10",
     "behavior": "On POSIX the launcher install is an explicit no-op: ADR-019 is Windows-only, and a second unowned way to resolve `hive` must not appear on a platform where uv tool remains the install model.",
     "verification": "uv run pytest tests/test_runtime.py::test_install_launcher_is_an_explicit_noop_off_windows -q",

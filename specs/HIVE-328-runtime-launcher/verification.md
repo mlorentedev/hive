@@ -19,6 +19,7 @@ created: "2026-08-07"
 - [x] AC10 (dead `hive*` reported, named with `dotf doctor --fix`, left unmodified) -> `test_orphaned_launchers_reports_a_dead_hive_without_modifying_it`, `test_orphaned_launchers_ignores_a_healthy_hive`, `test_orphaned_launchers_skips_hives_own_directory`, `test_orphan_warning_names_the_path_and_the_repair_command`
 - [x] AC11 (prepended, not appended) -> `test_prepend_user_path_puts_hives_dir_first`
 - [x] POSIX boundary (ADR-019 is Windows-only) -> `test_install_launcher_is_an_explicit_noop_off_windows`
+- [x] Upgrade wiring (an upgrade installs the launcher, after the flip; a launcher failure does not fail the upgrade) -> `test_self_upgrade_installs_the_launcher_after_repointing`, `test_a_failed_launcher_install_does_not_fail_the_upgrade`
 
 ## What PR2 cannot verify here, and why that is stated rather than papered over
 
@@ -52,6 +53,23 @@ Success: no issues found in 30 source files
 
 The 12 new tests were confirmed **red before the implementation existed** (`AttributeError` on
 each new symbol), not merely green afterwards.
+
+### The two tests that were missing, and how they were found
+
+A review pass asked which test covered the PR's own stated decision — *"a launcher failure must not
+fail an upgrade"* — and the answer was none. Nothing exercised the `self_upgrade -> install_launcher`
+wiring at all: the twelve tests call `install_launcher` directly, and every existing `self_upgrade`
+test runs as Linux, where it no-ops. A decision prominent enough to flag for review was being held
+by prose alone. Two tests added, then **neutered to prove they discriminate** rather than merely
+pass:
+
+| Neuter | Result |
+|---|---|
+| Remove the `try/except OSError` so the failure propagates | `test_a_failed_launcher_install_does_not_fail_the_upgrade` fails on the escaped `OSError`; the wiring test stays green |
+| Replace the `install_launcher()` call with `pass` | `test_self_upgrade_installs_the_launcher_after_repointing` fails on its assertion; the failure test stays green |
+
+Each neuter fails exactly one test, which is the property that makes them independent rather than
+two spellings of one check.
 
 ## A defect the tests caught before it could ship
 

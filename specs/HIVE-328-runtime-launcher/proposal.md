@@ -1,7 +1,7 @@
 ---
 id: "HIVE-328-runtime-launcher"
 type: spec
-status: implementing # draft | implementing | verifying | archived
+status: verifying # draft | implementing | verifying | archived
 created: "2026-08-07"
 issue: "hive#328"   # repo#NNN — GitHub issue / Project item that tracks this spec
 tags: [spec, proposal]

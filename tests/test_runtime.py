@@ -857,6 +857,73 @@ def test_orphaned_launchers_skips_hives_own_directory(
     assert _runtime.orphaned_launchers(skip=tmp_path / "bin") == []
 
 
+def test_self_upgrade_installs_the_launcher_after_repointing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """The wiring, asserted rather than assumed: an upgrade is what installs the
+    launcher, and it does so AFTER the flip — a shim advertised before ``current``
+    has moved would, for that window, point a human at the version being
+    replaced."""
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    from hive import _runtime
+
+    _seed_version(_runtime, "1.41.5")
+    _runtime.repoint("1.41.5")
+
+    selected_when_called: list[str | None] = []
+    monkeypatch.setattr(
+        _runtime,
+        "install_launcher",
+        lambda: selected_when_called.append(_runtime.current_version()),
+    )
+    monkeypatch.setattr(
+        _runtime,
+        "build_version",
+        lambda version, package="hive-vault": _seed_version(_runtime, version),
+    )
+
+    _runtime.self_upgrade("1.41.6")
+
+    assert selected_when_called == ["1.41.6"]
+
+
+def test_a_failed_launcher_install_does_not_fail_the_upgrade(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """The decision this codifies: by the time the launcher runs, ``current``
+    already selects the new version and the supervisor will restart into it, so a
+    refused registry write or a shim held open by another process costs PATH
+    convenience and nothing else. Letting it propagate would turn a completed,
+    correct upgrade into a reported failure — and tempt a caller into rolling
+    back a swap that was never in doubt.
+
+    Asserted on all three survivors: the return value, the flipped junction, and
+    the GC that runs *after* the launcher step and would be skipped if the
+    exception escaped.
+    """
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    from hive import _runtime
+
+    _seed_version(_runtime, "1.41.5")
+    _runtime.repoint("1.41.5")
+
+    def _refused() -> None:
+        raise OSError("Access is denied")
+
+    monkeypatch.setattr(_runtime, "install_launcher", _refused)
+    monkeypatch.setattr(
+        _runtime,
+        "build_version",
+        lambda version, package="hive-vault": _seed_version(_runtime, version),
+    )
+
+    assert _runtime.self_upgrade("1.41.6") == "1.41.5"
+    assert _runtime.current_version() == "1.41.6"
+    assert not _runtime.version_path("1.41.5").exists()  # GC still ran
+
+
 def test_orphan_warning_names_the_path_and_the_repair_command() -> None:
     """AC10's other half: a report the reader can act on. Per
     ``pattern-agent-oriented-errors`` the message carries WHAT is broken (the
