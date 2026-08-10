@@ -66,7 +66,8 @@ version and, when a newer `hive-vault` is present on disk, **exits `75`
 into the new code. No manual restart, and no latency added to client startup.
 
 ```
-uv tool upgrade hive-vault        # new version lands on disk
+Linux / macOS: uv tool upgrade hive-vault
+Windows:       hive self-upgrade [version]
         │
         ▼
 hive serve detects version drift  # within HIVE_UPGRADE_POLL_S
@@ -76,9 +77,11 @@ exit 75  ──►  supervisor restarts  ──►  daemon now runs the new vers
 ```
 
 So the upgrade *mechanism* lives in the package; **how often you upgrade is a
-deployment policy** you own — e.g. a periodic `uv tool upgrade hive-vault`
-(a systemd `--user` timer or a Windows Scheduled Task). The daemon adopts
-whatever is on disk on its next poll.
+deployment policy** you own. Linux and macOS can use a periodic `uv tool upgrade
+hive-vault` (for example, a systemd `--user` timer). On Windows, use
+`hive self-upgrade` deliberately; it creates a versioned runtime and atomically
+switches the active junction rather than replacing files that may be in use. The
+daemon adopts the installed version on its next poll.
 
 A graceful (signal) stop or a declined install exits `0`, which under
 `Restart=on-failure` does **not** trigger a relaunch — only the drift path
