@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.1](https://github.com/mlorentedev/hive/compare/v3.1.0...v3.1.1) (2026-08-10)
+
+
+### Documentation
+
+* document platform-specific Hive upgrades ([#370](https://github.com/mlorentedev/hive/issues/370)) ([62c5ca6](https://github.com/mlorentedev/hive/commit/62c5ca67f5be79fba4c2e2f9ddedf465a9e3b2c0))
+
 ## [3.1.0](https://github.com/mlorentedev/hive/compare/v3.0.0...v3.1.0) (2026-08-10)
 
 
