@@ -1,6 +1,6 @@
 [project]
 name = "hive-vault"
-version = "3.0.0"
+version = "3.1.0"
 description = "Unified MCP server for AI-assisted development — on-demand Obsidian vault access + worker delegation"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -46,7 +46,7 @@ dependencies = [
     # 1.27.2 audited 2026-05-31: tests/test_compat_shim.py (incl. the
     # real-subprocess cancel-race) passes — the patched RequestResponder
     # internals are unchanged.
-    "mcp>=1.27,<2.0",
+    "mcp>=1.27,<3.0",
     "psutil>=5.9.0",
     "pydantic-settings>=2.0",
     "pyyaml>=6.0",
