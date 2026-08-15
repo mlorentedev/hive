@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -103,10 +104,8 @@ def _read_existing_lessons_text(project_dir: Path) -> str:
     ]:
         if candidate.exists() and candidate not in seen:
             seen.add(candidate)
-            try:
+            with contextlib.suppress(OSError, UnicodeDecodeError):
                 texts.append(candidate.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError):
-                pass
     return "\n\n".join(texts)
 
 

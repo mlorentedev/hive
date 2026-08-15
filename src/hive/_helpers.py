@@ -326,7 +326,8 @@ _LESSON_DATE_PREFIX_RE = re.compile(
 )
 _LESSON_DATE_SUFFIX_RE = re.compile(r"\s*\(\d{4}-\d{2}-\d{2}\)$")
 _SECTION_FIELD_RE = re.compile(
-    r"^(?:-\s*)?\*\*(Context|Problem|Solution|Impact|Root cause|Fix|Decision|Lesson)\*\*:\s*(.+)$",
+    r"^(?:-\s*)?\*\*(Context|Problem|Solution|Impact|Root cause|Fix|Decision|Lesson)"
+    r":?\*\*:?\s*(.+)$",
     re.IGNORECASE,
 )
 _GENERIC_SECTION_HEADINGS = {
@@ -467,28 +468,24 @@ def check_lesson_recurrence(
 
         # 1. Title SequenceMatcher ratio
         title_sim = difflib.SequenceMatcher(None, cand_title_lower, exist_title).ratio()
-        if title_sim >= 0.70:
-            if title_sim > best_score:
-                best_score = title_sim
-                best_match_heading = lesson["heading"]
+        if title_sim >= 0.70 and title_sim > best_score:
+            best_score = title_sim
+            best_match_heading = lesson["heading"]
 
         # 2. Problem SequenceMatcher ratio
         if cand_prob_lower and exist_prob and len(cand_prob) >= 15 and len(exist_prob) >= 15:
             prob_sim = difflib.SequenceMatcher(None, cand_prob_lower, exist_prob).ratio()
-            if prob_sim >= 0.65:
-                if prob_sim > best_score:
-                    best_score = prob_sim
-                    best_match_heading = lesson["heading"]
+            if prob_sim >= 0.65 and prob_sim > best_score:
+                best_score = prob_sim
+                best_match_heading = lesson["heading"]
 
         # 3. Substring matching
-        if len(cand_title_lower) >= 20 and cand_title_lower in exist_full:
-            if 0.85 > best_score:
-                best_score = 0.85
-                best_match_heading = lesson["heading"]
-        if len(cand_prob_lower) >= 25 and cand_prob_lower in exist_full:
-            if 0.85 > best_score:
-                best_score = 0.85
-                best_match_heading = lesson["heading"]
+        if len(cand_title_lower) >= 20 and cand_title_lower in exist_full and best_score < 0.85:
+            best_score = 0.85
+            best_match_heading = lesson["heading"]
+        if len(cand_prob_lower) >= 25 and cand_prob_lower in exist_full and best_score < 0.85:
+            best_score = 0.85
+            best_match_heading = lesson["heading"]
 
         # 4. Token / keyword overlap on title + problem
         exist_key_tokens = _tokenize_for_recurrence(f"{lesson['title']} {lesson['problem']}")
@@ -506,10 +503,9 @@ def check_lesson_recurrence(
         # 5. Full text similarity
         if len(cand_full) >= 30:
             text_sim = difflib.SequenceMatcher(None, cand_full_lower, exist_full).ratio()
-            if text_sim >= 0.60:
-                if text_sim > best_score:
-                    best_score = text_sim
-                    best_match_heading = lesson["heading"]
+            if text_sim >= 0.60 and text_sim > best_score:
+                best_score = text_sim
+                best_match_heading = lesson["heading"]
 
     if best_match_heading is not None:
         return True, best_match_heading

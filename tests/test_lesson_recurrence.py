@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 from hive._helpers import (
-    _STANDING_ORDER_1_WARNING,
     check_lesson_recurrence,
     parse_existing_lessons,
 )
