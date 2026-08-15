@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.0](https://github.com/mlorentedev/hive/compare/v3.1.1...v3.2.0) (2026-08-15)
+
+
+### Features
+
+* **vault:** detect lesson recurrence in capture_lesson tool ([#374](https://github.com/mlorentedev/hive/issues/374)) ([adcd9c4](https://github.com/mlorentedev/hive/commit/adcd9c4e59873b3e74fc8c992a846bdf5f23b5a9))
+
 ## [3.1.1](https://github.com/mlorentedev/hive/compare/v3.1.0...v3.1.1) (2026-08-10)
 
 
