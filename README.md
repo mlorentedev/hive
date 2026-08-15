@@ -86,7 +86,22 @@ uv tool install --upgrade hive-vault   # >= 1.32.0
 hive service install                   # supervise hive serve (systemd --user / Task Scheduler)
 ```
 
-Once supervised, the daemon self-updates: it polls its installed version and, on an upgrade, exits `75` so the supervisor restarts it into the new code — so a periodic `uv tool upgrade hive-vault` keeps every client current with no added startup latency. See the [daemon mode guide](https://mlorentedev.github.io/hive/guides/daemon-mode/) and the [activation runbook](docs/runbooks/daemon-activation.md).
+To install a newer release, use the platform-specific command:
+
+```bash
+# Linux / macOS
+uv tool upgrade hive-vault
+
+# Windows (the version is optional; omitted selects the latest PyPI release)
+hive self-upgrade [version]
+```
+
+On Windows, `self-upgrade` builds the release beside the running files and atomically switches
+the managed runtime, avoiding in-use-file conflicts. Open a new terminal after the first managed
+upgrade so its `PATH` change is available. Once supervised, the daemon detects the new installed
+version, exits `75`, and the supervisor restarts it into the new code. See the
+[daemon mode guide](https://mlorentedev.github.io/hive/guides/daemon-mode/) and the
+[activation runbook](docs/runbooks/daemon-activation.md).
 
 ## Tools
 

@@ -1,5 +1,25 @@
 # Changelog
 
+## [3.1.1](https://github.com/mlorentedev/hive/compare/v3.1.0...v3.1.1) (2026-08-10)
+
+
+### Documentation
+
+* document platform-specific Hive upgrades ([#370](https://github.com/mlorentedev/hive/issues/370)) ([62c5ca6](https://github.com/mlorentedev/hive/commit/62c5ca67f5be79fba4c2e2f9ddedf465a9e3b2c0))
+
+## [3.1.0](https://github.com/mlorentedev/hive/compare/v3.0.0...v3.1.0) (2026-08-10)
+
+
+### Features
+
+* **runtime:** install a PATH launcher that dispatches through current ([#365](https://github.com/mlorentedev/hive/issues/365)) ([61e1089](https://github.com/mlorentedev/hive/commit/61e1089df4e18ebf4b66956dd4e60e8126ccbd12))
+
+
+### Documentation
+
+* **adr:** decide the client upgrade policy — notify and offer, never auto-apply ([#363](https://github.com/mlorentedev/hive/issues/363)) ([f7e959c](https://github.com/mlorentedev/hive/commit/f7e959c9cd5d15f01dc5b909ee9c37f3413f3195))
+* **lessons:** capture the release rate-limit failure and its skipped-not-failed shape ([#367](https://github.com/mlorentedev/hive/issues/367)) ([290ef1f](https://github.com/mlorentedev/hive/commit/290ef1f50858f016723c6a23f5d1010223f77309))
+
 ## [3.0.0](https://github.com/mlorentedev/hive/compare/v2.0.0...v3.0.0) (2026-08-09)
 
 
