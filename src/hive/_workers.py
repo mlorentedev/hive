@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING
 from hive._helpers import (
     _READ_ONLY,
     _REJECT_MSG,
+    _STANDING_ORDER_1_WARNING,
     _SUMMARIZE_THRESHOLD,
     _WRITE,
     _format_metadata,
@@ -21,6 +23,7 @@ from hive._helpers import (
     _resolve_project_dir,
     _safe_read,
     _vault_guard,
+    check_lesson_recurrence,
     extract_lesson_headings,
     format_io_error,
     project_not_found,
@@ -87,6 +90,25 @@ _EXTRACT_PROMPT = (
 _MAX_EXTRACT_INPUT = 8000  # chars, safe for any worker model
 
 
+def _read_existing_lessons_text(project_dir: Path) -> str:
+    """Read existing lessons content across 90-lessons.md, docs/lessons.md, and lessons.md."""
+    from pathlib import Path as _Path  # noqa: F811
+
+    pdir = _Path(project_dir)
+    texts: list[str] = []
+    seen: set[_Path] = set()
+    for candidate in [
+        pdir / "90-lessons.md",
+        pdir / "docs" / "lessons.md",
+        pdir / "lessons.md",
+    ]:
+        if candidate.exists() and candidate not in seen:
+            seen.add(candidate)
+            with contextlib.suppress(OSError, UnicodeDecodeError):
+                texts.append(candidate.read_text(encoding="utf-8"))
+    return "\n\n".join(texts)
+
+
 def _write_lesson(
     project_dir: Path,
     project: str,
@@ -113,6 +135,20 @@ def _write_lesson(
 
     if f"] {title}\n" in existing:
         return "skipped", f"Lesson already exists: '{title}'. Skipping."
+
+    all_existing = _read_existing_lessons_text(project_dir)
+    is_recurrent, matched_heading = check_lesson_recurrence(
+        title=title,
+        context=context,
+        problem=problem,
+        solution=solution,
+        existing_content=all_existing,
+    )
+    recurrence_warning = (
+        _STANDING_ORDER_1_WARNING.format(heading=matched_heading)
+        if is_recurrent and matched_heading
+        else ""
+    )
 
     # HIVE-115 / issue #114: scan inputs for XML-leak shapes BEFORE
     # building the entry. Warn-don't-reject preserves the agent's
@@ -156,7 +192,7 @@ def _write_lesson(
     )
     return (
         "written",
-        f"Lesson captured: '{title}' → {project}/90-lessons.md{suffix}",
+        f"Lesson captured: '{title}' → {project}/90-lessons.md{suffix}{recurrence_warning}",
     )
 
 
