@@ -218,7 +218,7 @@ class TestCaptureLessonRecurrenceIntegration:
         # Verify entry was written to 90-lessons.md despite warning
         lessons = (
             git_vault / "10_projects" / "testproject" / "90-lessons.md"
-        ).read_text()
+        ).read_text(encoding="utf-8")
         assert "Validate YAML frontmatter before write" in lessons
 
     async def test_capture_lesson_no_warning_when_distinct(
@@ -269,7 +269,8 @@ class TestCaptureLessonRecurrenceIntegration:
 ### [2026-01-01] Subprocess deadlock under high concurrency
 **Problem:** Subprocess pipes deadlocked when output buffer exceeded 64KB.
 **Solution:** Use communicate() or async streaming.
-"""
+""",
+            encoding="utf-8",
         )
 
         mcp = create_server(vault_path=git_vault)

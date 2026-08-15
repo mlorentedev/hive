@@ -351,7 +351,7 @@ def parse_existing_lessons(content: str) -> list[dict[str, str]]:
         return []
     in_block = _mark_codeblock_lines(lines)
 
-    sections: list[tuple[int, str]] = []
+    boundaries: list[tuple[int, str, bool]] = []
     for idx, raw in enumerate(lines):
         if in_block[idx]:
             continue
@@ -359,19 +359,23 @@ def parse_existing_lessons(content: str) -> list[dict[str, str]]:
         if m:
             heading_text = m.group(1).strip()
             clean_heading = heading_text.lower()
-            if any(
-                clean_heading.startswith(g) or clean_heading == g
+            generic = clean_heading in _GENERIC_SECTION_HEADINGS or any(
+                clean_heading.startswith(f"{g}:") or clean_heading.startswith(f"{g} -")
                 for g in _GENERIC_SECTION_HEADINGS
-            ):
-                continue
-            sections.append((idx, heading_text))
+            )
+            boundaries.append((idx, heading_text, generic))
+
+    sections = [(idx, text) for idx, text, generic in boundaries if not generic]
 
     if not sections:
         return []
 
     lessons: list[dict[str, str]] = []
-    for i, (start_idx, heading_text) in enumerate(sections):
-        end_idx = sections[i + 1][0] if i + 1 < len(sections) else len(lines)
+    for _i, (start_idx, heading_text) in enumerate(sections):
+        end_idx = next(
+            (idx for idx, _, _ in boundaries if idx > start_idx),
+            len(lines),
+        )
         section_lines = lines[start_idx + 1 : end_idx]
 
         clean_title = _LESSON_DATE_PREFIX_RE.sub("", heading_text)
