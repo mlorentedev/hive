@@ -289,6 +289,234 @@ def find_lesson_heading(content: str, line_no: int) -> str | None:
     return None
 
 
+_STANDING_ORDER_1_WARNING = (
+    "\n\n[STANDING ORDER #1 WARNING: RECURRENT LESSON DETECTED]\n"
+    "This lesson appears to recur from an existing entry: '{heading}'.\n"
+    "Per Standing Order #1 ('Automate, don't instruct') and pattern-lesson-promotion:\n"
+    "Recorded lessons are passive memory. When a failure mode recurs (≥2 occurrences),\n"
+    "do not rely on passive text — promote this rule to an active, deterministic check\n"
+    "(pre-commit hook, CI lint/test, or runtime assertion) in this session."
+)
+
+_RECURRENCE_STOPWORDS: set[str] = {
+    "a", "about", "above", "after", "again", "against", "all", "am", "an", "and",
+    "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being",
+    "below", "between", "both", "but", "by", "can", "can't", "cannot", "could",
+    "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down",
+    "during", "each", "few", "for", "from", "further", "had", "hadn't", "has",
+    "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her",
+    "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's",
+    "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it",
+    "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my",
+    "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or",
+    "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same",
+    "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so",
+    "some", "such", "than", "that", "that's", "the", "their", "theirs", "them",
+    "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll",
+    "they're", "they've", "this", "those", "through", "to", "too", "under", "until",
+    "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've",
+    "were", "weren't", "what", "what's", "when", "when's", "where", "where's",
+    "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't",
+    "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your",
+    "yours", "yourself", "yourselves",
+}
+
+_LESSON_DATE_PREFIX_RE = re.compile(
+    r"^(?:\[\d{4}-\d{2}-\d{2}\]\s*|\d{4}-\d{2}-\d{2}:\s*|(?:\d{4}-\d{2}-\d{2}\s*-\s*))"
+)
+_LESSON_DATE_SUFFIX_RE = re.compile(r"\s*\(\d{4}-\d{2}-\d{2}\)$")
+_SECTION_FIELD_RE = re.compile(
+    r"^(?:-\s*)?\*\*(Context|Problem|Solution|Impact|Root cause|Fix|Decision|Lesson)\*\*:\s*(.+)$",
+    re.IGNORECASE,
+)
+_GENERIC_SECTION_HEADINGS = {
+    "lessons learned",
+    "architecture decisions",
+    "operational lessons",
+    "table of contents",
+    "overview",
+    "introduction",
+}
+
+
+def parse_existing_lessons(content: str) -> list[dict[str, str]]:
+    """Parse lesson entries from markdown content (90-lessons.md or docs/lessons.md).
+
+    Extracts heading, title, problem, solution, context, and full text for each
+    lesson found in the content, ignoring code blocks and generic section containers.
+    """
+    lines = content.splitlines()
+    if not lines:
+        return []
+    in_block = _mark_codeblock_lines(lines)
+
+    sections: list[tuple[int, str]] = []
+    for idx, raw in enumerate(lines):
+        if in_block[idx]:
+            continue
+        m = re.match(r"^#{2,3}\s+(.+)$", raw)
+        if m:
+            heading_text = m.group(1).strip()
+            clean_heading = heading_text.lower()
+            if any(
+                clean_heading.startswith(g) or clean_heading == g
+                for g in _GENERIC_SECTION_HEADINGS
+            ):
+                continue
+            sections.append((idx, heading_text))
+
+    if not sections:
+        return []
+
+    lessons: list[dict[str, str]] = []
+    for i, (start_idx, heading_text) in enumerate(sections):
+        end_idx = sections[i + 1][0] if i + 1 < len(sections) else len(lines)
+        section_lines = lines[start_idx + 1 : end_idx]
+
+        clean_title = _LESSON_DATE_PREFIX_RE.sub("", heading_text)
+        clean_title = _LESSON_DATE_SUFFIX_RE.sub("", clean_title).strip()
+
+        problem_parts: list[str] = []
+        solution_parts: list[str] = []
+        context_parts: list[str] = []
+
+        for sline in section_lines:
+            sline_stripped = sline.strip()
+            fm = _SECTION_FIELD_RE.match(sline_stripped)
+            if fm:
+                field_name = fm.group(1).lower()
+                val = fm.group(2).strip()
+                if field_name in {"problem", "impact", "root cause"}:
+                    problem_parts.append(val)
+                elif field_name in {"solution", "decision", "fix", "lesson"}:
+                    solution_parts.append(val)
+                elif field_name in {"context"}:
+                    context_parts.append(val)
+
+        problem_text = " ".join(problem_parts)
+        solution_text = " ".join(solution_parts)
+        context_text = " ".join(context_parts)
+        full_text = f"{heading_text} " + " ".join(
+            sline.strip() for sline in section_lines if sline.strip()
+        )
+
+        lessons.append(
+            {
+                "heading": heading_text,
+                "title": clean_title if clean_title else heading_text,
+                "problem": problem_text,
+                "solution": solution_text,
+                "context": context_text,
+                "full_text": full_text,
+            }
+        )
+    return lessons
+
+
+def _tokenize_for_recurrence(text: str) -> set[str]:
+    words = re.findall(r"[a-zA-Z0-9_-]{3,}", text.lower())
+    return {w for w in words if w not in _RECURRENCE_STOPWORDS}
+
+
+def check_lesson_recurrence(
+    title: str,
+    context: str = "",
+    problem: str = "",
+    solution: str = "",
+    existing_content: str = "",
+) -> tuple[bool, str | None]:
+    """Check whether a new lesson recurs from existing recorded lessons.
+
+    Compares the candidate lesson against existing lessons parsed from
+    90-lessons.md or docs/lessons.md using title similarity, problem overlap,
+    keyword tokens, and substring matching.
+
+    Returns (True, matched_heading) if a recurrence is detected, otherwise (False, None).
+    """
+    if not existing_content or not title.strip():
+        return False, None
+
+    existing_lessons = parse_existing_lessons(existing_content)
+    if not existing_lessons:
+        return False, None
+
+    cand_title = _LESSON_DATE_PREFIX_RE.sub("", title.strip())
+    cand_title = _LESSON_DATE_SUFFIX_RE.sub("", cand_title).strip()
+    cand_prob = problem.strip()
+    cand_sol = solution.strip()
+    cand_ctx = context.strip()
+    cand_full = f"{cand_title} {cand_prob} {cand_sol} {cand_ctx}".strip()
+
+    cand_title_lower = cand_title.lower()
+    cand_prob_lower = cand_prob.lower()
+    cand_full_lower = cand_full.lower()
+
+    cand_key_tokens = _tokenize_for_recurrence(f"{cand_title} {cand_prob}")
+
+    best_match_heading: str | None = None
+    best_score: float = 0.0
+
+    for lesson in existing_lessons:
+        exist_title = lesson["title"].lower()
+        exist_prob = lesson["problem"].lower()
+        exist_full = lesson["full_text"].lower()
+
+        # Exact title match (strip dates/brackets)
+        if cand_title_lower == exist_title:
+            return True, lesson["heading"]
+
+        # 1. Title SequenceMatcher ratio
+        title_sim = difflib.SequenceMatcher(None, cand_title_lower, exist_title).ratio()
+        if title_sim >= 0.70:
+            if title_sim > best_score:
+                best_score = title_sim
+                best_match_heading = lesson["heading"]
+
+        # 2. Problem SequenceMatcher ratio
+        if cand_prob_lower and exist_prob and len(cand_prob) >= 15 and len(exist_prob) >= 15:
+            prob_sim = difflib.SequenceMatcher(None, cand_prob_lower, exist_prob).ratio()
+            if prob_sim >= 0.65:
+                if prob_sim > best_score:
+                    best_score = prob_sim
+                    best_match_heading = lesson["heading"]
+
+        # 3. Substring matching
+        if len(cand_title_lower) >= 20 and cand_title_lower in exist_full:
+            if 0.85 > best_score:
+                best_score = 0.85
+                best_match_heading = lesson["heading"]
+        if len(cand_prob_lower) >= 25 and cand_prob_lower in exist_full:
+            if 0.85 > best_score:
+                best_score = 0.85
+                best_match_heading = lesson["heading"]
+
+        # 4. Token / keyword overlap on title + problem
+        exist_key_tokens = _tokenize_for_recurrence(f"{lesson['title']} {lesson['problem']}")
+        if len(cand_key_tokens) >= 3 and len(exist_key_tokens) >= 3:
+            overlap = cand_key_tokens & exist_key_tokens
+            min_len = min(len(cand_key_tokens), len(exist_key_tokens))
+            containment = len(overlap) / min_len
+            jaccard = len(overlap) / len(cand_key_tokens | exist_key_tokens)
+            if len(overlap) >= 3 and (containment >= 0.60 or jaccard >= 0.40):
+                score = max(containment, jaccard)
+                if score > best_score:
+                    best_score = score
+                    best_match_heading = lesson["heading"]
+
+        # 5. Full text similarity
+        if len(cand_full) >= 30:
+            text_sim = difflib.SequenceMatcher(None, cand_full_lower, exist_full).ratio()
+            if text_sim >= 0.60:
+                if text_sim > best_score:
+                    best_score = text_sim
+                    best_match_heading = lesson["heading"]
+
+    if best_match_heading is not None:
+        return True, best_match_heading
+
+    return False, None
+
+
 _VAULT_NOT_FOUND_MSG = (
     "Vault not found at {path}.\n\n"
     "Set the vault path via the HIVE_VAULT_PATH env var (alias: VAULT_PATH) "
