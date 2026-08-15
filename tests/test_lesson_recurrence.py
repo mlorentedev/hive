@@ -216,9 +216,9 @@ class TestCaptureLessonRecurrenceIntegration:
         assert "Automate, don't instruct" in text2
 
         # Verify entry was written to 90-lessons.md despite warning
-        lessons = (
-            git_vault / "10_projects" / "testproject" / "90-lessons.md"
-        ).read_text(encoding="utf-8")
+        lessons = (git_vault / "10_projects" / "testproject" / "90-lessons.md").read_text(
+            encoding="utf-8"
+        )
         assert "Validate YAML frontmatter before write" in lessons
 
     async def test_capture_lesson_no_warning_when_distinct(
