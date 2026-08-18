@@ -1,0 +1,16 @@
+---
+id: lesson-075-a-config-filter-that-reads-like-batch-these-a
+type: lesson
+status: active
+created: "2026-08-07"
+owner: manu
+tags: [hive, lesson, dependabot, dependencies, security, configuration, diagnosis, HIVE-334]
+---
+
+# A config filter that reads like "batch these" actually means "exclude the rest"
+
+**Context:** A high-severity Dependabot advisory on `cryptography` ([#334](https://github.com/mlorentedev/hive/issues/334)) sat with no pull request. Filed with two candidate causes and no decision, then investigated.
+**Problem:** Both stated hypotheses were wrong, and ruling them out is what exposed the real cause. *"The grouped weekly config with `open-pull-requests-limit: 1` starves security updates"* — no: `automated-security-fixes` was `enabled=true, paused=false`, and security updates are not subject to that limit. *"Transitive bumps are unreachable"* — no: `uv lock --dry-run --upgrade-package cryptography` resolved `48.0.1 -> 50.0.0` in 284 ms with nothing pinning it below 50, and Dependabot had **already** bumped this same transitive package in PR #137, touching only `uv.lock`. The difference between #137 and the stuck alert was the *update type*: #137 was a patch, this one a major. The cause was a group that reads as a batching convenience: `patterns: ["*"]` with `update-types: ["minor", "patch"]`. Because the pattern claims **every** dependency while the update-types admit only two, a major bump is not batched elsewhere — it is **excluded entirely**. `pip` and `npm` each had one such group, so neither Python deps nor the Astro site could receive a major bump at all, security or routine, and no major appeared anywhere in the repo's Dependabot history. `github-actions` and `docker`, which set no `update-types`, were unaffected.
+**Solution:** A second group per affected ecosystem matching the same `*` but claiming `major` only — two groups with identical patterns are non-overlapping when their update-types are disjoint, so minor/patch stay batched while a major arrives as its own PR. Deliberately *not* adding `major` to the existing group, which would fold a breaking change in with routine patches and force an all-or-nothing merge. `open-pull-requests-limit` went 1 -> 2 so the groups do not compete for one slot, keeping the "no 20 stale PRs" property the config was written for. The analysis also recorded what it could not prove from outside — whether the group filter specifically suppressed the *security* path — because the fix is right on its own terms either way.
+**Why:** An allow-list scoped by one axis (`update-types`) but matched by another (`patterns: ["*"]`) silently subtracts from the total. Read such a rule as "what does this make unreachable", not "what does this group together" — and check the complement explicitly. The diagnostic that worked was falsifying every stated hypothesis first: once both were dead, the one remaining difference between a working case (#137) and the broken one *was* the cause, with no guessing. Look for a past success of the same shape before theorising about a failure; it turns an open question into a controlled comparison.
+**Tags:** `#dependabot` `#dependencies` `#security` `#configuration` `#diagnosis` `#HIVE-334`
