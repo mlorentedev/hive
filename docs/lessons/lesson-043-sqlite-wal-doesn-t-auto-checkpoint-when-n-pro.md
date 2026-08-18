@@ -1,0 +1,15 @@
+---
+id: lesson-043-sqlite-wal-doesn-t-auto-checkpoint-when-n-pro
+type: lesson
+status: active
+created: "2026-05-21"
+owner: manu
+tags: [hive, lesson, sqlite, wal, multiprocess, checkpoint, concurrency, HIVE-115, ADR-009]
+---
+
+# SQLite WAL doesn't auto-checkpoint when N processes hold readers (baseline N=3-5)
+
+**Context:** Investigating multi-process WAL bloat for HIVE-115. Local snapshot 2026-05-21: 3 concurrent hive-vault processes alive (PIDs 475646, 529429, 540650 — 25min, 7min, 4min old). `lsof` confirms each holds open file handles to all 3 SQLite DBs simultaneously (worker.db, relevance.db, lesson_reinforcement.db). Observed sizes: `relevance.db-wal` = 4.1 MB vs `.db` = 53 KB (77× ratio), `lesson_reinforcement.db-wal` = 157 KB vs 12 KB (13×), `worker.db-wal` = 91 KB vs 8.2 KB (11×) — and `worker.db-wal` was last modified 2 months ago (March 13). Critical context: 3-5 concurrent Claude Code sessions per user is the BASELINE daily usage pattern of hive, not edge case. Prior ADR-005 scale table dimensioned "1-3 = fine, 5 = occasional waits"; the system is operating at the codo of its own scaling boundary in normal use.
+**Problem:** `PRAGMA journal_mode=WAL` + `PRAGMA wal_autocheckpoint=1000` does NOT mean "WAL stays small". Any concurrent reader that has an open snapshot blocks the checkpoint operation from advancing past the frame it's reading. With process-per-MCP-client orchestration (ADR-001/ADR-005), every additional Claude Code session adds a process that opens read handles on ALL trackers even if it only uses one. Result: at N=3-5 baseline, there is virtually always a snapshot holder; the WAL never drains. Worse: the original Phase A design called for `PRAGMA wal_checkpoint(TRUNCATE)` on shutdown — but at N=3-5, there is rarely a "last process to shut down". The shutdown drain is virtually inert; the WAL grows unboundedly until a true idle moment that may never come. Per-open WAL replay cost grows linearly with WAL size, so each new hive process pays an increasing startup tax.
+**Solution:** Under multi-process patterns at N>1 baseline, the WAL drain must be PERIODIC, not shutdown-driven. Concretely (Phase A of HIVE-115, ADR-009 v1): (1) start a background `threading.Thread(daemon=True)` in every hive process that runs `PRAGMA wal_checkpoint(PASSIVE)` every 30s on each tracker's connection. PASSIVE does not block readers and advances checkpoint as far as current frames allow. (2) Keep `wal_checkpoint(TRUNCATE)` on graceful shutdown as a fallback — useful when N IS 0 (rare but possible). (3) Surface `wal_size_bytes` in `vault_health(include_runtime=True)` so growth is observable before it becomes contention. Cross-references: the lesson "Three timeouts in a chain aren't a deadline" (above) (same root: composition of locally-correct decisions failing at the actual usage envelope). For Phase B see ADR-009 v2 (Outbox+Reconciler) which makes the reconciler thread the single periodic checkpoint owner. Long-form analysis: HIVE-115 backlog (tracked in the forge — GitHub issues / milestones).
+**Tags:** `#sqlite` `#wal` `#multiprocess` `#checkpoint` `#concurrency` `#HIVE-115` `#ADR-009`

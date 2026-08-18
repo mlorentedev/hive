@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from hive._commit_queue import CommitReconciler
+    from hive._fts import VaultFTSIndex
     from hive._idempotency import IdempotencyStore
     from hive._lesson_reinforcement import LessonReinforcementTracker
     from hive._lock_eviction import LockEvictionTracker
@@ -47,10 +48,9 @@ class ServerContext:
     index_update_hook: object = None
     started_at_iso: str = ""
     started_at_monotonic: float = 0.0
-    # ADR-018: drains queued vault paths into one commit per tick. Optional
-    # so a context built without one (tests, non-serving callers) simply
-    # commits inline as before, rather than needing a null object.
     reconciler: CommitReconciler | None = None
+    # FEAT-015: SQLite FTS5 search index for sub-millisecond BM25 search.
+    fts_index: VaultFTSIndex | None = None
 
     def close(self) -> None:
         """Close all database connections held by this context.
