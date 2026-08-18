@@ -502,7 +502,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
 
             # Try SQLite FTS5 search
             try:
-                fts: VaultFTSIndex = getattr(ctx, "fts_index", None)
+                fts = ctx.fts_index
                 if fts is None:
                     from hive._fts import VaultFTSIndex
 

@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from hive._commit_queue import CommitReconciler
+    from hive._fts import VaultFTSIndex
     from hive._idempotency import IdempotencyStore
     from hive._lesson_reinforcement import LessonReinforcementTracker
     from hive._lock_eviction import LockEvictionTracker
@@ -49,7 +50,7 @@ class ServerContext:
     started_at_monotonic: float = 0.0
     reconciler: CommitReconciler | None = None
     # FEAT-015: SQLite FTS5 search index for sub-millisecond BM25 search.
-    fts_index: object = None
+    fts_index: VaultFTSIndex | None = None
 
     def close(self) -> None:
         """Close all database connections held by this context.
