@@ -491,7 +491,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
                 project,
             )
 
-        # ── Ranked mode ──
+        # ── Ranked mode (SQLite FTS5 + BM25) ──
         if ranked:
             if not query:
                 return track(
@@ -499,6 +499,60 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
                     "vault_search",
                     "Query is required for ranked search.",
                 )
+
+            # Try SQLite FTS5 search
+            try:
+                fts: VaultFTSIndex = getattr(ctx, "fts_index", None)
+                if fts is None:
+                    from hive._fts import VaultFTSIndex
+
+                    fts = VaultFTSIndex(ctx.vault, scopes=ctx.scopes)
+                    ctx.fts_index = fts
+
+                fts_matches = fts.search(
+                    query=query,
+                    max_results=max_results,
+                    type_filter=type_filter,
+                    status_filter=status_filter,
+                    tag_filter=tag_filter,
+                    scope=scope,
+                )
+                if fts_matches:
+                    results: list[str] = [
+                        f"# Ranked Search: '{query}'",
+                        "",
+                    ]
+                    for m in fts_matches:
+                        meta_items = []
+                        if m.doc_type:
+                            meta_items.append(f"type={m.doc_type}")
+                        if m.doc_status:
+                            meta_items.append(f"status={m.doc_status}")
+                        if m.tags:
+                            meta_items.append(f"tags=[{', '.join(m.tags)}]")
+                        if m.created:
+                            meta_items.append(f"created={m.created}")
+                        meta_str = ", ".join(meta_items)
+                        meta_part = f" [{meta_str}]" if meta_str else ""
+
+                        results.append(
+                            f"### {m.rel_path} (score: {m.score:.1f}){meta_part}",
+                        )
+                        for line in m.matching_lines[:5]:
+                            results.append(f"  - {line}")
+
+                    output = "\n".join(results)
+                    return track(
+                        ctx,
+                        "vault_search",
+                        _truncate(output, max_lines),
+                    )
+            except Exception as fts_err:
+                import logging
+
+                logging.getLogger("hive.fts").warning("FTS5 ranked search fallback: %s", fts_err)
+
+            # Linear fallback
             query_lower = query.lower()
             today = date.today()
             scored: list[tuple[float, str, str, list[str]]] = []
@@ -527,7 +581,7 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             scored.sort(key=lambda x: x[0], reverse=True)
             scored = scored[:max_results]
 
-            results: list[str] = [
+            results = [
                 f"# Ranked Search: '{query}'",
                 "",
             ]
