@@ -86,6 +86,19 @@ _PARTIAL_STATE_SUFFIX = (
 )
 
 
+def _notify_index_update(ctx: ServerContext, filepath: Path) -> None:
+    """Notify async semantic hook and update SQLite FTS5 index on write/patch."""
+    schedule_async_hook(ctx.index_update_hook, filepath)
+    fts = getattr(ctx, "fts_index", None)
+    if fts is not None:
+        try:
+            fts.update_file(filepath)
+        except Exception as exc:  # noqa: BLE001
+            import logging
+
+            logging.getLogger("hive.fts").warning("FTS index update failed: %s", exc)
+
+
 def _commit_status_suffix(
     requested_commit: bool,
     deferred: bool,
@@ -346,7 +359,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 deadline_killed=_was_deadline_killed(),
                 queued=queued,
             )
-            schedule_async_hook(ctx.index_update_hook, filepath)
+            _notify_index_update(ctx, filepath)
             return track(
                 ctx,
                 "vault_write",
@@ -442,7 +455,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             deadline_killed=_was_deadline_killed(),
             queued=queued,
         )
-        schedule_async_hook(ctx.index_update_hook, filepath)
+        _notify_index_update(ctx, filepath)
         return track(
             ctx,
             "vault_write",
@@ -632,7 +645,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             deadline_killed=_was_deadline_killed(),
             queued=queued,
         )
-        schedule_async_hook(ctx.index_update_hook, filepath)
+        _notify_index_update(ctx, filepath)
         return track(
             ctx, "vault_patch", f"Applied {n} {noun} to {project}/{path}.{suffix}", project, path
         )

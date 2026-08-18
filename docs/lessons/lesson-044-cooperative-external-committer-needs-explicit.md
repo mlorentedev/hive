@@ -1,0 +1,15 @@
+---
+id: lesson-044-cooperative-external-committer-needs-explicit
+type: lesson
+status: active
+created: "2026-05-21"
+owner: manu
+tags: [hive, lesson, git, obsidian-git, coordination, filelock, multiprocess, HIVE-115, ADR-010]
+---
+
+# Cooperative external committer needs explicit coordination, not best-effort
+
+**Context:** Investigating `.git/index.lock` contention for HIVE-115. Hive's vault git policy (ADR-006) treats commits as "best-effort, never fail the write". The Obsidian vault has the obsidian-git plugin configured: `autoSaveInterval=10` minutes, `autoPullInterval=10`, `autoPullOnBoot=true`, `pullBeforePush=true`. Neither tool knows the other exists. When obsidian-git fires its 10-minute backup tick, it holds `.git/index.lock` for the duration of pull + commit + push (~5-15s, the pullBeforePush=true triples the window). During that window, any hive `_GIT_LOCK` + `_git_filelock` acquire blocks. Issue #110 evidence: silent 30-second freezes per call coinciding with obsidian-git ticks, leading to `_LOCK_TIMEOUT=30` abandons. Prior ADR-006 §6 already added "detect_obsidian_git()" as informational signal in `vault_health`, but treated it as advisory only.
+**Problem:** When hive treats git as "best-effort, never fail the write" and obsidian-git treats git as "auto-commit every interval", the two cooperative processes COMPETE for `.git/index.lock` instead of coordinating. The result is silent: hive abandons with a WARNING log after 30s, the user sees a freeze, but no errors propagate. Worse, the windows are not synchronized — obsidian-git's `pullBeforePush=true` extends the lock window 3× over a plain commit, so the probability of coincidence is high during write-heavy hive sessions. The pre-existing "informational detection" in vault_health is insufficient: it surfaces presence, not active coordination. There is no fallback path when the external committer is paused or broken.
+**Solution:** Promote `detect_obsidian_git()` from informational to first-class design concept. Phase A of HIVE-115 (ADR-010 external-committer-coexistence): (1) `HIVE_LOCK_TIMEOUT_S` env-tunable so users with large vaults can absorb longer external windows; (2) structured `mcp.lock_contention` log per acquire attempt with `waited_ms` field; (3) `obsidian_git_present` boolean surfaced in `vault_health(include_runtime=True)`. Phase B (ADR-009 v2 outbox path): when external committer detected AND recent (probe `git log -1 --since="$((autoSaveInterval*2)) minutes ago"` returns a commit), DEFER hive's writes via `commit=False` automatically (not just opt-in); when detector reports stale/missing, FALLBACK to hive's own backoff-retry reconciler. Critical: never blindly defer indefinitely — a paused obsidian-git plugin would silently halt all vault commits. Pattern: cooperate-or-fallback, never compete-blindly. Cross-ref the lesson "SQLite WAL doesn't auto-checkpoint when N processes hold readers" (above) for the SQLite half of the same multi-writer coordination problem.
+**Tags:** `#git` `#obsidian-git` `#coordination` `#filelock` `#multiprocess` `#HIVE-115` `#ADR-010`
