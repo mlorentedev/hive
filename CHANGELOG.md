@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.3.0](https://github.com/mlorentedev/hive/compare/v3.2.0...v3.3.0) (2026-08-18)
+
+
+### Features
+
+* implement SQLite FTS5 index and BM25 ranking for vault_search ([#381](https://github.com/mlorentedev/hive/issues/381)) ([759966f](https://github.com/mlorentedev/hive/commit/759966f2a1504e5b96596d89acc9c272ffa6ceb9))
+
 ## [3.2.0](https://github.com/mlorentedev/hive/compare/v3.1.1...v3.2.0) (2026-08-15)
 
 
