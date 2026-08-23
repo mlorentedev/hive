@@ -23,6 +23,9 @@ test-one: ## Run a single test file or expression (e.g. `make test-one ARGS="tes
 smoke: ## Run e2e smoke tests (needs Ollama + API key)
 	uv run pytest -m smoke -v
 
+diagnostic: ## Run empirical classifiers (report distributions; never gate a merge)
+	uv run pytest -m diagnostic -v
+
 check: lint typecheck test ## Lint + typecheck + test
 
 build: check ## Check + build package

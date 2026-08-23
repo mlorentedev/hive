@@ -154,6 +154,7 @@ def _classify(messages: list[dict[str, object]]) -> tuple[str, str]:
     reason="Re-enabled on all platforms as part of HIVE-116 PR-3 cross-OS CI lane",
 )
 @pytest.mark.asyncio
+@pytest.mark.diagnostic
 async def test_classify_cancellation_race(tmp_path: Path) -> None:
     """Drive cancellation race N times against a real hive subprocess; report scenario distribution.
 
