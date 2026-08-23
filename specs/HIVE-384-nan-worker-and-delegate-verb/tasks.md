@@ -16,8 +16,8 @@ Declared here so no PR silently absorbs the next:
 
 | PR | Lands | Criteria |
 |---|---|---|
-| **1** | the provider layer: `HIVE_WORKER_*` settings with the `HIVE_EMBED_*` fallback and the `NAN_API_KEY` alias, Ollama and OpenRouter removed, the three `_try_worker` call sites re-routed, `budget.py` trimmed, `worker_status` reshaped, and the stale surfaces (`AGENTS.md`, `Makefile`, tests) | AC5, AC6, AC7 |
-| **2** | the verb: `hive delegate`, the result-carried status classification, `delegate_task`'s `timeout_s` and `model` migration, exit-code mapping, daemon routing and the degraded flag | AC1, AC2, AC3, AC4 |
+| **1** | the provider layer: `HIVE_WORKER_*` settings with the `HIVE_EMBED_*` fallback and the `NAN_API_KEY` alias, Ollama and OpenRouter removed, the three `_try_worker` call sites re-routed, `budget.py` trimmed, `worker_status` reshaped, and the stale surfaces (`AGENTS.md`, `Makefile`, tests) | AC5, AC6, ~~AC7~~ |
+| **2** | the verb: `hive delegate`, the result-carried status classification, `delegate_task`'s `timeout_s` and `model` migration, exit-code mapping, daemon routing and the degraded flag | AC1, AC2, AC3, AC4, **AC7** |
 
 **PR 1 carries the `feat!`** — it is where the providers and the MCP parameters actually disappear.
 
@@ -27,6 +27,11 @@ release-please accumulating them into a single `4.0.0`. That is not what happene
 "after the release publishes, `uv tool upgrade`" step in Closing runs a second time before CLI-042's
 AC6 can be re-checked. Two follow-ups also landed between them, both `fix` on the same release line:
 `#392` (no provider named in shipped surfaces) and `#394` (its review findings).
+
+**AC7 moved from PR 1 to PR 2, struck through above.** PR 1 marked it complete; it had no test,
+and its `features.json` command selected zero tests. Writing that test in PR 2 found two real
+leaks. Ownership is recorded where the work happened rather than where it was planned — the
+release evidence has to match the acceptance matrix or neither can be trusted.
 
 ## Setup
 
