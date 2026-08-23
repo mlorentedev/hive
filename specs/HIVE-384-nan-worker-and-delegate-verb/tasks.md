@@ -32,6 +32,18 @@ created: "2026-08-23"
       `openrouter_paid_model`
 - [ ] [AC6] Remove `max_cost_per_request` from `delegate_task`'s MCP parameters — the declared
       amendment to ADR-011 §5, stated in the commit body, not slipped in
+- [ ] [AC6] **Migrate `delegate_task`'s `model` parameter**, which today is `model: str = "auto"`
+      carrying the legacy provider vocabulary. Removing only `max_cost_per_request` would leave the
+      old model contract standing after every other task is done. Three parts, and the third is the
+      one that makes it a migration rather than a rename:
+      - redefine the parameter as a concrete model id with no provider-alias vocabulary and no
+        `"auto"` default — the caller states the model, as the CLI contract requires;
+      - update every in-repo caller and the tool's docstring and documentation;
+      - **reject the legacy values explicitly** (`auto`, `ollama`, `openrouter-free`, `openrouter`)
+        with an error naming the replacement, rather than passing them through to a provider that no
+        longer exists. A silently-accepted dead alias is how a caller discovers the break as a
+        confusing inference failure instead of a clear validation error.
+- [ ] [AC6] Assertion that a legacy `model` value is rejected, so the migration cannot regress
 - [ ] [AC6] Assertion that keeps them gone: no settings field, MCP parameter, or documentation line
       names Ollama or OpenRouter for the worker
 

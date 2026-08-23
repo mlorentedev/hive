@@ -9,6 +9,13 @@ created: "2026-08-23"
 
 Map every acceptance criterion from `proposal.md` to concrete proof (commit hash, test name, or observed behavior).
 
+> **Status as of 2026-08-23: every criterion below is PENDING, and that is the spec's state, not an
+> omission.** This folder was scaffolded by a docs-only PR; no implementation exists yet, so no
+> criterion can carry evidence. Each row's follow-up is the correspondingly tagged `[AC<n>]` task in
+> `tasks.md`. The only result recorded today is the pre-change baseline under Test status, which
+> proves the tree was green *before* the work, not that any criterion is met. `spec archive` must
+> refuse this folder until these rows carry real hashes and test names.
+
 - [ ] AC1 (hive delegate honours the wire contract) -> commit `<hash>` / test `<name>`
 - [ ] AC2 (exit codes separate pool-unavailable from task-failed) -> commit `<hash>` / test `<name>`
 - [ ] AC3 (timeout kills the worker and returns without waiting) -> commit `<hash>` / test `<name>`
@@ -19,9 +26,17 @@ Map every acceptance criterion from `proposal.md` to concrete proof (commit hash
 
 ## Test status
 
-- Test suite: `<command> -> <output / coverage %>`
-- Manual smoke test: what was exercised, what was observed
-- No regressions in existing test suite: yes / no (if no, document)
+- **Pre-change baseline, 2026-08-23** — `make check` on this branch before any source change:
+  `897 passed, 2 skipped, 63 deselected in 241.15s, 85% coverage, exit 0`.
+  Recorded so a later failure is attributable to the change rather than to the environment. The 63
+  deselected are the `@pytest.mark.smoke` tests, excluded by `-m 'not smoke'`.
+  *Caveat worth keeping:* the first attempt failed with 7 mypy errors about missing `types-psutil`
+  stubs. That was a fresh worktree whose `.venv` was unsynced, **not** a repo defect —
+  `types-psutil>=5.9.0` is declared in `pyproject.toml` and CI runs `uv run mypy src/`.
+- Post-change test suite: `<command> -> <output / coverage %>` — PENDING
+- Manual smoke test against a live NaN endpoint: PENDING. Required for AC5 and AC6; it cannot run in
+  `make check` because it needs a credential, so its output is pasted here by hand.
+- No regressions in existing test suite: PENDING (compare against the baseline above)
 
 ## Decisions made during implementation
 

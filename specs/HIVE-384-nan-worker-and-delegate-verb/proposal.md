@@ -51,7 +51,7 @@ than a value edit.
 
 ```
 $ hive delegate --model deepseek-v4-flash --timeout 60 --prompt "summarise this diff"
-{"status":"ok","model":"deepseek-v4-flash","tokens":812,"duration_ms":4310,"output":"…"}
+{"status":"ok","model":"deepseek-v4-flash","degraded":false,"tokens":812,"duration_ms":4310,"output":"…"}
 ```
 
 The name mirrors the MCP tool that already exists (`delegate_task`), so the CLI and the MCP surface
@@ -69,10 +69,28 @@ failing or pretending.
 | Element | Decision |
 |---|---|
 | Model | **One per invocation, taken as a parameter.** No internal fallback list — the dispatcher owns chain-walking, and a second fallback list here would be a second routing authority. |
-| Timeout | **Required**, no silent default. |
-| Cancellation | Kill the worker and return without waiting for it. |
-| Output | JSON on **stdout**, logs on **stderr**. The record names the model that actually answered. |
+| Timeout | **Required**, no silent default. See the deadline semantics below — they are not self-evident. |
+| Cancellation | Issue termination and return; do not wait for the worker to die. |
+| Output | JSON on **stdout**, logs on **stderr**. The record names the model that actually answered, and carries `degraded` (see below). |
 | Exit codes | `0` task succeeded · `1` task failed (the worker answered and the answer is a failure) · `2` usage or validation error · `3` **pool unavailable** (unreachable, 429, auth rejected) · `4` timeout |
+
+**Deadline semantics, stated because "return without waiting" and ADR-008's two-second grace are not
+the same thing.** `bounded_call` cancels, `terminate()`s, waits 2s, then `kill()`s. If the verb waited
+for that escalation, its observable deadline would be `--timeout + 2s` and the no-wait requirement
+would be violated; if it skipped the supervisor it would grow a second timeout mechanism. Both are
+avoided by splitting the two:
+
+- **`--timeout` is the observable deadline.** The verb returns exit `4` once the deadline expires and
+  termination has been *issued* — it does not wait for the grace window or the `kill()` escalation,
+  which `bounded_call` completes on its own.
+- **`--timeout` overrides `ctx.tool_timeout` for that dispatch.** The daemon path's default is 60s;
+  a per-dispatch deadline that a 60s ambient default could silently cap is not a deadline. A
+  `--timeout` above it must raise the ceiling, not be clamped by it.
+
+**`degraded` is an explicit boolean in the output**, not an inference from an absent field: `false`
+when the call went through the daemon, `true` when it fell back to the in-process stdio path
+(ADR-011 §3). A consumer must be able to tell a degraded answer from a normal one without parsing
+prose, because the fallback path has different concurrency and latency behaviour.
 
 **Exit code 3 is the one that carries weight.** *Pool unavailable* and *task failed* must be
 distinguishable, because the dispatcher advances its chain on the first and must not on the second —
@@ -119,12 +137,19 @@ Things this PR explicitly does NOT include. Forces a sharp boundary and prevents
     shape this spec exists to fix.
   - `HiveSettings` carries an unprefixed `OPENROUTER_API_KEY` alias for ergonomic deploy. It goes
     with the provider.
-- **The credential must not land in a file.** `HIVE_WORKER_API_KEY` is read from the process
-  environment the launcher injects (`dotf secrets run -- hive serve` on the consuming side), never
-  from `environment.d` or a config file. hive's side of this is narrow but real: it must not log the
+- **One canonical credential name, with a declared alias — not two names hoping to meet.**
+  `HIVE_WORKER_API_KEY` is canonical everywhere: contract, tasks, tests and `features.json`. The
+  consuming launcher resolves the secret from its registry, where it is `NAN_API_KEY`, so
+  `HiveSettings` accepts **`AliasChoices("HIVE_WORKER_API_KEY", "NAN_API_KEY")`** — the pattern that
+  file already uses twice (`vault_path`, and `openrouter_api_key` before its removal). Without the
+  alias the launcher would inject one name and hive would read another, and AC5 would fail on
+  authentication for a reason no error message would explain.
+- **The credential must not land in a file.** It is read from the process environment the launcher
+  injects (`dotf secrets run -- hive serve` on the consuming side), never from `environment.d` or a
+  config file. hive's side of this is narrow but real: it must not log the
   value, must not echo it into the crash artifact — ADR-011 §4 already requires *"no secrets/API
   keys"* there — and must be verifiable by consequence (the daemon answers) rather than by printing.
-- **[OPEN] Where the verb's own smoke test can run.** It needs `NAN_API_KEY` present, so it belongs
+- **[OPEN] Where the verb's own smoke test can run.** It needs the worker credential present, so it belongs
   behind the existing `smoke` marker (excluded by default) rather than in `make check`. What is not
   yet decided is whether CI gets a credential or the smoke stays developer-only; the second is the
   status quo and the cheaper answer.
@@ -138,15 +163,18 @@ Things this PR explicitly does NOT include. Forces a sharp boundary and prevents
 Observable outcomes. Each must be testable.
 
 - [ ] **AC1 — `hive delegate` exists and honours the wire contract.** It writes one JSON object to
-      stdout carrying `status`, `model`, `duration_ms` and `output`, with all logging on stderr, and
-      requires `--model` and `--timeout` rather than defaulting them.
+      stdout carrying `status`, `model`, `duration_ms`, `output` and `degraded`, with all logging on
+      stderr, and requires `--model` and `--timeout` rather than defaulting them.
 - [ ] **AC2 — the exit codes separate the two failure classes.** An unreachable or rate-limited
       provider exits `3`; a worker that answers with a failure exits `1`. Tested with both simulated.
 - [ ] **AC3 — the timeout kills the worker and returns without waiting**, via ADR-008's
-      `bounded_call`, exiting `4`. Tested against a worker that outlives its deadline.
+      `bounded_call`, exiting `4`. Tested against a worker that outlives its deadline, asserting the
+      verb returns **within the deadline plus a small epsilon, not deadline + the 2s grace**, and that
+      a `--timeout` larger than `ctx.tool_timeout` is honoured rather than clamped to 60s.
 - [ ] **AC4 — the verb routes through the daemon and degrades honestly.** With a daemon running it
-      goes through the client path; with none it falls back to in-process stdio and marks degraded
-      mode in its output (ADR-011 §3).
+      goes through the client path and emits `degraded: false`; with none it falls back to in-process
+      stdio and emits `degraded: true` (ADR-011 §3). Both directions tested — a field that is only
+      ever asserted in one state is not asserted.
 - [ ] **AC5 — the worker reaches NaN.** `worker_status` reports a reachable provider and the resolved
       model instead of two dead ones, and a `smoke`-marked test performs a real inference.
 - [ ] **AC6 — Ollama and OpenRouter are gone from every surface, not just the provider module.** No

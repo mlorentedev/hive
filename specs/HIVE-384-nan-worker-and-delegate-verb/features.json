@@ -30,7 +30,7 @@
   {
     "id": "HIVE-384-nan-worker-and-delegate-verb-f5",
     "behavior": "AC5 — the worker resolves HIVE_WORKER_* settings and falls back to HIVE_EMBED_* when unset",
-    "verification": "uv run pytest tests/test_config.py -k worker_settings_fallback",
+    "verification": "uv run pytest tests/test_config.py -k worker_settings_fallback_and_key_alias",
     "state": "pending",
     "evidence": ""
   },
