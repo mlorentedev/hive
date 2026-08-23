@@ -41,7 +41,7 @@ class HiveSettings(BaseSettings):
     # `SecretStr` is the idiomatic fix and is deliberately NOT taken here: it
     # changes the field's type, which propagates through `ServerContext` and
     # six call sites, and a type migration does not belong in the PR that
-    # discovered the leak. Tracked separately; `repr=False` closes the leak now.
+    # discovered the leak. Tracked as #397; `repr=False` closes the leak now.
     worker_api_key: str = Field(default="", repr=False)
     vault_scopes: dict[str, str] = Field(
         # ``agents`` is intentionally LAST: auto-scan (plain project name)
