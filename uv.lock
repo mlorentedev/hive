@@ -521,7 +521,7 @@ wheels = [
 
 [[package]]
 name = "hive-vault"
-version = "3.3.0"
+version = "4.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
