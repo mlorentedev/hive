@@ -1,5 +1,23 @@
 # Changelog
 
+## [4.1.0](https://github.com/mlorentedev/hive/compare/v4.0.0...v4.1.0) (2026-08-23)
+
+
+### Features
+
+* add the hive delegate verb, the dispatch seam a router can call ([4092bf4](https://github.com/mlorentedev/hive/commit/4092bf42694cd5040f1463c1ff773da92d46e2f2))
+* add the hive delegate verb, the dispatch seam a router can call ([#395](https://github.com/mlorentedev/hive/issues/395)) ([4092bf4](https://github.com/mlorentedev/hive/commit/4092bf42694cd5040f1463c1ff773da92d46e2f2))
+
+
+### Bug Fixes
+
+* gate the smoke worker fixture on the model, and drop a stale alias ([e062258](https://github.com/mlorentedev/hive/commit/e0622585549c4ddd05a5fe67383502e6eabed6f2))
+* gate the smoke worker fixture on the model, and drop a stale alias from the docs ([#394](https://github.com/mlorentedev/hive/issues/394)) ([e062258](https://github.com/mlorentedev/hive/commit/e0622585549c4ddd05a5fe67383502e6eabed6f2))
+* name no provider in the worker's shipped surfaces ([15d1c45](https://github.com/mlorentedev/hive/commit/15d1c4594eb9b79499b052a55690f9dbd94b6f66))
+* name no provider in the worker's shipped surfaces ([#392](https://github.com/mlorentedev/hive/issues/392)) ([15d1c45](https://github.com/mlorentedev/hive/commit/15d1c4594eb9b79499b052a55690f9dbd94b6f66))
+* never retry a dispatch whose outcome is ambiguous, and four review ([f171389](https://github.com/mlorentedev/hive/commit/f171389f497808b3701c0eb82f1dab28853ad23c))
+* never retry a dispatch whose outcome is ambiguous, and four review findings ([#396](https://github.com/mlorentedev/hive/issues/396)) ([f171389](https://github.com/mlorentedev/hive/commit/f171389f497808b3701c0eb82f1dab28853ad23c))
+
 ## [4.0.0](https://github.com/mlorentedev/hive/compare/v3.3.0...v4.0.0) (2026-08-23)
 
 
