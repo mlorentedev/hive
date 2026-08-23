@@ -114,7 +114,7 @@ Smoke tests are marked `@pytest.mark.smoke` and excluded by default; they requir
 
 ## Configuration
 
-`HiveSettings` (pydantic-settings) reads `HIVE_*` env vars. Two settings accept an unprefixed alias for ergonomic deploy: `VAULT_PATH` → `vault_path`, `OPENROUTER_API_KEY` → `openrouter_api_key`. Vault default is `~/Projects/knowledge`. Worker DBs default to `~/.local/share/hive/{worker,relevance}.db`.
+`HiveSettings` (pydantic-settings) reads `HIVE_*` env vars. One setting accepts an unprefixed alias for ergonomic deploy: `VAULT_PATH` → `vault_path`. The `OPENROUTER_API_KEY` alias documented here previously went away with its setting in 4.0.0; no provider-named variable is read (#391). Vault default is `~/Projects/knowledge`. Worker DBs default to `~/.local/share/hive/{worker,relevance}.db`.
 
 ## Documentation site (i18n)
 

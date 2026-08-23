@@ -119,7 +119,11 @@ def smoke_budget(tmp_path: Path) -> BudgetTracker:
 
 @pytest.fixture
 def smoke_worker_client() -> OpenAICompatibleClient | None:
-    if not WORKER_BASE_URL or not WORKER_API_KEY:
+    # Same three requirements `_worker_reachable` gates on, so the fixture can
+    # never hand out a client the probe would have refused — in particular one
+    # carrying `default_model=""`, which hive cannot supply a default for now
+    # that it assumes no provider's model ids (#391).
+    if not WORKER_BASE_URL or not WORKER_API_KEY or not WORKER_MODEL:
         return None
     return OpenAICompatibleClient(
         base_url=WORKER_BASE_URL,
