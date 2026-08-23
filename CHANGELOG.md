@@ -1,5 +1,21 @@
 # Changelog
 
+## [4.0.0](https://github.com/mlorentedev/hive/compare/v3.3.0...v4.0.0) (2026-08-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* the delegate worker is now a single OpenAI-compatible provider. Ollama and OpenRouter are removed, `delegate_task` loses `max_cost_per_request`, and its `model` parameter no longer accepts `auto` / `ollama` / `openrouter-free` / `openrouter`. Configure the worker with `HIVE_WORKER_BASE_URL`, `HIVE_WORKER_API_KEY` (or `NAN_API_KEY`) and `HIVE_WORKER_MODEL`; each falls back to its `HIVE_EMBED_*` counterpart when unset.
+
+### Features
+
+* make the delegate worker NaN-only ([#390](https://github.com/mlorentedev/hive/issues/390)) ([6fb37fa](https://github.com/mlorentedev/hive/commit/6fb37fa41f1ae4dc9f96e947ece66ba20d150829))
+
+
+### Documentation
+
+* **spec:** scaffold HIVE-384 for the NaN-only worker and the delegate verb ([#385](https://github.com/mlorentedev/hive/issues/385)) ([6dbc090](https://github.com/mlorentedev/hive/commit/6dbc090977fb8391030cdd041acaa82a6fd991d4))
+
 ## [3.3.0](https://github.com/mlorentedev/hive/compare/v3.2.0...v3.3.0) (2026-08-18)
 
 
