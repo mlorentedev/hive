@@ -1,17 +1,34 @@
-"""HTTP clients for Ollama and OpenAI-compatible providers (OpenRouter, NaN)."""
+"""HTTP clients for OpenAI-compatible providers."""
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
 _AVAILABILITY_CACHE_TTL_S = 30.0
-# Health-check connect timeout: kept short so an unreachable Ollama
+# Health-check connect timeout: kept short so an unreachable endpoint
 # fails fast (1s) instead of consuming the generate-timeout budget.
 _AVAILABILITY_CONNECT_TIMEOUT_S = 1.0
+# Label used when a base_url carries no parseable host, so an error message
+# never degrades to an empty prefix like " unavailable: ...".
+_UNKNOWN_PROVIDER_LABEL = "OpenAI-compatible endpoint"
+
+
+def provider_label(base_url: str) -> str:
+    """Describe a provider by its host, for error messages and logs.
+
+    The host is derived rather than declared on purpose: a label configured
+    separately from the endpoint it names is a second thing to keep truthful,
+    and it goes stale the moment someone repoints ``base_url`` without
+    updating it. Deriving it means the name in an error is always the machine
+    the request actually went to.
+    """
+    host = urlsplit(base_url).hostname or ""
+    return host or _UNKNOWN_PROVIDER_LABEL
 
 
 @dataclass(frozen=True)
@@ -37,7 +54,7 @@ class EmbedResponse:
 
 @dataclass(frozen=True)
 class ModelInfo:
-    """Model metadata from OpenRouter catalog."""
+    """Model metadata from an OpenAI-compatible ``/v1/models`` catalog."""
 
     id: str
     name: str
@@ -48,13 +65,23 @@ class ModelInfo:
 
 
 class OpenAICompatibleClient:
-    """Async client for any OpenAI-compatible ``/v1`` API (OpenRouter, NaN, Ollama).
+    """Async client for any OpenAI-compatible ``/v1`` API.
+
+    Hive names no provider: whatever serves an OpenAI-compatible ``/v1`` is a
+    valid backend, and which one is a deployment choice made entirely through
+    configuration. A hosted service and a local runtime are equally supported.
 
     ``base_url`` includes the version prefix and everything up to the resource
-    (e.g. ``https://api.nan.builders/v1`` or ``https://openrouter.ai/api/v1``).
+    (e.g. ``https://api.example.com/v1`` or ``http://localhost:11434/v1``).
     Full request URLs are built explicitly as ``{base_url}/chat/completions`` etc.
     rather than relying on httpx's RFC-3986 ``base_url`` join, which silently
     drops a base path when the request path is absolute.
+
+    ``provider_name`` only ever labels errors and logs. Leave it unset and it
+    is derived from ``base_url``'s host, which cannot disagree with the
+    endpoint the request went to; pass it to give a client a role name instead
+    (``embed`` / ``synth``), where which of several clients failed matters more
+    than which host did.
     """
 
     def __init__(
@@ -63,18 +90,15 @@ class OpenAICompatibleClient:
         api_key: str = "",
         default_model: str = "",
         timeout: float = 120.0,
-        provider_name: str = "OpenAI-compatible",
-        title: str = "",
+        provider_name: str = "",
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._default_model = default_model
-        self._provider_name = provider_name
+        self._provider_name = provider_name or provider_label(base_url)
         headers: dict[str, str] = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
-        if title:
-            headers["X-OpenRouter-Title"] = title
         self._http: httpx.AsyncClient = httpx.AsyncClient(timeout=timeout, headers=headers)
 
     @property

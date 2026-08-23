@@ -1,8 +1,10 @@
-"""Smoke tests — real HTTP calls to the NaN worker + vault tool checks.
+"""Smoke tests — real HTTP calls to the configured worker + vault tool checks.
 
 Run with:  pytest -m smoke -v
-Requires:  a reachable worker endpoint (HIVE_WORKER_BASE_URL) and its credential
-           (HIVE_WORKER_API_KEY, or NAN_API_KEY as the launcher injects it).
+Requires:  a reachable OpenAI-compatible worker endpoint (HIVE_WORKER_BASE_URL)
+           and its credential (HIVE_WORKER_API_KEY). Which provider serves it is
+           a deployment choice; a launcher using its own variable name maps it
+           onto HIVE_WORKER_API_KEY at injection time (#391).
 Vault smoke tests always run (no external deps needed).
 """
 
@@ -36,8 +38,8 @@ pytestmark = pytest.mark.smoke
 WORKER_BASE_URL = os.environ.get("HIVE_WORKER_BASE_URL") or os.environ.get(
     "HIVE_EMBED_BASE_URL", ""
 )
-WORKER_MODEL = os.environ.get("HIVE_WORKER_MODEL", "deepseek-v4-flash")
-WORKER_API_KEY = os.environ.get("HIVE_WORKER_API_KEY") or os.environ.get("NAN_API_KEY", "")
+WORKER_MODEL = os.environ.get("HIVE_WORKER_MODEL", "")
+WORKER_API_KEY = os.environ.get("HIVE_WORKER_API_KEY", "")
 
 # Trivial prompt to keep latency and token usage minimal.
 PING_PROMPT = "Reply with exactly one word: pong"
@@ -58,8 +60,13 @@ def _worker_reachable() -> bool:
     #384 is that a configured-but-unreachable worker looked healthy for an
     unknown length of time. So the skip condition is a probe, not a truthy
     env var.
+
+    ``WORKER_MODEL`` is required rather than defaulted: hive names no provider,
+    so it cannot know which model id any given endpoint serves (#391). A guessed
+    default would turn "wrong provider configured" into a confusing inference
+    failure instead of a skip.
     """
-    if not WORKER_BASE_URL or not WORKER_API_KEY:
+    if not WORKER_BASE_URL or not WORKER_API_KEY or not WORKER_MODEL:
         return False
     try:
         resp = httpx.get(
@@ -118,7 +125,6 @@ def smoke_worker_client() -> OpenAICompatibleClient | None:
         base_url=WORKER_BASE_URL,
         api_key=WORKER_API_KEY,
         default_model=WORKER_MODEL,
-        provider_name="NaN",
     )
 
 

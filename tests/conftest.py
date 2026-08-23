@@ -188,10 +188,9 @@ def budget() -> Generator[BudgetTracker, None, None]:
 def worker_client() -> OpenAICompatibleClient:
     """Worker client for worker tests (methods are mocked per-test)."""
     return OpenAICompatibleClient(
-        base_url="https://api.nan.example/v1",
+        base_url="https://api.provider.example/v1",
         api_key="test-key",
-        default_model="deepseek-v4-flash",
-        provider_name="NaN",
+        default_model="test-model",
     )
 
 

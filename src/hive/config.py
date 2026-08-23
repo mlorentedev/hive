@@ -18,25 +18,20 @@ class HiveSettings(BaseSettings):
         default=Path.home() / "Projects" / "knowledge",
         validation_alias=AliasChoices("HIVE_VAULT_PATH", "VAULT_PATH"),
     )
-    # HIVE-384: the worker's own provider, OpenAI-compatible. Ollama and
-    # OpenRouter were removed rather than deprecated — Ollama was not running
-    # and OpenRouter was retired upstream in August 2026, so the worker reached
-    # zero models and nothing noticed.
+    # HIVE-384: the worker's own endpoint, OpenAI-compatible. Which provider
+    # serves it is a deployment choice hive does not make; the two hard-wired
+    # providers this replaced are named in the 4.0.0 changelog, not here.
     #
     # Empty base_url = worker disabled, exactly as embed_base_url means for the
     # semantic backend. Never a guessed default: a worker that silently points
     # somewhere is worse than one that says it is unconfigured.
     worker_base_url: str = ""
     worker_model: str = ""
-    # NAN_API_KEY is the launcher-side name of this credential: the consuming
-    # `dotf secrets run` resolves it from a registry that calls it that. Without
-    # the alias the launcher would inject one name and hive would read another,
-    # and authentication would fail for a reason no error message explains.
-    # Same AliasChoices pattern vault_path uses.
-    worker_api_key: str = Field(
-        default="",
-        validation_alias=AliasChoices("HIVE_WORKER_API_KEY", "NAN_API_KEY"),
-    )
+    # One name, and it is hive's own. An alias naming a particular provider
+    # would make a published package read a variable that only means something
+    # inside one deployment; mapping a launcher's own name onto
+    # HIVE_WORKER_API_KEY is the launcher's job, at injection time.
+    worker_api_key: str = ""
     vault_scopes: dict[str, str] = Field(
         # ``agents`` is intentionally LAST: auto-scan (plain project name)
         # resolves first-match over insertion order, so appending keeps an
@@ -51,14 +46,16 @@ class HiveSettings(BaseSettings):
     )
     # HIVE-211: optional semantic backend for vault_ask. Empty base_url =
     # disabled (the default) — no index, no embed-on-write, zero overhead.
-    # OpenAI-compatible; default config points at NaN, Ollama is the local
-    # alternative (HIVE_EMBED_BASE_URL=http://localhost:11434/v1).
+    # OpenAI-compatible, and no provider is assumed: a hosted service and a
+    # local runtime (e.g. HIVE_EMBED_BASE_URL=http://localhost:11434/v1) are
+    # configured the same way.
     embed_base_url: str = ""
     embed_model: str = ""
     embed_api_key: str = ""
     # HIVE-211 PR4: LLM synthesis model. Uses the same base_url/api_key as
     # embeddings. Empty = return formatted retrieval chunks (no LLM call).
-    # Example: HIVE_SYNTH_MODEL=deepseek-v4-flash (NaN) or qwen2.5-coder:7b (Ollama).
+    # The model id is whatever the configured endpoint calls it — hive does not
+    # validate it against a catalog of known providers.
     synth_model: str = ""
     db_path: str = str(Path.home() / ".local" / "share" / "hive" / "worker.db")
     relevance_db_path: str = str(
@@ -106,11 +103,11 @@ class HiveSettings(BaseSettings):
     def _worker_falls_back_to_embed(self) -> "HiveSettings":
         """Resolve unset ``worker_*`` from the ``embed_*`` values (HIVE-384).
 
-        The worker is not an embedder, so it earns honest names — but in the
-        default deployment both point at the same NaN endpoint, and requiring
-        both to be configured would mean a machine that works today stops
-        working on upgrade. So the fallback is per field, not all-or-nothing:
-        a deployment can override the model alone and inherit the endpoint.
+        The worker is not an embedder, so it earns honest names — but a
+        deployment commonly points both at one endpoint, and requiring both to
+        be configured would mean a machine that works today stops working on
+        upgrade. So the fallback is per field, not all-or-nothing: a deployment
+        can override the model alone and inherit the endpoint.
 
         Fallback fills only what is *empty*; an explicit ``worker_*`` always
         wins. Both unset stays empty, which reads as "worker disabled" rather

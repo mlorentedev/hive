@@ -16,7 +16,7 @@ Hive is an MCP server (stdio transport, FastMCP framework) with three responsibi
 
 1. **Vault tools** — query, search, list, write, patch markdown files in an Obsidian vault. All writes auto-commit to git (best-effort; git failure never crashes the server) and validate YAML frontmatter.
 2. **Session tools** — `session_briefing` assembles tasks + lessons + git log + health in one call so an AI client gets ~50 lines of context instead of ~800.
-3. **Worker tools** — `delegate_task` and `capture_lesson` each make one attempt against one OpenAI-compatible worker (NaN). No internal fallback: the caller owns the chain, and failures are classified as *pool unavailable* vs *task failed* so the caller can tell a retryable one from a real one.
+3. **Worker tools** — `delegate_task` and `capture_lesson` each make one attempt against one OpenAI-compatible worker. No internal fallback: the caller owns the chain, and failures are classified as *pool unavailable* vs *task failed* so the caller can tell a retryable one from a real one.
 
 The package layout follows a deliberate split: `server.py` is a thin registration layer only. Each `_vault_*.py` / `_workers.py` module owns one tool family and registers its tools onto the FastMCP instance via a `register_*(mcp, ctx)` function. State lives in `ServerContext` (a dataclass in `_context.py`) and is passed to every handler — there is no module-level mutable state.
 
@@ -50,10 +50,15 @@ Two corrections worth carrying, because the stale versions of both are still quo
 
 ### Worker routing order
 
-`delegate_task` makes **one** attempt against **one** worker — a single OpenAI-compatible provider
-(NaN), configured by `HIVE_WORKER_BASE_URL` / `HIVE_WORKER_API_KEY` / `HIVE_WORKER_MODEL`, each
-falling back to its `HIVE_EMBED_*` counterpart when unset. `NAN_API_KEY` is accepted as the
-launcher-side alias for the key.
+`delegate_task` makes **one** attempt against **one** worker — a single OpenAI-compatible endpoint,
+configured by `HIVE_WORKER_BASE_URL` / `HIVE_WORKER_API_KEY` / `HIVE_WORKER_MODEL`, each falling
+back to its `HIVE_EMBED_*` counterpart when unset.
+
+**Hive names no provider.** Any service or local runtime serving an OpenAI-compatible `/v1` is a
+valid worker, and these three variables are the only way one is selected. A launcher that resolves
+the credential under its own variable name maps it onto `HIVE_WORKER_API_KEY` at injection time —
+hive does not accept provider-named aliases, because a published package reading one would be
+reading a variable that means something in exactly one deployment (#391).
 
 There is deliberately **no internal fallback chain**. Choosing among pools belongs to the caller
 that owns a routing map; a backend that falls back on its own is a second routing authority, and its
@@ -105,7 +110,7 @@ uv run pytest tests/test_server.py -k "vault_query"               # by keyword
 uv run pytest -m smoke -k worker_status                           # smoke subset
 ```
 
-Smoke tests are marked `@pytest.mark.smoke` and excluded by default; they require a reachable worker endpoint (`HIVE_WORKER_BASE_URL`) and its credential (`HIVE_WORKER_API_KEY`, or `NAN_API_KEY` as the launcher injects it). The skip condition **probes** the endpoint rather than checking that the variables are set — a configured-but-unreachable worker looking healthy is the defect #384 exists to fix.
+Smoke tests are marked `@pytest.mark.smoke` and excluded by default; they require a reachable worker endpoint (`HIVE_WORKER_BASE_URL`), its credential (`HIVE_WORKER_API_KEY`) and a model id the endpoint serves (`HIVE_WORKER_MODEL`). The skip condition **probes** the endpoint rather than checking that the variables are set — a configured-but-unreachable worker looking healthy is the defect #384 exists to fix.
 
 ## Configuration
 
