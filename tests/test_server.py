@@ -2468,7 +2468,9 @@ class TestWorkerStatus:
         worker_client.list_models = AsyncMock(return_value=[])  # type: ignore[method-assign]
         result = _text(await worker.call_tool("worker_status", {}))
         assert "Configured: yes" in result
-        assert "deepseek-v4-flash" in result
+        # The fixture's configured model, whatever it is named — worker_status
+        # reports what the deployment set, and hive assumes no vendor's ids.
+        assert "test-model" in result
 
     @pytest.mark.asyncio
     async def test_unreachable_provider_is_reported_as_not_reachable(

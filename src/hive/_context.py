@@ -27,12 +27,12 @@ class ServerContext:
     scopes: dict[str, str]
     tracker: UsageTracker
     budget: BudgetTracker
-    # HIVE-384: one worker client, OpenAI-compatible, pointed at NaN.
-    # ``None`` means the worker is unconfigured — the same meaning
-    # ``embed_base_url == ""`` carries for the semantic backend. Callers must
-    # branch on it rather than assume a client exists: the previous shape had a
-    # non-optional Ollama client that was always present and never reachable,
-    # which is how the worker served zero models without anyone noticing.
+    # HIVE-384: one worker client, OpenAI-compatible, pointed wherever the
+    # deployment configures it. ``None`` means the worker is unconfigured — the
+    # same meaning ``embed_base_url == ""`` carries for the semantic backend.
+    # Callers must branch on it rather than assume a client exists: the previous
+    # shape had a non-optional client that was always present and never
+    # reachable, which is how the worker served zero models unnoticed.
     worker: OpenAICompatibleClient | None
     relevance: RelevanceTracker
     lessons: LessonReinforcementTracker

@@ -156,7 +156,6 @@ def create_server(
             api_key=settings.worker_api_key,
             default_model=settings.worker_model,
             timeout=settings.http_timeout,
-            provider_name="NaN",
         )
     relevance = relevance_tracker or RelevanceTracker(
         db_path=settings.relevance_db_path,

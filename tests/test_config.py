@@ -14,22 +14,19 @@ def _isolate_hive_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Strip ambient hive configuration before every test.
 
     ``HiveSettings`` reads ``HIVE_*`` env vars plus the unprefixed
-    ``VAULT_PATH`` / ``NAN_API_KEY`` deploy aliases. A developer or
-    deploy box with any of these set (a real ``VAULT_PATH`` is the normal
-    case) would otherwise mask the hardcoded defaults and fail the
-    default-value assertions — green in CI, red locally. Clearing here runs
-    before each test body, so the override tests still set their own vars.
+    ``VAULT_PATH`` deploy alias. A developer or deploy box with any of these
+    set (a real ``VAULT_PATH`` is the normal case) would otherwise mask the
+    hardcoded defaults and fail the default-value assertions — green in CI, red
+    locally. Clearing here runs before each test body, so the override tests
+    still set their own vars.
+
+    No provider-named variable is stripped, because none is read any more
+    (#391). Stripping one would imply a coupling that no longer exists.
     """
     for key in list(os.environ):
         if key.startswith("HIVE_"):
             monkeypatch.delenv(key, raising=False)
     monkeypatch.delenv("VAULT_PATH", raising=False)
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    # HIVE-384: NAN_API_KEY is the launcher-side name of the worker credential,
-    # accepted as an unprefixed alias. It is present in a real developer
-    # environment, so leaving it set would mask the fallback assertions below —
-    # green in CI, red locally, which is the failure this fixture exists for.
-    monkeypatch.delenv("NAN_API_KEY", raising=False)
 
 
 class TestDefaults:
@@ -355,26 +352,8 @@ class TestWorkerSettings:
         assert s.worker_api_key == "worker-key"
         assert s.worker_model == "deepseek-v4-flash"
 
-    def test_nan_api_key_alias_populates_the_worker_key(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """The launcher injects the registry's name; hive must accept it.
-
-        Without this alias the launcher would export ``NAN_API_KEY`` and hive
-        would read ``HIVE_WORKER_API_KEY``, so authentication would fail for a
-        reason no error message explains.
-        """
-        monkeypatch.setenv("NAN_API_KEY", "from-the-launcher")
-        assert HiveSettings().worker_api_key == "from-the-launcher"
-
-    def test_prefixed_name_wins_over_the_alias(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setenv("NAN_API_KEY", "alias-value")
-        monkeypatch.setenv("HIVE_WORKER_API_KEY", "explicit-value")
-        assert HiveSettings().worker_api_key == "explicit-value"
+    # The provider-named alias this credential once accepted is gone (#391);
+    # tests/test_provider_neutrality.py asserts it stays gone.
 
     def test_all_empty_is_the_disabled_default(self) -> None:
         """No worker configuration at all resolves to empty, never to a guess."""
