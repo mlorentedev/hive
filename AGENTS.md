@@ -16,7 +16,7 @@ Hive is an MCP server (stdio transport, FastMCP framework) with three responsibi
 
 1. **Vault tools** — query, search, list, write, patch markdown files in an Obsidian vault. All writes auto-commit to git (best-effort; git failure never crashes the server) and validate YAML frontmatter.
 2. **Session tools** — `session_briefing` assembles tasks + lessons + git log + health in one call so an AI client gets ~50 lines of context instead of ~800.
-3. **Worker tools** — `delegate_task` and `capture_lesson` route work down a cost ladder: Ollama (local, free) → OpenRouter free tier → OpenRouter paid (gated by $1/mo SQLite budget) → reject.
+3. **Worker tools** — `delegate_task` and `capture_lesson` each make one attempt against one OpenAI-compatible worker (NaN). No internal fallback: the caller owns the chain, and failures are classified as *pool unavailable* vs *task failed* so the caller can tell a retryable one from a real one.
 
 The package layout follows a deliberate split: `server.py` is a thin registration layer only. Each `_vault_*.py` / `_workers.py` module owns one tool family and registers its tools onto the FastMCP instance via a `register_*(mcp, ctx)` function. State lives in `ServerContext` (a dataclass in `_context.py`) and is passed to every handler — there is no module-level mutable state.
 
@@ -32,7 +32,7 @@ The package layout follows a deliberate split: `server.py` is a thin registratio
 | `src/hive/_compat.py` | MCP cancellation shim — see "Compat shim" below |
 | `src/hive/config.py` | `HiveSettings` (pydantic-settings, `HIVE_*` env vars) |
 | `src/hive/budget.py` | SQLite budget tracker ($1/mo default cap, WAL mode) |
-| `src/hive/clients.py` | Async HTTP clients (Ollama + OpenRouter, httpx) |
+| `src/hive/clients.py` | Async HTTP client for any OpenAI-compatible `/v1` API (httpx) |
 | `src/hive/relevance.py` | EMA-based section relevance scoring |
 | `src/hive/frontmatter.py` | YAML frontmatter parse/validate/generate |
 | `site/` | Astro + Starlight bilingual (EN/ES) docs site |
@@ -50,12 +50,21 @@ Two corrections worth carrying, because the stale versions of both are still quo
 
 ### Worker routing order
 
-`delegate_task` tries clients in this order, falling through on failure or unavailability:
+`delegate_task` makes **one** attempt against **one** worker — a single OpenAI-compatible provider
+(NaN), configured by `HIVE_WORKER_BASE_URL` / `HIVE_WORKER_API_KEY` / `HIVE_WORKER_MODEL`, each
+falling back to its `HIVE_EMBED_*` counterpart when unset. `NAN_API_KEY` is accepted as the
+launcher-side alias for the key.
 
-1. **Ollama** `qwen2.5-coder:7b` (local) — free, primary
-2. **OpenRouter** `qwen/qwen3-coder:free` — free tier fallback
-3. **OpenRouter** paid (`qwen/qwen3-coder`) — only if caller passes `max_cost_per_request > 0` AND `BudgetTracker` allows it
-4. **Reject** — surface the error to the client; Claude handles fallback
+There is deliberately **no internal fallback chain**. Choosing among pools belongs to the caller
+that owns a routing map; a backend that falls back on its own is a second routing authority, and its
+answer can no longer be attributed to a model. Failures are classified rather than collapsed — *pool
+unavailable* (unreachable, 429, auth) is distinct from *task failed* (the provider answered and the
+answer is unusable), because a caller may retry the first elsewhere and must not retry the second.
+
+Ollama and OpenRouter were removed in **4.0.0**; their model aliases (`auto`, `ollama`,
+`openrouter-free`, `openrouter`) are rejected with a message naming the replacement rather than
+silently ignored. There is no spend cap: the provider is a flat subscription, so the binding
+constraint is concurrency, not cost.
 
 ## MCP tool schema rules (load-bearing)
 
@@ -76,7 +85,7 @@ make lint       # ruff check src/ tests/
 make typecheck  # mypy --strict src/
 make test       # pytest with coverage (smoke tests auto-excluded via addopts)
 make test-one   # run a single test: make test-one ARGS="tests/test_server.py -k vault_query"
-make smoke      # pytest -m smoke (needs running Ollama + OPENROUTER_API_KEY)
+make smoke      # pytest -m smoke (needs a reachable worker + HIVE_WORKER_API_KEY)
 make check      # lint + typecheck + test — run this before every PR
 make build      # check + uv build
 make run        # uv run python -m hive.server (local MCP server over stdio)
@@ -96,7 +105,7 @@ uv run pytest tests/test_server.py -k "vault_query"               # by keyword
 uv run pytest -m smoke -k worker_status                           # smoke subset
 ```
 
-Smoke tests are marked `@pytest.mark.smoke` and excluded by default (`addopts = "-m 'not smoke'"` in `pyproject.toml`); they require a live Ollama at `OLLAMA_ENDPOINT` and an `OPENROUTER_API_KEY`.
+Smoke tests are marked `@pytest.mark.smoke` and excluded by default; they require a reachable worker endpoint (`HIVE_WORKER_BASE_URL`) and its credential (`HIVE_WORKER_API_KEY`, or `NAN_API_KEY` as the launcher injects it). The skip condition **probes** the endpoint rather than checking that the variables are set — a configured-but-unreachable worker looking healthy is the defect #384 exists to fix.
 
 ## Configuration
 

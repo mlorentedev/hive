@@ -20,7 +20,7 @@ test: ## Run unit + integration tests
 test-one: ## Run a single test file or expression (e.g. `make test-one ARGS="tests/test_server.py -k vault_query"`)
 	uv run pytest $(ARGS)
 
-smoke: ## Run e2e smoke tests (needs Ollama + API key)
+smoke: ## Run e2e smoke tests (needs a reachable worker + HIVE_WORKER_API_KEY)
 	uv run pytest -m smoke -v
 
 diagnostic: ## Run empirical classifiers (report distributions; never gate a merge)

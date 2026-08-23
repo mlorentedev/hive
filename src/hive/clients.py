@@ -47,119 +47,6 @@ class ModelInfo:
     is_free: bool
 
 
-class OllamaClient:
-    """Async client for Ollama's /api/chat endpoint."""
-
-    def __init__(self, endpoint: str, model: str, timeout: float = 120.0) -> None:
-        self._endpoint = endpoint.rstrip("/")
-        self._model = model
-        self._http = httpx.AsyncClient(base_url=self._endpoint, timeout=timeout)
-        # is_available probe uses a much shorter connect timeout so an
-        # unreachable homelab fails in ~1s rather than burning the full
-        # generate timeout; the read timeout still matches generate
-        # because the / endpoint should respond instantly.
-        self._probe_http = httpx.AsyncClient(
-            base_url=self._endpoint,
-            timeout=httpx.Timeout(
-                connect=_AVAILABILITY_CONNECT_TIMEOUT_S,
-                read=_AVAILABILITY_CONNECT_TIMEOUT_S,
-                write=_AVAILABILITY_CONNECT_TIMEOUT_S,
-                pool=_AVAILABILITY_CONNECT_TIMEOUT_S,
-            ),
-        )
-        self._availability_cached: bool | None = None
-        self._availability_cached_at: float = 0.0
-
-    @property
-    def model(self) -> str:
-        """The configured model name."""
-        return self._model
-
-    async def aclose(self) -> None:
-        """Close the underlying HTTP clients."""
-        await self._http.aclose()
-        await self._probe_http.aclose()
-
-    async def generate(
-        self, prompt: str, context: str = "", max_tokens: int = 2000
-    ) -> ClientResponse:
-        """Send a chat completion to Ollama and return a unified response."""
-        messages: list[dict[str, str]] = []
-        if context:
-            messages.append({"role": "system", "content": context})
-        messages.append({"role": "user", "content": prompt})
-
-        try:
-            start = time.monotonic()
-            resp = await self._http.post(
-                "/api/chat",
-                json={
-                    "model": self._model,
-                    "messages": messages,
-                    "stream": False,
-                    "options": {"num_predict": max_tokens},
-                },
-            )
-            elapsed_ms = int((time.monotonic() - start) * 1000)
-        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-            msg = f"Ollama unavailable at {self._endpoint}: {exc}"
-            raise ConnectionError(msg) from exc
-        except httpx.TimeoutException as exc:
-            msg = f"Ollama request timed out at {self._endpoint}: {exc}"
-            raise ConnectionError(msg) from exc
-
-        if resp.status_code >= 400:
-            msg = f"Ollama error ({resp.status_code}): {resp.text[:200]}"
-            raise RuntimeError(msg)
-
-        try:
-            data = resp.json()
-        except ValueError as exc:
-            msg = f"Ollama returned non-JSON response: {exc}"
-            raise RuntimeError(msg) from exc
-        # Ollama returns total_duration in nanoseconds
-        total_ns = data.get("total_duration", 0)
-        latency = int(total_ns / 1_000_000) if total_ns else elapsed_ms
-
-        try:
-            text = data["message"]["content"]
-        except (KeyError, TypeError) as exc:
-            msg = f"Ollama response missing expected fields: {exc}"
-            raise RuntimeError(msg) from exc
-
-        return ClientResponse(
-            text=text,
-            model=self._model,
-            tokens=data.get("eval_count", 0),
-            cost_usd=0.0,
-            latency_ms=latency,
-        )
-
-    async def is_available(self) -> bool:
-        """Check if Ollama is reachable.
-
-        Result is cached for ``_AVAILABILITY_CACHE_TTL_S`` seconds to
-        avoid storming the endpoint when multiple tool calls (or
-        multiple hive subprocesses) all probe within the same window.
-        Uses a short connect timeout so an outage answers in ~1s
-        instead of consuming the generate-timeout budget.
-        """
-        now = time.monotonic()
-        if (
-            self._availability_cached is not None
-            and now - self._availability_cached_at < _AVAILABILITY_CACHE_TTL_S
-        ):
-            return self._availability_cached
-        try:
-            resp = await self._probe_http.get("/")
-            available = resp.status_code == 200
-        except (httpx.ConnectError, httpx.TimeoutException):
-            available = False
-        self._availability_cached = available
-        self._availability_cached_at = now
-        return available
-
-
 class OpenAICompatibleClient:
     """Async client for any OpenAI-compatible ``/v1`` API (OpenRouter, NaN, Ollama).
 
@@ -189,6 +76,11 @@ class OpenAICompatibleClient:
         if title:
             headers["X-OpenRouter-Title"] = title
         self._http: httpx.AsyncClient = httpx.AsyncClient(timeout=timeout, headers=headers)
+
+    @property
+    def model(self) -> str:
+        """The default model id this client was configured with."""
+        return self._default_model
 
     async def aclose(self) -> None:
         """Close the underlying HTTP client."""
@@ -336,21 +228,3 @@ class OpenAICompatibleClient:
                 )
             )
         return models
-
-
-class OpenRouterClient(OpenAICompatibleClient):
-    """OpenRouter client — a thin, backward-compatible OpenAI-compatible subclass.
-
-    Preserves the original constructor signature and the ``X-OpenRouter-Title``
-    header so existing callers and tests are unaffected.
-    """
-
-    def __init__(self, api_key: str, default_model: str, timeout: float = 120.0) -> None:
-        super().__init__(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=api_key,
-            default_model=default_model,
-            timeout=timeout,
-            provider_name="OpenRouter",
-            title="hive-worker",
-        )

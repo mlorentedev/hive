@@ -52,27 +52,34 @@ from hive._vault_read import list_projects_text, register_vault_read  # noqa: E4
 from hive._vault_write import register_vault_write  # noqa: E402
 from hive._workers import register_workers  # noqa: E402
 from hive.budget import BudgetTracker  # noqa: E402
-from hive.clients import OllamaClient, OpenRouterClient  # noqa: E402
+from hive.clients import OpenAICompatibleClient  # noqa: E402
 from hive.config import settings  # noqa: E402
 from hive.relevance import RelevanceTracker  # noqa: E402
 from hive.usage import UsageTracker  # noqa: E402
 
 
 def _status_payload(ctx: ServerContext) -> dict[str, Any]:
-    """Assemble the /status JSON: live metrics + budget + version + uptime.
+    """Assemble the /status JSON: live metrics + worker usage + version + uptime.
 
     Live metrics come from the in-memory core (no DB read on the hot path);
-    the budget snapshot is an on-demand read, acceptable here since /status is
+    the usage snapshot is an on-demand read, acceptable here since /status is
     an operator query, not the request hot path.
+
+    HIVE-384 replaced the ``budget`` block with ``worker_usage``. The old block
+    reported dollars spent and remaining against a monthly cap, which on a flat
+    subscription would read ``0.0`` and ``the whole budget`` forever — an
+    operator surface that always says the same thing is worse than one that says
+    nothing, because it looks like a working gauge. Volume and latency are what
+    an operator can act on now.
     """
-    stats = ctx.budget.month_stats(ctx.openrouter_budget)
+    usage = ctx.budget.month_usage()
     uptime_s = max(0, int(time.monotonic() - ctx.started_at_monotonic))
     return {
         "version": _hive_version(),
         "uptime_s": uptime_s,
-        "budget": {
-            "spent": round(float(stats["spent"]), 4),
-            "remaining": round(float(stats["remaining"]), 4),
+        "worker_usage": {
+            "request_count": usage["request_count"],
+            "total_tokens": usage["total_tokens"],
         },
         **METRICS.snapshot(),
     }
@@ -106,8 +113,7 @@ def create_server(
     vault_path: Path | None = None,
     usage_tracker: UsageTracker | None = None,
     budget_tracker: BudgetTracker | None = None,
-    ollama_client: OllamaClient | None = None,
-    openrouter_client: OpenRouterClient | None = None,
+    worker_client: OpenAICompatibleClient | None = None,
     vault_scopes: dict[str, str] | None = None,
     relevance_tracker: RelevanceTracker | None = None,
     lesson_tracker: LessonReinforcementTracker | None = None,
@@ -139,19 +145,18 @@ def create_server(
     scopes = vault_scopes or _default_scopes()
     tracker = usage_tracker or UsageTracker()
     budget = budget_tracker or BudgetTracker(db_path=settings.db_path)
-    ollama = ollama_client or OllamaClient(
-        endpoint=settings.ollama_endpoint,
-        model=settings.ollama_model,
-        timeout=settings.http_timeout,
-    )
-    openrouter: OpenRouterClient | None = None
-    if openrouter_client is not None:
-        openrouter = openrouter_client
-    elif settings.openrouter_api_key:
-        openrouter = OpenRouterClient(
-            api_key=settings.openrouter_api_key,
-            default_model=settings.openrouter_model,
+    # HIVE-384: one worker, built only when it is actually configured. An
+    # unconfigured worker is ``None``, never a client pointed at a default that
+    # happens to be unreachable — that shape is what let the worker report
+    # "available models: none" for an unknown length of time.
+    worker: OpenAICompatibleClient | None = worker_client
+    if worker is None and settings.worker_base_url:
+        worker = OpenAICompatibleClient(
+            base_url=settings.worker_base_url,
+            api_key=settings.worker_api_key,
+            default_model=settings.worker_model,
             timeout=settings.http_timeout,
+            provider_name="NaN",
         )
     relevance = relevance_tracker or RelevanceTracker(
         db_path=settings.relevance_db_path,
@@ -181,15 +186,12 @@ def create_server(
         scopes=scopes,
         tracker=tracker,
         budget=budget,
-        ollama=ollama,
-        openrouter=openrouter,
+        worker=worker,
         relevance=relevance,
         lessons=lessons,
         lock_eviction=lock_eviction,
         idempotency=idempotency,
         stale_days=settings.stale_threshold_days,
-        openrouter_budget=settings.openrouter_budget,
-        openrouter_paid_model=settings.openrouter_paid_model,
         tool_timeout=settings.tool_timeout,
         embed_base_url=(embed_base_url if embed_base_url is not None else settings.embed_base_url),
         embed_model=embed_model if embed_model is not None else settings.embed_model,

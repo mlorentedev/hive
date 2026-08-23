@@ -58,20 +58,16 @@ def identity_block_text(ctx: ServerContext) -> str:
     booleans only — never API keys), started_at. Stable across calls
     since started_at is captured at server construction.
     """
-    # Ollama backend: report the cached availability probe. Unprobed →
-    # False (we cannot claim presence we haven't verified). OpenRouter:
-    # presence boolean derived from whether the client was constructed
-    # (which requires an api_key) — the key itself is never embedded.
-    ollama_present = bool(
-        getattr(ctx.ollama, "_availability_cached", None),
-    )
-    openrouter_present = ctx.openrouter is not None
+    # HIVE-384: one worker backend. The boolean says the client was
+    # CONSTRUCTED, which requires a configured base_url — it does not claim the
+    # endpoint answers. That distinction is the whole reason this issue exists:
+    # the previous shape reported an Ollama client that always existed and never
+    # reached a model, so "configured" read as "working" for an unknown length
+    # of time. The key itself is never embedded here.
     backends = (
-        '{"ollama": '
-        + ("true" if ollama_present else "false")
-        + ', "openrouter": '
-        + ("true" if openrouter_present else "false")
-        + "}"
+        '{"worker": '
+        + ("true" if ctx.worker is not None else "false")
+        + ', "worker_reachable": "unprobed"}'
     )
     return "\n".join(
         [
@@ -125,7 +121,7 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
     uptime_s = max(0.0, time.monotonic() - ctx.started_at_monotonic)
     tools = _registered_tool_names(mcp)
     period = datetime.now(UTC).strftime("%Y-%m")
-    stats = ctx.budget.month_stats(ctx.openrouter_budget)
+    usage = ctx.budget.month_usage()
 
     # HIVE-115 telemetry. Each computation is defensive: a psutil error
     # or stat failure must NEVER prevent vault_health from returning.
@@ -211,9 +207,9 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
         "- uncommitted:",
         f"  - count: {count_text}",
         f"  - oldest_age_s: {oldest_age_text}",
-        "- openrouter_budget:",
-        f"  - spent_usd: {float(stats['spent']):.4f}",
-        f"  - cap_usd: {ctx.openrouter_budget}",
+        "- worker_usage:",
+        f"  - request_count: {usage['request_count']}",
+        f"  - total_tokens: {usage['total_tokens']}",
         f"  - period: {period}",
         "",
     ]

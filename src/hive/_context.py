@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from hive._lesson_reinforcement import LessonReinforcementTracker
     from hive._lock_eviction import LockEvictionTracker
     from hive.budget import BudgetTracker
-    from hive.clients import OllamaClient, OpenRouterClient
+    from hive.clients import OpenAICompatibleClient
     from hive.relevance import RelevanceTracker
     from hive.usage import UsageTracker
 
@@ -27,15 +27,18 @@ class ServerContext:
     scopes: dict[str, str]
     tracker: UsageTracker
     budget: BudgetTracker
-    ollama: OllamaClient
-    openrouter: OpenRouterClient | None
+    # HIVE-384: one worker client, OpenAI-compatible, pointed at NaN.
+    # ``None`` means the worker is unconfigured — the same meaning
+    # ``embed_base_url == ""`` carries for the semantic backend. Callers must
+    # branch on it rather than assume a client exists: the previous shape had a
+    # non-optional Ollama client that was always present and never reachable,
+    # which is how the worker served zero models without anyone noticing.
+    worker: OpenAICompatibleClient | None
     relevance: RelevanceTracker
     lessons: LessonReinforcementTracker
     lock_eviction: LockEvictionTracker
     idempotency: IdempotencyStore
     stale_days: int
-    openrouter_budget: float
-    openrouter_paid_model: str
     tool_timeout: float
     # HIVE-211: optional semantic backend for vault_ask (empty = disabled).
     embed_base_url: str = ""
