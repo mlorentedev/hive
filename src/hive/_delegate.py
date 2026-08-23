@@ -49,6 +49,11 @@ _STATUS_EXIT = {
     "timeout": EXIT_TIMEOUT,
 }
 
+# What a worker body must carry before this verb will pass it on. `degraded` is
+# absent deliberately: only the verb knows which route answered, so it is added
+# here rather than expected from the far side.
+_REQUIRED_FIELDS = frozenset({"status", "model", "output", "tokens", "duration_ms", "detail"})
+
 _DESCRIPTION = """\
 Run one task against the configured worker and print a JSON result record.
 
@@ -97,12 +102,16 @@ def run_delegate(argv: list[str]) -> int:
     parser = _parser()
     try:
         args = parser.parse_args(argv)
-    except SystemExit:
-        # argparse exits 2 and has already explained itself on stderr. Return
-        # rather than propagate so a usage error never reaches the emit path:
-        # a record for a call that was never made would be a lie a dispatcher
-        # would happily parse.
-        return EXIT_USAGE
+    except SystemExit as exc:
+        # argparse has already explained itself on stderr. Return rather than
+        # propagate so neither path reaches the emit path: a record for a call
+        # that was never made would be a lie a dispatcher would happily parse.
+        #
+        # `--help` and `--version` raise SystemExit(0) through this same branch,
+        # so the code has to be read rather than assumed: collapsing everything
+        # to EXIT_USAGE made `hive delegate --help` exit 2, which is a script
+        # asking for usage and being told it got the usage wrong.
+        return EXIT_OK if exc.code == 0 else EXIT_USAGE
 
     # argparse's own type check accepts 0 and negatives. A zero deadline is not
     # a deadline, and rejecting it beats dispatching something that can only
@@ -182,19 +191,46 @@ async def _dispatch_async(
     state = _read_state()
     if state is not None and _daemon_reachable(DEFAULT_HOST, state[0]):
         port, token = state
+        # The fallback is PRE-SUBMISSION ONLY, and the flag is what enforces it.
+        #
+        # The daemon records usage as soon as the worker answers, before it
+        # serialises the response. So a connection that dies after the request
+        # went out leaves an *ambiguous* outcome: the inference may have run and
+        # been paid for. Falling back there would run a second one — double
+        # cost, and a second slot out of a pool whose concurrency is the binding
+        # constraint. Retrying is only free before the request was submitted.
+        #
+        # Failing to open the session (daemon mid-restart, stale token,
+        # handshake stall) is unambiguous: nothing ran, so the documented
+        # ADR-011 §3 fallback applies and `degraded` reports which path answered.
+        submitted = False
         try:
             client = _remote_client(DEFAULT_HOST, port, token)
             async with client:
+                submitted = True
                 result = await client.call_tool("delegate_task", payload)
-            return _decode(result, degraded=False)
-        except Exception as exc:  # noqa: BLE001 - any daemon failure degrades
-            # Broad on purpose. The TCP probe proves something is listening, not
-            # that it will complete an MCP call: a daemon mid-restart, a stale
-            # token, a handshake stall. Every one of those is a reason to take
-            # the documented fallback, and none is a reason to fail the
-            # dispatch — the degraded flag is how the caller learns which path
-            # answered.
-            _log.warning("daemon call failed (%r); falling back to in-process", exc)
+                return _decode(result, degraded=False)
+        except Exception as exc:  # noqa: BLE001 - classified by `submitted`
+            if submitted:
+                _log.warning("daemon connection lost after submission (%r); NOT retrying", exc)
+                # task_failed, not pool_unavailable: exit 3 would advance the
+                # dispatcher's chain and spend a second pool on a task that may
+                # already have been served. Fail closed is the direction that
+                # does not retry, and a human reading the detail can decide.
+                return {
+                    "status": "task_failed",
+                    "model": model,
+                    "degraded": False,
+                    "tokens": 0,
+                    "duration_ms": 0,
+                    "output": "",
+                    "detail": (
+                        "the daemon connection failed after the request was submitted, so the "
+                        f"worker may have run and been billed ({exc!r}). Not retried locally or "
+                        "elsewhere: a second dispatch could pay for the same task twice."
+                    ),
+                }
+            _log.warning("daemon session could not be opened (%r); falling back", exc)
 
     from hive.server import create_server
 
@@ -211,19 +247,40 @@ def _decode(result: Any, *, degraded: bool) -> dict[str, Any]:
     """
     text = _result_text(result)
     try:
-        record: dict[str, Any] = json.loads(text)
+        parsed = json.loads(text)
     except (ValueError, TypeError):
-        return {
-            "status": "task_failed",
-            "model": "",
-            "degraded": degraded,
-            "tokens": 0,
-            "duration_ms": 0,
-            "output": "",
-            "detail": f"worker returned an unparseable body: {text[:200]}",
-        }
+        return _unusable(text, degraded, "unparseable")
+    # Parseable is not the same as usable. `[]`, `null` and `"text"` are all
+    # valid JSON and none is a record: assigning `degraded` into them raised
+    # TypeError straight out of the verb, so a malformed worker body produced a
+    # traceback on stderr and NOTHING on stdout — the one thing a dispatcher
+    # cannot handle. An object missing contracted keys is the quieter version of
+    # the same problem, and is rejected for the same reason.
+    if not isinstance(parsed, dict):
+        return _unusable(text, degraded, f"not a JSON object ({type(parsed).__name__})")
+    missing = _REQUIRED_FIELDS - set(parsed)
+    if missing:
+        return _unusable(text, degraded, f"missing {', '.join(sorted(missing))}")
+    record: dict[str, Any] = dict(parsed)
     record["degraded"] = degraded
     return record
+
+
+def _unusable(text: str, degraded: bool, why: str) -> dict[str, Any]:
+    """The canonical record for a body this verb cannot act on.
+
+    task_failed rather than pool_unavailable: the pool answered, and what came
+    back is unusable. Retrying that on a different model would hide it.
+    """
+    return {
+        "status": "task_failed",
+        "model": "",
+        "degraded": degraded,
+        "tokens": 0,
+        "duration_ms": 0,
+        "output": "",
+        "detail": f"worker returned a body this verb cannot use — {why}: {text[:200]}",
+    }
 
 
 def _result_text(result: Any) -> str:

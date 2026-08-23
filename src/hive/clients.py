@@ -293,7 +293,13 @@ class OpenAICompatibleClient:
             )
             raise PoolUnavailableError(msg)
         if resp.status_code >= 400:
-            msg = f"{self._provider_name} models error ({resp.status_code}): {resp.text[:200]}"
+            # Through _error_detail, not raw resp.text: `worker_status` renders
+            # this exception, and a provider that echoes the Authorization value
+            # in a 500 body would put the credential on a status surface. The
+            # 401 path was redacted and this one was not, which is the half of
+            # a fix that leaves the leak reachable by a different status code.
+            detail = self._error_detail(resp)
+            msg = f"{self._provider_name} models error ({resp.status_code}): {detail}"
             raise RuntimeError(msg)
 
         try:
