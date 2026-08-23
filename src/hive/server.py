@@ -811,6 +811,8 @@ Commands:
   (no args)                            run the stdio MCP server (v1 per-session contract)
   serve                                run the single-owner daemon (ADR-011)
   client                               run the thin stdio shim that proxies to the daemon
+  delegate --model M --timeout S       run one task against one model; JSON on stdout
+                                       (exit 1 task failed, 3 pool unavailable, 4 timeout)
   service {install,uninstall,status}   manage the daemon as a per-user OS service
   self-upgrade [version]               build + swap to a hive-vault version (PyPI latest if omitted)
 
@@ -857,6 +859,10 @@ def _dispatch(argv: list[str]) -> int:
     if cmd == "client":
         _run_client(argv[1:])
         return 0
+    if cmd == "delegate":
+        from hive._delegate import run_delegate
+
+        return run_delegate(argv[1:])
     print(f"hive: unknown command: {cmd}", file=sys.stderr)
     print(_USAGE, file=sys.stderr, end="")
     return 2

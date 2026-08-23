@@ -300,6 +300,41 @@ def _capture_lesson_lookup(
 _RETIRED_MODEL_ALIASES = frozenset({"auto", "ollama", "openrouter-free", "openrouter"})
 
 
+def _as_record(
+    status: str,
+    *,
+    model: str = "",
+    output: str = "",
+    tokens: int = 0,
+    duration_ms: int = 0,
+    detail: str = "",
+) -> str:
+    """Serialise one dispatch outcome for a machine caller (HIVE-384 AC1).
+
+    Every field is always present, including on the failure paths. A consumer
+    that has to branch on which keys exist before it can read a status is a
+    consumer that will get that branch wrong once; ``degraded`` is the only key
+    added later, by the verb, because only the verb knows which route answered.
+
+    ``status`` travels as a VALUE and not as an exception type on purpose:
+    types do not survive the JSON-RPC boundary between the daemon and its
+    clients, and the pool-unavailable / task-failed distinction is exactly what
+    the dispatcher on the far side needs in order to decide whether advancing
+    its fallback chain is legitimate.
+    """
+    return json.dumps(
+        {
+            "status": status,
+            "model": model,
+            "output": output,
+            "tokens": tokens,
+            "duration_ms": duration_ms,
+            "detail": detail,
+        },
+        separators=(",", ":"),
+    )
+
+
 def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
     """Register worker tools on the MCP server."""
 
@@ -352,6 +387,14 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
         except ConnectionError as exc:
             # Unreachable, refused, rate-limited, auth rejected — the pool did
             # not serve the request. Retrying elsewhere is legitimate.
+            #
+            # This branch documented those four conditions from the start and
+            # only received two of them: `clients.py` raised ConnectionError on
+            # transport failures alone, so a 429 or a 401 arrived as a
+            # RuntimeError and classified as `task_failed` below — the chain
+            # stopping exactly where it should have advanced. PR 2 gave the
+            # refusals their own `PoolUnavailableError`, a ConnectionError
+            # subclass so this catch needed no widening.
             return None, "pool_unavailable", f"worker unreachable: {exc}"
         except RuntimeError as exc:
             # The provider answered and the answer is unusable. Retrying the
@@ -625,6 +668,8 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
         section: str = "context",
         path: str = "",
         max_summary_lines: int = 20,
+        timeout_s: float = 0.0,
+        structured: bool = False,
     ) -> str:
         """Offload work to a cheaper model or summarize vault files.
 
@@ -643,9 +688,41 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
             section: Shortcut name for summarization. Ignored if path is set.
             path: Relative path to a .md file. Overrides section.
             max_summary_lines: Target summary length for summarization.
+            timeout_s: Per-dispatch deadline in seconds. 0 uses the ambient
+                tool timeout. A value ABOVE the ambient one raises the ceiling
+                rather than being clamped by it — a deadline a 60s default can
+                silently cap is not a deadline (HIVE-384 AC3).
+            structured: Return a JSON record instead of prose. Prose is the
+                default so every existing caller's contract is unchanged; the
+                dispatcher asks for JSON because it needs the status as a
+                VALUE. Exception types do not survive the JSON-RPC boundary
+                between the daemon and its clients, so "the pool refused" and
+                "the worker answered badly" cannot be told apart by type on the
+                far side — and a dispatcher that cannot tell them apart turns a
+                rate limit into a silent retry against a different model.
         """
+        # A per-dispatch deadline REPLACES the ambient one rather than being
+        # bounded by it. `ctx.tool_timeout` defaults to 60s, and a caller that
+        # asked for 180 and silently got 60 was never given the deadline it
+        # asked for (HIVE-384 AC3).
+        deadline_s = timeout_s if timeout_s > 0 else ctx.tool_timeout
+
+        # Structured mode covers worker delegation only. Summarize mode returns
+        # a document, and quietly handing back prose to a caller that asked for
+        # JSON would fail at its parser with no idea why. Refusing names the
+        # reason at the boundary where it is still obvious.
+        if structured and project:
+            return _as_record(
+                "task_failed",
+                model=model,
+                detail=(
+                    "structured mode covers worker delegation only; "
+                    "summarize mode (project=) returns a document, not a record"
+                ),
+            )
+
         try:
-            async with tool_span("delegate_task", ctx.tool_timeout):
+            async with tool_span("delegate_task", deadline_s):
                 # ── Vault summarize mode ──
                 if project:
                     result = _resolve_file(
@@ -723,7 +800,10 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                     )
 
                 if not prompt:
-                    return track(ctx, "delegate_task", "Either prompt or project is required.")
+                    msg = "Either prompt or project is required."
+                    if structured:
+                        return _as_record("task_failed", model=model, detail=msg)
+                    return track(ctx, "delegate_task", msg)
 
                 # ── Worker delegation ──
                 #
@@ -736,13 +816,17 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                 _tn = "delegate_task"
 
                 if model in _RETIRED_MODEL_ALIASES:
-                    return track(
-                        ctx,
-                        _tn,
+                    retired = (
                         f"'{model}' was removed in 4.0.0 — the worker now runs a "
                         "single OpenAI-compatible provider. Pass a concrete model "
-                        "id, or omit `model` to use the configured default.",
+                        "id, or omit `model` to use the configured default."
                     )
+                    # task_failed, not pool_unavailable: the request is wrong,
+                    # and re-sending it to the next pool would fail identically
+                    # while looking like a capacity problem.
+                    if structured:
+                        return _as_record("task_failed", model=model, detail=retired)
+                    return track(ctx, _tn, retired)
 
                 resp, status, detail = await _try_worker(
                     prompt,
@@ -750,15 +834,37 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                     context,
                     model=model,
                 )
+                if structured:
+                    return _as_record(
+                        status,
+                        model=(resp.model if resp is not None else model),
+                        output=(resp.text if resp is not None else ""),
+                        tokens=(resp.tokens if resp is not None else 0),
+                        duration_ms=(resp.latency_ms if resp is not None else 0),
+                        detail=detail,
+                    )
                 if resp is not None:
                     return track(ctx, _tn, _format_response(resp))
                 return track(ctx, _tn, f"{detail}. {_REJECT_MSG}")
         except TimeoutError:
+            # The deadline that expired is the one that was ASKED for, so the
+            # message must name it rather than the ambient default — otherwise
+            # a 180s dispatch reports "timed out after 60s" and sends whoever
+            # reads it looking in the wrong place.
+            expired = timeout_s if timeout_s > 0 else ctx.tool_timeout
+            # `:g` rather than `:.0f`: a sub-second deadline rounds to "0s"
+            # under the latter, and "timed out after 0s" reads as a bug in the
+            # timer rather than as the deadline the caller chose.
+            if structured:
+                return _as_record(
+                    "timeout",
+                    model=model,
+                    detail=f"deadline of {expired:g}s expired; termination issued",
+                )
             return track(
                 ctx,
                 "delegate_task",
-                f"Tool timed out after {ctx.tool_timeout:.0f}s. "
-                "Worker may be slow or unresponsive.",
+                f"Tool timed out after {expired:g}s. Worker may be slow or unresponsive.",
             )
 
     @mcp.tool(annotations=_READ_ONLY)

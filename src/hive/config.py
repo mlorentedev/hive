@@ -31,7 +31,18 @@ class HiveSettings(BaseSettings):
     # would make a published package read a variable that only means something
     # inside one deployment; mapping a launcher's own name onto
     # HIVE_WORKER_API_KEY is the launcher's job, at injection time.
-    worker_api_key: str = ""
+    # repr=False on every credential field. `repr(settings)` is not something
+    # anyone calls on purpose — it is what a traceback, a debug log and a
+    # pytest assertion print unbidden, and pydantic renders field VALUES there.
+    # Measured: `repr(HiveSettings())` contained `worker_api_key='<the key>'`
+    # verbatim. The transcript that catches such a line is a durable artifact
+    # nothing scans and nothing can un-print (AC7).
+    #
+    # `SecretStr` is the idiomatic fix and is deliberately NOT taken here: it
+    # changes the field's type, which propagates through `ServerContext` and
+    # six call sites, and a type migration does not belong in the PR that
+    # discovered the leak. Tracked separately; `repr=False` closes the leak now.
+    worker_api_key: str = Field(default="", repr=False)
     vault_scopes: dict[str, str] = Field(
         # ``agents`` is intentionally LAST: auto-scan (plain project name)
         # resolves first-match over insertion order, so appending keeps an
@@ -51,7 +62,7 @@ class HiveSettings(BaseSettings):
     # configured the same way.
     embed_base_url: str = ""
     embed_model: str = ""
-    embed_api_key: str = ""
+    embed_api_key: str = Field(default="", repr=False)
     # HIVE-211 PR4: LLM synthesis model. Uses the same base_url/api_key as
     # embeddings. Empty = return formatted retrieval chunks (no LLM call).
     # The model id is whatever the configured endpoint calls it — hive does not
