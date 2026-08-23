@@ -1,7 +1,8 @@
-"""Smoke tests — real HTTP calls to Ollama and OpenRouter + vault tool checks.
+"""Smoke tests — real HTTP calls to the NaN worker + vault tool checks.
 
 Run with:  pytest -m smoke -v
-Requires:  Ollama running + OPENROUTER_API_KEY set (for worker tests).
+Requires:  a reachable worker endpoint (HIVE_WORKER_BASE_URL) and its credential
+           (HIVE_WORKER_API_KEY, or NAN_API_KEY as the launcher injects it).
 Vault smoke tests always run (no external deps needed).
 """
 
@@ -18,7 +19,7 @@ import httpx
 import pytest
 
 from hive.budget import BudgetTracker
-from hive.clients import OllamaClient, OpenRouterClient
+from hive.clients import OpenAICompatibleClient
 from hive.server import create_server
 
 if TYPE_CHECKING:
@@ -28,12 +29,15 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.smoke
 
-OLLAMA_ENDPOINT = os.environ.get("HIVE_OLLAMA_ENDPOINT", "http://ollama.kubelab.live:11434")
-OLLAMA_MODEL = os.environ.get("HIVE_OLLAMA_MODEL", "qwen2.5-coder:7b")
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY") or os.environ.get(
-    "HIVE_OPENROUTER_API_KEY"
+# HIVE-384: the smoke tests run against the single NaN-backed worker.
+# The credential is read under BOTH names the deployment uses — the prefixed one
+# hive owns, and the registry name the launcher injects — so a smoke run works
+# whether it is started by hand or through `dotf secrets run`.
+WORKER_BASE_URL = os.environ.get("HIVE_WORKER_BASE_URL") or os.environ.get(
+    "HIVE_EMBED_BASE_URL", ""
 )
-OPENROUTER_MODEL = os.environ.get("HIVE_OPENROUTER_MODEL", "qwen/qwen3-coder:free")
+WORKER_MODEL = os.environ.get("HIVE_WORKER_MODEL", "deepseek-v4-flash")
+WORKER_API_KEY = os.environ.get("HIVE_WORKER_API_KEY") or os.environ.get("NAN_API_KEY", "")
 
 # Trivial prompt to keep latency and token usage minimal.
 PING_PROMPT = "Reply with exactly one word: pong"
@@ -47,16 +51,31 @@ def _resource_text(result: ResourceResult) -> str:
     return str(result.contents[0].content)
 
 
-def _ollama_reachable() -> bool:
+def _worker_reachable() -> bool:
+    """Probe the configured worker endpoint.
+
+    Configuration alone is not enough to run these tests: the whole point of
+    #384 is that a configured-but-unreachable worker looked healthy for an
+    unknown length of time. So the skip condition is a probe, not a truthy
+    env var.
+    """
+    if not WORKER_BASE_URL or not WORKER_API_KEY:
+        return False
     try:
-        resp = httpx.get(f"{OLLAMA_ENDPOINT}/", timeout=5)
+        resp = httpx.get(
+            f"{WORKER_BASE_URL}/models",
+            headers={"Authorization": f"Bearer {WORKER_API_KEY}"},
+            timeout=5,
+        )
         return resp.status_code == 200
     except (httpx.ConnectError, httpx.ConnectTimeout):
         return False
 
 
-skip_no_ollama = pytest.mark.skipif(not _ollama_reachable(), reason="Ollama not reachable")
-skip_no_openrouter = pytest.mark.skipif(not OPENROUTER_API_KEY, reason="OPENROUTER_API_KEY not set")
+skip_no_worker = pytest.mark.skipif(
+    not _worker_reachable(),
+    reason="worker endpoint not configured or not reachable",
+)
 
 
 # ── Fixtures ────────────────────────────────────────────────────────
@@ -92,15 +111,15 @@ def smoke_budget(tmp_path: Path) -> BudgetTracker:
 
 
 @pytest.fixture
-def ollama_client() -> OllamaClient:
-    return OllamaClient(endpoint=OLLAMA_ENDPOINT, model=OLLAMA_MODEL)
-
-
-@pytest.fixture
-def openrouter_client() -> OpenRouterClient | None:
-    if not OPENROUTER_API_KEY:
+def smoke_worker_client() -> OpenAICompatibleClient | None:
+    if not WORKER_BASE_URL or not WORKER_API_KEY:
         return None
-    return OpenRouterClient(api_key=OPENROUTER_API_KEY, default_model=OPENROUTER_MODEL)
+    return OpenAICompatibleClient(
+        base_url=WORKER_BASE_URL,
+        api_key=WORKER_API_KEY,
+        default_model=WORKER_MODEL,
+        provider_name="NaN",
+    )
 
 
 @pytest.fixture
@@ -156,15 +175,13 @@ def smoke_vault(tmp_path: Path) -> Path:
 @pytest.fixture
 def server(
     smoke_budget: BudgetTracker,
-    ollama_client: OllamaClient,
-    openrouter_client: OpenRouterClient | None,
+    smoke_worker_client: OpenAICompatibleClient,
     smoke_vault: Path,
 ) -> FastMCP:
     return create_server(
         vault_path=smoke_vault,
         budget_tracker=smoke_budget,
-        ollama_client=ollama_client,
-        openrouter_client=openrouter_client,
+        worker_client=smoke_worker_client,
     )
 
 
@@ -596,146 +613,54 @@ class TestEdgeCasesSmoke:
         lines_before_truncation = result.split("[...")[0].strip().splitlines()
         assert len(lines_before_truncation) == 10
 
-    # G4
-    async def test_budget_exhausted(
-        self,
-        server: FastMCP,
-        smoke_budget: BudgetTracker,
-    ) -> None:
-        smoke_budget.record_request(model="test", cost_usd=5.0, tokens=0, latency_ms=0)
-        result = _text(
-            await server.call_tool(
-                "delegate_task",
-                {"prompt": PING_PROMPT, "model": "openrouter", "max_cost_per_request": 0.01},
-            )
-        )
-        assert "budget" in result.lower()
 
+@skip_no_worker
+class TestWorkerDispatch:
+    """A real dispatch against the configured worker.
 
-# ══════════════════════════════════════════════════════════════════════
-# Worker smoke tests (need real infra)
-# ══════════════════════════════════════════════════════════════════════
+    This is the criterion the whole change exists to make passable: before
+    #384 the worker reached zero models, so no smoke test of it could pass on
+    any machine.
+    """
 
-
-@skip_no_ollama
-class TestOllamaDirect:
-    """Real calls to Ollama."""
-
-    async def test_delegate_ollama_returns_response(self, server: FastMCP) -> None:
-        result = _text(
-            await server.call_tool("delegate_task", {"prompt": PING_PROMPT, "model": "ollama"})
-        )
-        assert "Worker Response" in result
-        assert "qwen2.5-coder" in result
-
-    async def test_delegate_ollama_has_tokens_and_latency(self, server: FastMCP) -> None:
-        result = _text(
-            await server.call_tool("delegate_task", {"prompt": PING_PROMPT, "model": "ollama"})
-        )
-        assert "tokens" in result
-        assert "$0.00" in result
-
-    async def test_ollama_records_budget(
-        self, server: FastMCP, smoke_budget: BudgetTracker
-    ) -> None:
-        await server.call_tool("delegate_task", {"prompt": PING_PROMPT, "model": "ollama"})
-        stats = smoke_budget.month_stats(5.0)
-        assert stats["request_count"] == 1
-        assert stats["spent"] == 0.0
-
-
-@skip_no_openrouter
-class TestOpenRouterFreeDirect:
-    """Real calls to OpenRouter free tier."""
-
-    async def test_delegate_openrouter_free_returns_response(self, server: FastMCP) -> None:
-        result = _text(
-            await server.call_tool(
-                "delegate_task", {"prompt": PING_PROMPT, "model": "openrouter-free"}
-            )
-        )
-        assert "Worker Response" in result
-
-    async def test_openrouter_free_records_budget(
-        self, server: FastMCP, smoke_budget: BudgetTracker
-    ) -> None:
-        await server.call_tool("delegate_task", {"prompt": PING_PROMPT, "model": "openrouter-free"})
-        stats = smoke_budget.month_stats(5.0)
-        assert stats["request_count"] == 1
-
-
-@skip_no_openrouter
-class TestOpenRouterPaidDirect:
-    """Real calls to OpenRouter paid tier."""
-
-    async def test_delegate_paid_returns_response(self, server: FastMCP) -> None:
-        result = _text(
-            await server.call_tool(
-                "delegate_task",
-                {"prompt": PING_PROMPT, "model": "openrouter", "max_cost_per_request": 0.01},
-            )
-        )
-        assert "Worker Response" in result
-        assert "qwen" in result.lower()
-
-    async def test_paid_records_nonzero_cost(
-        self, server: FastMCP, smoke_budget: BudgetTracker
-    ) -> None:
-        await server.call_tool(
-            "delegate_task",
-            {"prompt": PING_PROMPT, "model": "openrouter", "max_cost_per_request": 0.01},
-        )
-        stats = smoke_budget.month_stats(5.0)
-        assert stats["request_count"] == 1
-        assert stats["spent"] >= 0.0
-
-    async def test_paid_budget_guard_blocks_when_exhausted(
-        self, server: FastMCP, smoke_budget: BudgetTracker
-    ) -> None:
-        smoke_budget.record_request(model="test", cost_usd=5.0, tokens=0, latency_ms=0)
-        result = _text(
-            await server.call_tool(
-                "delegate_task",
-                {"prompt": PING_PROMPT, "model": "openrouter", "max_cost_per_request": 0.01},
-            )
-        )
-        assert "budget" in result.lower()
-
-
-@skip_no_ollama
-class TestAutoRouting:
-    """Auto routing with real backends."""
-
-    async def test_auto_picks_ollama_first(self, server: FastMCP) -> None:
+    async def test_dispatch_returns_a_real_response(self, server: FastMCP) -> None:
         result = _text(await server.call_tool("delegate_task", {"prompt": PING_PROMPT}))
         assert "Worker Response" in result
-        assert "qwen2.5-coder" in result
+        assert WORKER_MODEL in result
 
-    async def test_auto_records_budget(self, server: FastMCP, smoke_budget: BudgetTracker) -> None:
+    async def test_dispatch_records_usage(
+        self, server: FastMCP, smoke_budget: BudgetTracker
+    ) -> None:
         await server.call_tool("delegate_task", {"prompt": PING_PROMPT})
-        stats = smoke_budget.month_stats(5.0)
-        assert stats["request_count"] == 1
+        usage = smoke_budget.month_usage()
+        assert usage["request_count"] == 1
+        assert usage["total_tokens"] > 0
 
 
 class TestWorkerStatusSmoke:
     """Real status + model listing."""
 
-    @skip_no_ollama
-    async def test_status_shows_ollama_online(self, server: FastMCP) -> None:
-        result = _text(await server.call_tool("worker_status", {}))
-        assert "online" in result.lower()
+    @skip_no_worker
+    async def test_status_reports_reachable_against_a_real_endpoint(self, server: FastMCP) -> None:
+        """The probe, exercised for real — the assertion CI cannot make.
 
-    @skip_no_ollama
-    async def test_status_shows_ollama_model(self, server: FastMCP) -> None:
+        Unit tests can only prove the reachable/unreachable branches render
+        differently. Only a live endpoint proves the probe actually reaches one.
+        """
         result = _text(await server.call_tool("worker_status", {}))
-        assert OLLAMA_MODEL in result
+        assert "Reachable: yes" in result
 
-    @skip_no_openrouter
-    async def test_status_shows_openrouter_models(self, server: FastMCP) -> None:
+    @skip_no_worker
+    async def test_status_shows_the_configured_model(self, server: FastMCP) -> None:
         result = _text(await server.call_tool("worker_status", {}))
-        assert "OpenRouter" in result
+        assert WORKER_MODEL in result
 
-    async def test_status_shows_budget(self, server: FastMCP) -> None:
+    @skip_no_worker
+    async def test_status_lists_worker_models(self, server: FastMCP) -> None:
         result = _text(await server.call_tool("worker_status", {}))
-        assert "Budget" in result
-        assert "$" in result
+        assert "Available Models" in result
+
+    async def test_status_reports_usage_not_dollars(self, server: FastMCP) -> None:
+        result = _text(await server.call_tool("worker_status", {}))
+        assert "Usage this month" in result
+        assert "$" not in result

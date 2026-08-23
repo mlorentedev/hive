@@ -185,7 +185,7 @@ def budget() -> Generator[BudgetTracker, None, None]:
 
 
 @pytest.fixture
-def worker() -> OpenAICompatibleClient:
+def worker_client() -> OpenAICompatibleClient:
     """Worker client for worker tests (methods are mocked per-test)."""
     return OpenAICompatibleClient(
         base_url="https://api.nan.example/v1",

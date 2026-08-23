@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from hive.clients import ClientResponse, ModelInfo, OpenRouterClient
+from hive.clients import ClientResponse, ModelInfo, OpenAICompatibleClient
 from hive.server import create_server
 
 if TYPE_CHECKING:
@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from fastmcp.tools import ToolResult
 
     from hive.budget import BudgetTracker
-    from hive.clients import OllamaClient
 
 
 def _text(result: ToolResult) -> str:
@@ -683,9 +682,10 @@ class TestVaultHealthIdentity:
         secret = "sk-DO-NOT-LEAK-CANARY-12345"
         mcp = create_server(
             vault_path=mock_vault,
-            openrouter_client=OpenRouterClient(
+            worker_client=OpenAICompatibleClient(
+                base_url="https://api.nan.example/v1",
                 api_key=secret,
-                default_model="qwen/qwen3-coder:free",
+                default_model="deepseek-v4-flash",
             ),
         )
         try:
@@ -693,7 +693,7 @@ class TestVaultHealthIdentity:
             assert secret not in result
             assert "## server" in result
             # presence boolean is exposed instead
-            assert "openrouter" in result.lower()
+            assert "worker" in result.lower()
         finally:
             _close_server(mcp)
 
@@ -741,7 +741,7 @@ class TestVaultHealthRuntime:
         assert "## runtime" in result
         assert "uptime_s" in result
         assert "tools_registered" in result
-        assert "openrouter_budget" in result
+        assert "worker_usage" in result
 
     async def test_runtime_lists_registered_tool_names(
         self,
@@ -920,9 +920,10 @@ class TestVaultHealthRuntime:
         secret = "sk-RUNTIME-NEVER-LEAK-ABCDEF"
         mcp = create_server(
             vault_path=mock_vault,
-            openrouter_client=OpenRouterClient(
+            worker_client=OpenAICompatibleClient(
+                base_url="https://api.nan.example/v1",
                 api_key=secret,
-                default_model="qwen/qwen3-coder:free",
+                default_model="deepseek-v4-flash",
             ),
         )
         try:
@@ -933,8 +934,11 @@ class TestVaultHealthRuntime:
                 ),
             )
             assert secret not in result
-            # budget block exposes cap+spent, not credentials
-            assert "openrouter_budget" in result
+            # The usage block reports volume, never credentials. The block must
+            # be PRESENT as well as clean: an assertion that a secret is absent
+            # passes trivially when the whole section is missing, which is the
+            # way a leak test quietly stops testing anything.
+            assert "worker_usage" in result
         finally:
             _close_server(mcp)
 
@@ -2278,31 +2282,38 @@ class TestVaultUsage:
 def worker(
     mock_vault: Path,
     budget: BudgetTracker,
-    ollama: OllamaClient,
-    openrouter: OpenRouterClient,
+    worker_client: OpenAICompatibleClient,
 ) -> FastMCP:
     """Create a unified server with worker deps for worker-specific tests."""
     return create_server(
         vault_path=mock_vault,
         budget_tracker=budget,
-        ollama_client=ollama,
-        openrouter_client=openrouter,
+        worker_client=worker_client,
     )
 
 
-# ── delegate_task: auto routing ─────────────────────────────────────
+# ── delegate_task: single-shot dispatch ─────────────────────────────
 
 
-class TestDelegateTaskAutoRouting:
-    """Auto routing: Ollama first, then OpenRouter free, then paid."""
+class TestDelegateTaskDispatch:
+    """One worker, one shot (HIVE-384).
+
+    The tiered ladder these tests replaced (Ollama → OpenRouter free →
+    OpenRouter paid → reject) went with its providers, and the shape went with
+    it deliberately: choosing among pools belongs to the dispatcher, not to a
+    backend. What is asserted here instead is the property that makes such a
+    dispatcher possible — that a failure is *classified* rather than collapsed,
+    and that exactly one attempt is made.
+    """
 
     @pytest.mark.asyncio
-    async def test_ollama_first_when_available(self, worker: FastMCP, ollama: OllamaClient) -> None:
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+    async def test_success_returns_output_and_names_the_model(
+        self, worker: FastMCP, worker_client: OpenAICompatibleClient
+    ) -> None:
+        worker_client.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=ClientResponse(
                 text="hello world",
-                model="qwen2.5-coder:7b",
+                model="deepseek-v4-flash",
                 tokens=10,
                 cost_usd=0.0,
                 latency_ms=200,
@@ -2310,275 +2321,177 @@ class TestDelegateTaskAutoRouting:
         )
         result = _text(await worker.call_tool("delegate_task", {"prompt": "say hello"}))
         assert "hello world" in result
-        assert "qwen2.5-coder:7b" in result
+        assert "deepseek-v4-flash" in result
 
     @pytest.mark.asyncio
-    async def test_fallback_to_openrouter_free_when_ollama_down(
-        self, worker: FastMCP, ollama: OllamaClient, openrouter: OpenRouterClient
+    async def test_exactly_one_attempt_on_failure(
+        self, worker: FastMCP, worker_client: OpenAICompatibleClient
     ) -> None:
-        ollama.is_available = AsyncMock(return_value=False)  # type: ignore[method-assign]
-        openrouter.generate = AsyncMock(  # type: ignore[method-assign]
-            return_value=ClientResponse(
-                text="from openrouter",
-                model="qwen/qwen3-coder:free",
-                tokens=50,
-                cost_usd=0.0,
-                latency_ms=800,
-            )
+        """No retry, no second provider — the caller owns the fallback chain.
+
+        A backend that retries on its own is a second routing authority: the
+        dispatcher can no longer attribute which model answered, and a bad
+        answer silently becomes a different model's answer.
+        """
+        gen = AsyncMock(side_effect=ConnectionError("refused"))
+        worker_client.generate = gen  # type: ignore[method-assign]
+        await worker.call_tool("delegate_task", {"prompt": "test"})
+        assert gen.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_unreachable_provider_reports_unavailability(
+        self, worker: FastMCP, worker_client: OpenAICompatibleClient
+    ) -> None:
+        worker_client.generate = AsyncMock(  # type: ignore[method-assign]
+            side_effect=ConnectionError("connection refused"),
         )
         result = _text(await worker.call_tool("delegate_task", {"prompt": "test"}))
-        assert "from openrouter" in result
+        assert "unreachable" in result.lower()
 
     @pytest.mark.asyncio
-    async def test_ollama_error_falls_to_openrouter(
-        self, worker: FastMCP, ollama: OllamaClient, openrouter: OpenRouterClient
+    async def test_provider_error_is_not_reported_as_unavailability(
+        self, worker: FastMCP, worker_client: OpenAICompatibleClient
     ) -> None:
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        ollama.generate = AsyncMock(side_effect=ConnectionError("ollama failed"))  # type: ignore[method-assign]
-        openrouter.generate = AsyncMock(  # type: ignore[method-assign]
-            return_value=ClientResponse(
-                text="fallback ok",
-                model="qwen/qwen3-coder:free",
-                tokens=30,
-                cost_usd=0.0,
-                latency_ms=500,
-            )
+        """The two failure classes must stay distinguishable in the output.
+
+        A dispatcher advances its chain on *pool unavailable* and must not on
+        *task failed*; if the surface text conflated them the distinction the
+        classification exists for would be unobservable from outside.
+        """
+        worker_client.generate = AsyncMock(  # type: ignore[method-assign]
+            side_effect=RuntimeError("model returned malformed output"),
         )
         result = _text(await worker.call_tool("delegate_task", {"prompt": "test"}))
-        assert "fallback ok" in result
+        assert "worker error" in result.lower()
+        assert "unreachable" not in result.lower()
 
     @pytest.mark.asyncio
-    async def test_all_unavailable_returns_reject(
-        self, worker: FastMCP, ollama: OllamaClient, openrouter: OpenRouterClient
+    async def test_unconfigured_worker_says_so(self, mock_vault: Path) -> None:
+        """No worker configured is a distinct, stated outcome, not a crash."""
+        mcp = create_server(vault_path=mock_vault)
+        try:
+            result = _text(await mcp.call_tool("delegate_task", {"prompt": "test"}))
+            assert "not configured" in result.lower()
+        finally:
+            _close_server(mcp)
+
+    @pytest.mark.asyncio
+    async def test_explicit_model_is_passed_through(
+        self, worker: FastMCP, worker_client: OpenAICompatibleClient
     ) -> None:
-        ollama.is_available = AsyncMock(return_value=False)  # type: ignore[method-assign]
-        openrouter.generate = AsyncMock(side_effect=ConnectionError("down"))  # type: ignore[method-assign]
-        result = _text(await worker.call_tool("delegate_task", {"prompt": "test"}))
-        assert "The host should handle this task directly" in result
-
-
-# ── delegate_task: budget enforcement ───────────────────────────────
-
-
-class TestDelegateTaskBudget:
-    """Budget cap enforcement for paid models."""
-
-    @pytest.mark.asyncio
-    async def test_max_cost_zero_skips_paid(
-        self, worker: FastMCP, ollama: OllamaClient, openrouter: OpenRouterClient
-    ) -> None:
-        ollama.is_available = AsyncMock(return_value=False)  # type: ignore[method-assign]
-        # Free model fails
-        openrouter.generate = AsyncMock(side_effect=RuntimeError("rate limit"))  # type: ignore[method-assign]
-        result = _text(
-            await worker.call_tool("delegate_task", {"prompt": "test", "max_cost_per_request": 0.0})
-        )
-        assert "The host should handle this task directly" in result
-
-    @pytest.mark.asyncio
-    async def test_max_cost_allows_paid_fallback(
-        self,
-        worker: FastMCP,
-        ollama: OllamaClient,
-        openrouter: OpenRouterClient,
-    ) -> None:
-        ollama.is_available = AsyncMock(return_value=False)  # type: ignore[method-assign]
-
-        call_count = 0
-
-        async def _side_effect(*args: object, **kwargs: object) -> ClientResponse:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                # First call: free model fails
-                raise RuntimeError("rate limit")
-            # Second call: paid model succeeds
-            return ClientResponse(
-                text="paid result",
-                model="deepseek/deepseek-v3",
-                tokens=100,
-                cost_usd=0.03,
-                latency_ms=1000,
-            )
-
-        openrouter.generate = AsyncMock(side_effect=_side_effect)  # type: ignore[method-assign]
-
-        result = _text(
-            await worker.call_tool(
-                "delegate_task", {"prompt": "test", "max_cost_per_request": 0.05}
-            )
-        )
-        assert "paid result" in result
-
-    @pytest.mark.asyncio
-    async def test_budget_exhausted_rejects_paid(
-        self,
-        worker: FastMCP,
-        budget: BudgetTracker,
-        ollama: OllamaClient,
-        openrouter: OpenRouterClient,
-    ) -> None:
-        # Exhaust budget
-        budget.record_request("m", cost_usd=5.0, tokens=100, latency_ms=100, task_type="general")
-        ollama.is_available = AsyncMock(return_value=False)  # type: ignore[method-assign]
-        openrouter.generate = AsyncMock(side_effect=RuntimeError("rate limit"))  # type: ignore[method-assign]
-
-        result = _text(
-            await worker.call_tool(
-                "delegate_task", {"prompt": "test", "max_cost_per_request": 0.10}
-            )
-        )
-        assert "The host should handle this task directly" in result
-
-
-# ── delegate_task: explicit model ───────────────────────────────────
-
-
-class TestDelegateTaskExplicitModel:
-    """Explicit model selection bypasses auto-routing."""
-
-    @pytest.mark.asyncio
-    async def test_explicit_ollama(self, worker: FastMCP, ollama: OllamaClient) -> None:
-        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+        gen = AsyncMock(
             return_value=ClientResponse(
-                text="explicit ollama",
-                model="qwen2.5-coder:7b",
-                tokens=20,
-                cost_usd=0.0,
-                latency_ms=150,
+                text="ok", model="mimo-v2.5", tokens=5, cost_usd=0.0, latency_ms=100
             )
         )
-        result = _text(
-            await worker.call_tool("delegate_task", {"prompt": "test", "model": "ollama"})
+        worker_client.generate = gen  # type: ignore[method-assign]
+        await worker.call_tool(
+            "delegate_task",
+            {"prompt": "test", "model": "mimo-v2.5"},
         )
-        assert "explicit ollama" in result
+        assert gen.await_args is not None
+        assert gen.await_args.kwargs["model"] == "mimo-v2.5"
+
+
+# ── delegate_task: the retired provider aliases ─────────────────────
+
+
+class TestRetiredModelAliases:
+    """4.0.0 removed the provider vocabulary; passing it must fail loudly.
+
+    A dead alias that is quietly accepted reaches the caller later as a
+    confusing inference failure. Rejected with a message naming the
+    replacement, it is a break they can fix in one read.
+    """
 
     @pytest.mark.asyncio
-    async def test_explicit_openrouter_free(
-        self, worker: FastMCP, openrouter: OpenRouterClient
+    @pytest.mark.parametrize(
+        "alias",
+        ["auto", "ollama", "openrouter-free", "openrouter"],
+    )
+    async def test_alias_is_rejected(
+        self, worker: FastMCP, worker_client: OpenAICompatibleClient, alias: str
     ) -> None:
-        openrouter.generate = AsyncMock(  # type: ignore[method-assign]
-            return_value=ClientResponse(
-                text="explicit free",
-                model="qwen/qwen3-coder:free",
-                tokens=30,
-                cost_usd=0.0,
-                latency_ms=400,
-            )
-        )
-        result = _text(
-            await worker.call_tool("delegate_task", {"prompt": "test", "model": "openrouter-free"})
-        )
-        assert "explicit free" in result
-
-    @pytest.mark.asyncio
-    async def test_explicit_openrouter_paid(
-        self,
-        worker: FastMCP,
-        openrouter: OpenRouterClient,
-    ) -> None:
-        openrouter.generate = AsyncMock(  # type: ignore[method-assign]
-            return_value=ClientResponse(
-                text="explicit paid",
-                model="qwen/qwen3-coder",
-                tokens=50,
-                cost_usd=0.001,
-                latency_ms=300,
-            )
-        )
-        result = _text(
-            await worker.call_tool("delegate_task", {"prompt": "test", "model": "openrouter"})
-        )
-        assert "explicit paid" in result
-
-    @pytest.mark.asyncio
-    async def test_explicit_custom_model(
-        self,
-        worker: FastMCP,
-        openrouter: OpenRouterClient,
-    ) -> None:
-        openrouter.generate = AsyncMock(  # type: ignore[method-assign]
-            return_value=ClientResponse(
-                text="custom model output",
-                model="deepseek/deepseek-v3",
-                tokens=40,
-                cost_usd=0.0005,
-                latency_ms=250,
-            )
-        )
-        result = _text(
-            await worker.call_tool(
-                "delegate_task",
-                {"prompt": "test", "model": "deepseek/deepseek-v3"},
-            )
-        )
-        assert "custom model output" in result
-
-    @pytest.mark.asyncio
-    async def test_empty_prompt_no_project_rejected(self, worker: FastMCP) -> None:
-        result = _text(await worker.call_tool("delegate_task", {}))
-        assert "required" in result.lower()
+        gen = AsyncMock()
+        worker_client.generate = gen  # type: ignore[method-assign]
+        result = _text(await worker.call_tool("delegate_task", {"prompt": "test", "model": alias}))
+        assert "removed in 4.0.0" in result
+        # Rejected before dispatch: no quota is spent discovering the break.
+        assert gen.await_count == 0
 
 
-# ── delegate_task: records to budget tracker ────────────────────────
+# ── delegate_task: records usage telemetry ──────────────────────────
 
 
 class TestDelegateTaskRecording:
-    """Successful requests are recorded in the budget tracker."""
+    """A successful call is recorded as usage, which is what survived the cap."""
 
     @pytest.mark.asyncio
-    async def test_records_on_success(
-        self, worker: FastMCP, budget: BudgetTracker, ollama: OllamaClient
+    async def test_records_tokens_and_latency(
+        self,
+        worker: FastMCP,
+        budget: BudgetTracker,
+        worker_client: OpenAICompatibleClient,
     ) -> None:
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+        worker_client.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=ClientResponse(
-                text="ok", model="qwen2.5-coder:7b", tokens=10, cost_usd=0.0, latency_ms=100
+                text="ok",
+                model="deepseek-v4-flash",
+                tokens=42,
+                cost_usd=0.0,
+                latency_ms=321,
             )
         )
         await worker.call_tool("delegate_task", {"prompt": "test"})
-        assert budget.month_stats(5.0)["request_count"] == 1
+        usage = budget.month_usage()
+        assert usage["request_count"] == 1
+        assert usage["total_tokens"] == 42
+        assert usage["by_model"]["deepseek-v4-flash"]["avg_latency_ms"] == 321
 
 
 # ── worker_status ───────────────────────────────────────────────────
 
 
 class TestWorkerStatus:
-    """worker_status tool shows budget, connectivity, and available models."""
+    """worker_status reports configuration, probed reachability, and usage.
+
+    The distinction these tests defend is the one whose absence caused #384:
+    **configured is not reachable.** The old surface reported providers by
+    whether a client object existed, so it said the worker was there while it
+    served zero models, for an unknown length of time and with nobody looking.
+    """
 
     @pytest.mark.asyncio
-    async def test_status_shows_budget(
-        self,
-        worker: FastMCP,
-        budget: BudgetTracker,
-        ollama: OllamaClient,
-        openrouter: OpenRouterClient,
+    async def test_reports_configuration_and_model(
+        self, worker: FastMCP, worker_client: OpenAICompatibleClient
     ) -> None:
-        budget.record_request("m", cost_usd=1.23, tokens=100, latency_ms=100, task_type="general")
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        worker_client.list_models = AsyncMock(return_value=[])  # type: ignore[method-assign]
         result = _text(await worker.call_tool("worker_status", {}))
-        assert "1.23" in result
-        assert "$1.0" in result
+        assert "Configured: yes" in result
+        assert "deepseek-v4-flash" in result
 
     @pytest.mark.asyncio
-    async def test_status_shows_ollama_connectivity(
-        self, worker: FastMCP, ollama: OllamaClient
+    async def test_unreachable_provider_is_reported_as_not_reachable(
+        self, worker: FastMCP, worker_client: OpenAICompatibleClient
     ) -> None:
-        ollama.is_available = AsyncMock(return_value=False)  # type: ignore[method-assign]
+        """Configured and unreachable must be visibly different states."""
+        worker_client.list_models = AsyncMock(  # type: ignore[method-assign]
+            side_effect=ConnectionError("connection refused"),
+        )
         result = _text(await worker.call_tool("worker_status", {}))
-        assert "offline" in result.lower() or "unavailable" in result.lower()
+        assert "Configured: yes" in result
+        assert "Reachable: NO" in result
 
     @pytest.mark.asyncio
-    async def test_status_includes_models(
-        self, worker: FastMCP, ollama: OllamaClient, openrouter: OpenRouterClient
+    async def test_reachable_provider_reports_its_models(
+        self, worker: FastMCP, worker_client: OpenAICompatibleClient
     ) -> None:
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        openrouter.list_models = AsyncMock(  # type: ignore[method-assign]
+        worker_client.list_models = AsyncMock(  # type: ignore[method-assign]
             return_value=[
                 ModelInfo(
-                    id="qwen/qwen3-coder:free",
-                    name="Qwen3 Coder",
-                    context_length=65536,
+                    id="deepseek-v4-flash",
+                    name="DeepSeek V4 Flash",
+                    context_length=1048576,
                     cost_per_million_input=0.0,
                     cost_per_million_output=0.0,
                     is_free=True,
@@ -2586,17 +2499,50 @@ class TestWorkerStatus:
             ]
         )
         result = _text(await worker.call_tool("worker_status", {}))
-        assert "qwen2.5-coder:7b" in result
-        assert "qwen/qwen3-coder:free" in result
+        assert "Reachable: yes" in result
+        assert "DeepSeek V4 Flash" in result
 
     @pytest.mark.asyncio
-    async def test_status_without_models(
-        self, worker: FastMCP, ollama: OllamaClient, openrouter: OpenRouterClient
+    async def test_unconfigured_worker_says_what_to_set(self, mock_vault: Path) -> None:
+        mcp = create_server(vault_path=mock_vault)
+        try:
+            result = _text(await mcp.call_tool("worker_status", {}))
+            assert "Configured: no" in result
+            assert "HIVE_WORKER_BASE_URL" in result
+        finally:
+            _close_server(mcp)
+
+    @pytest.mark.asyncio
+    async def test_without_models_it_does_not_claim_reachability(
+        self, worker: FastMCP, worker_client: OpenAICompatibleClient
     ) -> None:
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        """Skipping the probe must report `unprobed`, never `yes`.
+
+        An unprobed backend reported as reachable is precisely the false
+        assurance this tool exists to stop giving.
+        """
+        probe = AsyncMock(return_value=[])
+        worker_client.list_models = probe  # type: ignore[method-assign]
         result = _text(await worker.call_tool("worker_status", {"include_models": False}))
+        assert "Reachable: unprobed" in result
         assert "Available Models" not in result
-        assert "Budget" in result
+        assert probe.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_reports_usage_not_dollars(
+        self,
+        worker: FastMCP,
+        budget: BudgetTracker,
+        worker_client: OpenAICompatibleClient,
+    ) -> None:
+        worker_client.list_models = AsyncMock(return_value=[])  # type: ignore[method-assign]
+        budget.record_request("m", tokens=100, latency_ms=100)
+        result = _text(await worker.call_tool("worker_status", {}))
+        assert "Usage this month" in result
+        assert "Tokens: 100" in result
+        # A dollar figure on a flat subscription would always read zero, and a
+        # gauge that never moves looks like a working gauge.
+        assert "$" not in result
 
 
 # ── Multi-scope vault tests ─────────────────────────────────────────
@@ -3685,15 +3631,13 @@ class TestSectionFallback:
 def worker_vault(
     git_vault: Path,
     budget: BudgetTracker,
-    ollama: OllamaClient,
-    openrouter: OpenRouterClient,
+    worker_client: OpenAICompatibleClient,
 ) -> FastMCP:
     """Server with git vault + worker deps for capture_lesson (batch) tests."""
     return create_server(
         vault_path=git_vault,
         budget_tracker=budget,
-        ollama_client=ollama,
-        openrouter_client=openrouter,
+        worker_client=worker_client,
     )
 
 
@@ -3737,10 +3681,9 @@ class TestExtractLessons:
         self,
         git_vault: Path,
         worker_vault: FastMCP,
-        ollama: OllamaClient,
+        worker_client: OpenAICompatibleClient,
     ) -> None:
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+        worker_client.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response(_VALID_LESSONS_JSON),
         )
         result = _text(
@@ -3761,7 +3704,7 @@ class TestExtractLessons:
         self,
         git_vault: Path,
         worker_vault: FastMCP,
-        ollama: OllamaClient,
+        worker_client: OpenAICompatibleClient,
     ) -> None:
         # Pre-write a lesson with same title
         lessons_file = git_vault / "10_projects" / "testproject" / "90-lessons.md"
@@ -3769,8 +3712,7 @@ class TestExtractLessons:
         lessons_file.write_text(
             existing + "\n### [2026-01-01] Always check return values\nExisting.\n"
         )
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+        worker_client.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response(_VALID_LESSONS_JSON),
         )
         result = _text(
@@ -3787,7 +3729,7 @@ class TestExtractLessons:
     async def test_filters_low_confidence(
         self,
         worker_vault: FastMCP,
-        ollama: OllamaClient,
+        worker_client: OpenAICompatibleClient,
     ) -> None:
         low_conf = json.dumps(
             [
@@ -3801,8 +3743,7 @@ class TestExtractLessons:
                 },
             ]
         )
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+        worker_client.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response(low_conf),
         )
         result = _text(
@@ -3817,11 +3758,9 @@ class TestExtractLessons:
     async def test_worker_unavailable(
         self,
         worker_vault: FastMCP,
-        ollama: OllamaClient,
-        openrouter: OpenRouterClient,
+        worker_client: OpenAICompatibleClient,
     ) -> None:
-        ollama.is_available = AsyncMock(return_value=False)  # type: ignore[method-assign]
-        openrouter.generate = AsyncMock(  # type: ignore[method-assign]
+        worker_client.generate = AsyncMock(  # type: ignore[method-assign]
             side_effect=ConnectionError("no workers"),
         )
         result = _text(
@@ -3836,10 +3775,9 @@ class TestExtractLessons:
     async def test_worker_invalid_json(
         self,
         worker_vault: FastMCP,
-        ollama: OllamaClient,
+        worker_client: OpenAICompatibleClient,
     ) -> None:
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+        worker_client.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response("This is not JSON at all, just text."),
         )
         result = _text(
@@ -3854,10 +3792,9 @@ class TestExtractLessons:
     async def test_worker_empty_array(
         self,
         worker_vault: FastMCP,
-        ollama: OllamaClient,
+        worker_client: OpenAICompatibleClient,
     ) -> None:
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+        worker_client.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response("[]"),
         )
         result = _text(
@@ -3873,7 +3810,7 @@ class TestExtractLessons:
         self,
         git_vault: Path,
         worker_vault: FastMCP,
-        ollama: OllamaClient,
+        worker_client: OpenAICompatibleClient,
     ) -> None:
         """Worker wraps JSON in markdown fences — still parsed correctly."""
         wrapped = (
@@ -3892,8 +3829,7 @@ class TestExtractLessons:
             )
             + "\n```"
         )
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+        worker_client.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response(wrapped),
         )
         result = _text(
@@ -3909,7 +3845,7 @@ class TestExtractLessons:
         self,
         git_vault: Path,
         worker_vault: FastMCP,
-        ollama: OllamaClient,
+        worker_client: OpenAICompatibleClient,
     ) -> None:
         many = json.dumps(
             [
@@ -3924,8 +3860,7 @@ class TestExtractLessons:
                 for i in range(10)
             ]
         )
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+        worker_client.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response(many),
         )
         await worker_vault.call_tool(
@@ -3942,7 +3877,7 @@ class TestExtractLessons:
         self,
         git_vault: Path,
         worker_vault: FastMCP,
-        ollama: OllamaClient,
+        worker_client: OpenAICompatibleClient,
     ) -> None:
         """Worker output with newlines in fields is sanitized."""
         injected = json.dumps(
@@ -3957,8 +3892,7 @@ class TestExtractLessons:
                 }
             ]
         )
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+        worker_client.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response(injected),
         )
         result = _text(
@@ -3978,15 +3912,14 @@ class TestExtractLessons:
         self,
         git_vault: Path,
         worker_vault: FastMCP,
-        ollama: OllamaClient,
+        worker_client: OpenAICompatibleClient,
     ) -> None:
         """Filesystem errors during lesson write are reported, not silently dropped."""
         lessons_file = git_vault / "10_projects" / "testproject" / "90-lessons.md"
         # Make file read-only so appends fail
         lessons_file.chmod(0o444)
         try:
-            ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-            ollama.generate = AsyncMock(  # type: ignore[method-assign]
+            worker_client.generate = AsyncMock(  # type: ignore[method-assign]
                 return_value=_worker_response(_VALID_LESSONS_JSON),
             )
             result = _text(
@@ -4005,11 +3938,10 @@ class TestExtractLessons:
         self,
         git_vault: Path,
         worker_vault: FastMCP,
-        ollama: OllamaClient,
+        worker_client: OpenAICompatibleClient,
     ) -> None:
         """User text with curly braces (code, JSON) doesn't crash str.format()."""
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+        worker_client.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response(_VALID_LESSONS_JSON),
         )
         # Text containing curly braces — would crash without escaping
@@ -4026,7 +3958,7 @@ class TestExtractLessons:
         self,
         git_vault: Path,
         worker_vault: FastMCP,
-        ollama: OllamaClient,
+        worker_client: OpenAICompatibleClient,
     ) -> None:
         """Tags with newlines are sanitized to prevent markdown injection."""
         injected_tags = json.dumps(
@@ -4041,8 +3973,7 @@ class TestExtractLessons:
                 }
             ]
         )
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        ollama.generate = AsyncMock(  # type: ignore[method-assign]
+        worker_client.generate = AsyncMock(  # type: ignore[method-assign]
             return_value=_worker_response(injected_tags),
         )
         result = _text(
@@ -4804,7 +4735,7 @@ class TestToolTimeouts:
     async def test_delegate_task_timeout(
         self,
         worker: FastMCP,
-        ollama: OllamaClient,
+        worker_client: OpenAICompatibleClient,
     ) -> None:
         """delegate_task returns timeout message when worker hangs."""
 
@@ -4812,8 +4743,7 @@ class TestToolTimeouts:
             await asyncio.sleep(999)
             raise AssertionError("unreachable")
 
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        ollama.generate = AsyncMock(side_effect=slow_generate)  # type: ignore[method-assign]
+        worker_client.generate = AsyncMock(side_effect=slow_generate)  # type: ignore[method-assign]
 
         ctx = worker._hive_ctx  # type: ignore[attr-defined]
         ctx.tool_timeout = 0.1
@@ -4825,15 +4755,23 @@ class TestToolTimeouts:
     async def test_worker_status_timeout(
         self,
         worker: FastMCP,
-        ollama: OllamaClient,
+        worker_client: OpenAICompatibleClient,
     ) -> None:
-        """worker_status returns timeout message when connectivity check hangs."""
+        """worker_status returns timeout message when the probe hangs.
 
-        async def slow_check() -> bool:
+        The probe is now `list_models` — a real network call — rather than the
+        retired Ollama availability check. That makes this case more likely in
+        practice, not less: an endpoint that accepts the connection and then
+        stalls is exactly what a saturated provider looks like.
+        """
+
+        async def slow_check(*a: object, **kw: object) -> list[ModelInfo]:
             await asyncio.sleep(999)
-            return True
+            raise AssertionError("unreachable")
 
-        ollama.is_available = AsyncMock(side_effect=slow_check)  # type: ignore[method-assign]
+        worker_client.list_models = AsyncMock(  # type: ignore[method-assign]
+            side_effect=slow_check,
+        )
 
         ctx = worker._hive_ctx  # type: ignore[attr-defined]
         ctx.tool_timeout = 0.1
@@ -4846,23 +4784,20 @@ class TestToolTimeouts:
         self,
         git_vault: Path,
         budget: BudgetTracker,
-        ollama: OllamaClient,
-        openrouter: OpenRouterClient,
+        worker_client: OpenAICompatibleClient,
     ) -> None:
         """capture_lesson batch mode returns timeout when worker hangs."""
         mcp = create_server(
             vault_path=git_vault,
             budget_tracker=budget,
-            ollama_client=ollama,
-            openrouter_client=openrouter,
+            worker_client=worker_client,
         )
 
         async def slow_generate(*a: object, **kw: object) -> ClientResponse:
             await asyncio.sleep(999)
             raise AssertionError("unreachable")
 
-        ollama.is_available = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        ollama.generate = AsyncMock(side_effect=slow_generate)  # type: ignore[method-assign]
+        worker_client.generate = AsyncMock(side_effect=slow_generate)  # type: ignore[method-assign]
 
         ctx = mcp._hive_ctx  # type: ignore[attr-defined]
         ctx.tool_timeout = 0.1
