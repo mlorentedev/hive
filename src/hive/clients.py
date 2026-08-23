@@ -9,6 +9,38 @@ from urllib.parse import urlsplit
 
 import httpx
 
+
+class PoolUnavailableError(ConnectionError):
+    """The pool declined to serve the request; retrying elsewhere is legitimate.
+
+    Unreachable, timed out, rate-limited, or credential-rejected — in every one
+    of those the request never became an answer, so a dispatcher should advance
+    its fallback chain. That is the whole reason this type exists as something
+    other than a message: HIVE-384's contract gives it exit `3`, while a worker
+    that *answered* with a failure gets exit `1` and no retry.
+
+    It subclasses ``ConnectionError`` deliberately. Both `_try_worker` and
+    `worker_status` already catch `ConnectionError` and treat it as *pool
+    unavailable*; a sibling type would have silently reclassified them into the
+    task-failed branch — the exact collapse this distinction exists to prevent.
+
+    Deliberately NOT raised for 5xx: those mean the pool accepted the request
+    and broke while serving it. Unknown failures classify as task-failed,
+    because the fail-closed direction is the one that does not retry.
+    """
+
+
+# HTTP statuses that mean "this pool did not serve you", as opposed to "your
+# request was served and the result is bad". Kept as a mapping so the raised
+# message names which refusal it was: an operator reading one line should not
+# have to look the number up, and "rate limited" and "credential rejected" call
+# for completely different actions.
+_POOL_REFUSAL_STATUSES = {
+    401: "credential rejected",
+    403: "forbidden",
+    429: "rate limited",
+}
+
 _AVAILABILITY_CACHE_TTL_S = 30.0
 # Health-check connect timeout: kept short so an unreachable endpoint
 # fails fast (1s) instead of consuming the generate-timeout budget.
@@ -125,12 +157,22 @@ class OpenAICompatibleClient:
             resp = await self._http.post(url, json=payload)
             elapsed_ms = int((time.monotonic() - start) * 1000)
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-            raise ConnectionError(f"{self._provider_name} unavailable: {exc}") from exc
+            raise PoolUnavailableError(f"{self._provider_name} unavailable: {exc}") from exc
         except httpx.TimeoutException as exc:
-            raise ConnectionError(f"{self._provider_name} request timed out: {exc}") from exc
+            raise PoolUnavailableError(f"{self._provider_name} request timed out: {exc}") from exc
 
-        if resp.status_code == 429:
-            raise RuntimeError(f"{self._provider_name} rate limit exceeded. Retry later.")
+        # A refusal is not a failed task. 429 and 401/403 mean the pool did not
+        # serve this request at all, so a dispatcher should try the next entry
+        # in its chain; a 4xx about the request itself, or any 5xx, means the
+        # pool took it and the answer is unusable, which must not be retried
+        # elsewhere. Before HIVE-384 PR 2 every non-2xx raised RuntimeError, so
+        # a rate limit read as a broken task and the chain stopped exactly
+        # where it should have advanced.
+        if resp.status_code in _POOL_REFUSAL_STATUSES:
+            raise PoolUnavailableError(
+                f"{self._provider_name} refused the request ({resp.status_code} "
+                f"{_POOL_REFUSAL_STATUSES[resp.status_code]}): {self._error_detail(resp)}"
+            )
         if resp.status_code >= 400:
             raise RuntimeError(
                 f"{self._provider_name} API error ({resp.status_code}): {self._error_detail(resp)}"
@@ -141,9 +183,27 @@ class OpenAICompatibleClient:
             raise RuntimeError(f"{self._provider_name} returned non-JSON response: {exc}") from exc
         return data, elapsed_ms
 
+    def _error_detail(self, resp: httpx.Response) -> str:
+        """Best-effort error message from a non-2xx response body, redacted.
+
+        The body is a REMOTE string that this process then puts into an
+        exception message, a log line and a result record. Some providers echo
+        the request's ``Authorization`` header back in an auth-failure body, so
+        the one call most likely to produce a detail — a 401 — is also the one
+        most likely to carry the credential in it (AC7).
+
+        The redaction is exact rather than pattern-based: it removes this
+        client's own key, which cannot over-redact and cannot miss a token
+        shaped differently than expected. A general secret scrubber over
+        arbitrary strings is a bigger thing and is not this.
+        """
+        detail = self._extract_detail(resp)
+        if self._api_key and self._api_key in detail:
+            detail = detail.replace(self._api_key, "<redacted>")
+        return detail
+
     @staticmethod
-    def _error_detail(resp: httpx.Response) -> str:
-        """Best-effort error message from a non-2xx response body."""
+    def _extract_detail(resp: httpx.Response) -> str:
         try:
             data = resp.json()
         except ValueError:
@@ -218,11 +278,20 @@ class OpenAICompatibleClient:
             resp = await self._http.get(f"{self._base_url}/models")
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             msg = f"{self._provider_name} unavailable: {exc}"
-            raise ConnectionError(msg) from exc
+            raise PoolUnavailableError(msg) from exc
         except httpx.TimeoutException as exc:
             msg = f"{self._provider_name} request timed out: {exc}"
-            raise ConnectionError(msg) from exc
+            raise PoolUnavailableError(msg) from exc
 
+        # Same split as _post_json: worker_status reads reachability off this
+        # call, and a rate-limited catalog means "reachable, throttled" rather
+        # than "broken".
+        if resp.status_code in _POOL_REFUSAL_STATUSES:
+            msg = (
+                f"{self._provider_name} refused the models request "
+                f"({resp.status_code} {_POOL_REFUSAL_STATUSES[resp.status_code]})"
+            )
+            raise PoolUnavailableError(msg)
         if resp.status_code >= 400:
             msg = f"{self._provider_name} models error ({resp.status_code}): {resp.text[:200]}"
             raise RuntimeError(msg)

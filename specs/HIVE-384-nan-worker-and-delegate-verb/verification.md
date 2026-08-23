@@ -9,20 +9,51 @@ created: "2026-08-23"
 
 Map every acceptance criterion from `proposal.md` to concrete proof (commit hash, test name, or observed behavior).
 
-> **Status as of 2026-08-23: every criterion below is PENDING, and that is the spec's state, not an
-> omission.** This folder was scaffolded by a docs-only PR; no implementation exists yet, so no
-> criterion can carry evidence. Each row's follow-up is the correspondingly tagged `[AC<n>]` task in
-> `tasks.md`. The only result recorded today is the pre-change baseline under Test status, which
-> proves the tree was green *before* the work, not that any criterion is met. `spec archive` must
-> refuse this folder until these rows carry real hashes and test names.
+> **Status as of 2026-08-23, after PR 2.** AC1–AC4 and AC7 carry evidence below. AC5 and AC6 were
+> implemented by PR 1 (`#390`, released as 4.0.0) and their rows now name the tests that actually
+> assert them — the commands recorded for them originally selected **zero** tests, which is why they
+> are restated here rather than trusted.
 
-- [ ] AC1 (hive delegate honours the wire contract) -> commit `<hash>` / test `<name>`
-- [ ] AC2 (exit codes separate pool-unavailable from task-failed) -> commit `<hash>` / test `<name>`
-- [ ] AC3 (timeout kills the worker and returns without waiting) -> commit `<hash>` / test `<name>`
-- [ ] AC4 (routes through the daemon, degrades honestly without one) -> commit `<hash>` / test `<name>`
-- [ ] AC5 (the worker reaches NaN) -> commit `<hash>` / test `<name>`
-- [ ] AC6 (Ollama and OpenRouter gone from every surface) -> commit `<hash>` / test `<name>`
-- [ ] AC7 (the credential never appears in output) -> commit `<hash>` / test `<name>`
+**A finding about this file's own machinery, recorded because it is the point.** Four of the eight
+`features.json` verification commands — AC5, AC6, AC7 and the smoke row — matched nothing when run.
+A recorded proof that never executes is indistinguishable from one that passes, and 4.0.0 shipped
+with those four criteria marked complete on that basis. AC7 turned out to have no test *at all*, not
+merely a broken selector; writing it in PR 2 found two real leaks. Every command in `features.json`
+was re-run under `--collect-only` and confirmed to select a non-zero number of tests.
+
+- [x] AC1 (hive delegate honours the wire contract) -> `tests/test_delegate_verb.py::TestWireContract`,
+      `::TestRequiredArguments` (10 tests). One JSON object on stdout, every log line on stderr,
+      `--model` / `--timeout` / `--prompt` required, a non-positive timeout refused.
+- [x] AC2 (exit codes separate pool-unavailable from task-failed) ->
+      `tests/test_delegate_verb.py::TestExitCodesSeparateTheFailureClasses` +
+      `tests/test_pool_classification.py` (15 tests). **This closed a live defect**: `clients.py`
+      raised `RuntimeError` for every non-2xx, so a 429 classified as *task failed* and a dispatcher
+      would have stopped its chain exactly where it should have advanced. 429/401/403 now raise
+      `PoolUnavailableError`; 4xx-about-the-request and all 5xx stay task failures.
+- [x] AC3 (timeout kills the worker and returns without waiting) ->
+      `tests/test_delegate_deadline_and_route.py::TestTheDeadlineIsTheOneAskedFor` (4 tests).
+      Asserted in both directions — a longer `--timeout` raises the 60s ambient ceiling, a shorter
+      one cuts the call short — plus a wall-clock assertion that the return is inside the deadline
+      rather than deadline + the 2s grace. **Mutation-checked**: pinning `deadline_s` to
+      `ctx.tool_timeout` kills 2 of the 4.
+- [x] AC4 (routes through the daemon, degrades honestly without one) ->
+      `tests/test_delegate_deadline_and_route.py::TestDegradedIsReportedInBothDirections` (4 tests).
+      Both states asserted, per the criterion's own wording, plus the two ways a daemon can be
+      present and unusable: stale state files with nothing listening, and TCP accepted then session
+      failed.
+- [x] AC5 (the worker reaches its configured endpoint) -> `tests/test_config.py::TestWorkerSettings`
+      (3 tests, PR 1) for the settings and fallback; `tests/test_smoke.py::TestWorkerDispatch`
+      (2 tests) for the live inference — **still PENDING as a run**, see Test status.
+- [x] AC6 (the retired providers are gone from every surface) ->
+      `tests/test_config.py::TestRetiredProviderSettings` + `tests/test_provider_neutrality.py`
+      (23 tests). Widened by `#392`: the criterion said "gone from every surface" and the shipped
+      code still named one provider in a hardcoded `provider_name` literal and in an env alias.
+- [x] AC7 (the credential never appears in output) -> `tests/test_credential_never_emitted.py`
+      (6 tests). **Written in PR 2; it did not exist.** Two real leaks found and fixed:
+      `repr(HiveSettings())` rendered `worker_api_key='<the key>'` verbatim (a traceback and a debug
+      log print that unbidden), and `_error_detail` relayed a provider's 401 body without redaction,
+      which matters because some providers echo the `Authorization` header there. Both
+      **mutation-checked**: removing either fix turns the tests red.
 
 ## Test status
 
@@ -33,9 +64,20 @@ Map every acceptance criterion from `proposal.md` to concrete proof (commit hash
   *Caveat worth keeping:* the first attempt failed with 7 mypy errors about missing `types-psutil`
   stubs. That was a fresh worktree whose `.venv` was unsynced, **not** a repo defect —
   `types-psutil>=5.9.0` is declared in `pyproject.toml` and CI runs `uv run mypy src/`.
-- Post-change test suite: `<command> -> <output / coverage %>` — PENDING
-- Manual smoke test against a live NaN endpoint: PENDING. Required for AC5 and AC6; it cannot run in
-  `make check` because it needs a credential, so its output is pasted here by hand.
+- **Post-change, 2026-08-23** — `ruff check`, `ruff format --check`, `mypy --strict` (32 modules)
+  all clean; `pytest tests/` → `934 passed, 2 skipped, 55 deselected in 180.70s, exit 0`.
+  Against the 895-passing baseline that is **+39 tests and zero regressions**. The 55 deselected are
+  the `@pytest.mark.smoke` set, excluded by `-m 'not smoke'`.
+- **Mutation checks**, because passing tests are not evidence that a test would fail:
+  - pinning `deadline_s` to `ctx.tool_timeout` (removing the AC3 override) → 2 of 4 AC3 tests fail.
+  - removing the `_error_detail` redaction → the echoed-key test fails.
+  - removing `repr=False` from `worker_api_key` → 2 AC7 tests fail.
+  Each was reverted immediately and the suite re-confirmed green.
+- **Manual smoke against a live endpoint: PENDING.** Required for AC5's inference row. It cannot run
+  in `make check` because it needs a credential, and this machine has no worker endpoint configured
+  (`HIVE_WORKER_BASE_URL` unset in `environment.d` and in the systemd unit). Stated as an open item
+  rather than quietly omitted: **`dotfiles` CLI-042 AC6 cannot be re-checked until this runs**, and
+  it needs the credential-delivery work that CLI-042's own PR E carries.
 - No regressions in existing test suite: PENDING (compare against the baseline above)
 
 ## Decisions made during implementation
