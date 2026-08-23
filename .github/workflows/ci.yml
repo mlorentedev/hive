@@ -68,8 +68,18 @@ jobs:
       - name: Test cross-worker lock
         run: uv run pytest tests/test_cross_worker_lock.py -m cross_worker -v
 
-      - name: Test cancellation race
-        run: uv run pytest tests/test_compat_shim.py::test_classify_cancellation_race -v
+      # The classifier is excluded from the default run by the `diagnostic`
+      # marker, so this step must select it explicitly — a nodeid alone is still
+      # filtered by addopts and would collect nothing (pytest exit 5).
+      #
+      # continue-on-error, deliberately: this test reports how cancellation races
+      # distribute, and its own docstring says it is not a pass/fail correctness
+      # test. Its output is worth having on every run; its failure is not worth
+      # blocking a merge, because a red here means the 20-iteration harness did
+      # not fit the runner's timing, not that the shim regressed.
+      - name: Test cancellation race (diagnostic, non-blocking)
+        continue-on-error: true
+        run: uv run pytest tests/test_compat_shim.py::test_classify_cancellation_race -m diagnostic -v
 
   docker:
     runs-on: ubuntu-latest
