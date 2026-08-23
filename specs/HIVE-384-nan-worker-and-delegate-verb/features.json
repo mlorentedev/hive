@@ -1,0 +1,58 @@
+[
+  {
+    "id": "HIVE-384-nan-worker-and-delegate-verb-f1",
+    "behavior": "AC1 — `hive delegate` writes one JSON object to stdout with status, model, duration_ms and output, logs to stderr, and requires --model and --timeout rather than defaulting them",
+    "verification": "uv run pytest tests/test_delegate_verb.py -k contract",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-384-nan-worker-and-delegate-verb-f2",
+    "behavior": "AC2 — an unreachable or rate-limited provider exits 3 (pool unavailable) while a worker answering with a failure exits 1 (task failed), on separate code paths",
+    "verification": "uv run pytest tests/test_delegate_verb.py -k exit_codes",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-384-nan-worker-and-delegate-verb-f3",
+    "behavior": "AC3 — a worker outliving its deadline is killed via bounded_call and the verb returns exit 4 without waiting for it",
+    "verification": "uv run pytest tests/test_delegate_verb.py -k timeout",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-384-nan-worker-and-delegate-verb-f4",
+    "behavior": "AC4 — with a daemon reachable the verb routes through the client path; with none it falls back to in-process stdio and marks degraded mode in its output",
+    "verification": "uv run pytest tests/test_delegate_verb.py -k daemon_fallback",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-384-nan-worker-and-delegate-verb-f5",
+    "behavior": "AC5 — the worker resolves HIVE_WORKER_* settings and falls back to HIVE_EMBED_* when unset",
+    "verification": "uv run pytest tests/test_config.py -k worker_settings_fallback_and_key_alias",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-384-nan-worker-and-delegate-verb-f6",
+    "behavior": "AC5 — the worker performs a real inference against NaN and worker_status reports a reachable provider with the resolved model",
+    "verification": "uv run pytest -m smoke -k worker_reaches_nan",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-384-nan-worker-and-delegate-verb-f7",
+    "behavior": "AC6 — no settings field, MCP parameter, Makefile help string or documentation line names Ollama or OpenRouter for the worker",
+    "verification": "uv run pytest tests/test_provider_removal.py",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-384-nan-worker-and-delegate-verb-f8",
+    "behavior": "AC7 — a planted credential value appears in no log line, no worker_status output and no crash artifact",
+    "verification": "uv run pytest tests/test_delegate_verb.py -k credential_never_emitted",
+    "state": "pending",
+    "evidence": ""
+  }
+]
