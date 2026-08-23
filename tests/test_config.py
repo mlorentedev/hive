@@ -14,7 +14,7 @@ def _isolate_hive_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Strip ambient hive configuration before every test.
 
     ``HiveSettings`` reads ``HIVE_*`` env vars plus the unprefixed
-    ``VAULT_PATH`` / ``OPENROUTER_API_KEY`` deploy aliases. A developer or
+    ``VAULT_PATH`` / ``NAN_API_KEY`` deploy aliases. A developer or
     deploy box with any of these set (a real ``VAULT_PATH`` is the normal
     case) would otherwise mask the hardcoded defaults and fail the
     default-value assertions — green in CI, red locally. Clearing here runs
@@ -25,26 +25,16 @@ def _isolate_hive_env(monkeypatch: pytest.MonkeyPatch) -> None:
             monkeypatch.delenv(key, raising=False)
     monkeypatch.delenv("VAULT_PATH", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    # HIVE-384: NAN_API_KEY is the launcher-side name of the worker credential,
+    # accepted as an unprefixed alias. It is present in a real developer
+    # environment, so leaving it set would mask the fallback assertions below —
+    # green in CI, red locally, which is the failure this fixture exists for.
+    monkeypatch.delenv("NAN_API_KEY", raising=False)
 
 
 class TestDefaults:
     def test_vault_path_default(self) -> None:
         assert HiveSettings().vault_path == Path.home() / "Projects" / "knowledge"
-
-    def test_ollama_endpoint_default(self) -> None:
-        assert HiveSettings().ollama_endpoint == "http://localhost:11434"
-
-    def test_ollama_model_default(self) -> None:
-        assert HiveSettings().ollama_model == "qwen2.5-coder:7b"
-
-    def test_openrouter_api_key_default_none(self) -> None:
-        assert HiveSettings().openrouter_api_key is None
-
-    def test_openrouter_budget_default(self) -> None:
-        assert HiveSettings().openrouter_budget == 1.0
-
-    def test_openrouter_model_default(self) -> None:
-        assert HiveSettings().openrouter_model == "qwen/qwen3-coder:free"
 
     def test_db_path_default(self) -> None:
         expected = str(Path.home() / ".local" / "share" / "hive" / "worker.db")
@@ -126,17 +116,9 @@ class TestEnvOverride:
         assert HiveSettings().post_kill_drain_s == float(value)
 
     def test_hive_prefix_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("HIVE_OLLAMA_MODEL", "llama3:8b")
-        assert HiveSettings().ollama_model == "llama3:8b"
-
-    def test_openrouter_key_without_prefix(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-123")
-        assert HiveSettings().openrouter_api_key == "sk-test-123"
-
-    def test_hive_prefixed_key_takes_precedence(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("OPENROUTER_API_KEY", "bare")
-        monkeypatch.setenv("HIVE_OPENROUTER_API_KEY", "prefixed")
-        assert HiveSettings().openrouter_api_key == "prefixed"
+        """The HIVE_ prefix reaches a plain field (was HIVE_OLLAMA_MODEL)."""
+        monkeypatch.setenv("HIVE_WORKER_MODEL", "deepseek-v4-flash")
+        assert HiveSettings().worker_model == "deepseek-v4-flash"
 
     def test_vault_path_coercion(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("HIVE_VAULT_PATH", "/tmp/vault")
@@ -335,3 +317,90 @@ class TestValidation:
     def test_invalid_budget_type_raises(self) -> None:
         with pytest.raises(ValidationError):
             HiveSettings(openrouter_budget="not-a-number")  # type: ignore[arg-type]
+
+
+class TestWorkerSettings:
+    """HIVE-384: the worker's own provider settings, with the embed fallback.
+
+    The worker is not an embedder, so it gets honest names — but the two point
+    at the same NaN endpoint in the default deployment, and requiring both to be
+    set would mean a machine that already works stops working on upgrade. Hence
+    the fallback: ``HIVE_WORKER_*`` when present, ``HIVE_EMBED_*`` otherwise.
+    """
+
+    def test_falls_back_to_embed_when_unset(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("HIVE_EMBED_BASE_URL", "https://api.nan.example/v1")
+        monkeypatch.setenv("HIVE_EMBED_API_KEY", "embed-key")
+        monkeypatch.setenv("HIVE_EMBED_MODEL", "qwen3-embedding")
+        s = HiveSettings()
+        assert s.worker_base_url == "https://api.nan.example/v1"
+        assert s.worker_api_key == "embed-key"
+        assert s.worker_model == "qwen3-embedding"
+
+    def test_explicit_worker_settings_win_over_embed(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("HIVE_EMBED_BASE_URL", "https://embed.example/v1")
+        monkeypatch.setenv("HIVE_EMBED_API_KEY", "embed-key")
+        monkeypatch.setenv("HIVE_EMBED_MODEL", "qwen3-embedding")
+        monkeypatch.setenv("HIVE_WORKER_BASE_URL", "https://worker.example/v1")
+        monkeypatch.setenv("HIVE_WORKER_API_KEY", "worker-key")
+        monkeypatch.setenv("HIVE_WORKER_MODEL", "deepseek-v4-flash")
+        s = HiveSettings()
+        assert s.worker_base_url == "https://worker.example/v1"
+        assert s.worker_api_key == "worker-key"
+        assert s.worker_model == "deepseek-v4-flash"
+
+    def test_nan_api_key_alias_populates_the_worker_key(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The launcher injects the registry's name; hive must accept it.
+
+        Without this alias the launcher would export ``NAN_API_KEY`` and hive
+        would read ``HIVE_WORKER_API_KEY``, so authentication would fail for a
+        reason no error message explains.
+        """
+        monkeypatch.setenv("NAN_API_KEY", "from-the-launcher")
+        assert HiveSettings().worker_api_key == "from-the-launcher"
+
+    def test_prefixed_name_wins_over_the_alias(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("NAN_API_KEY", "alias-value")
+        monkeypatch.setenv("HIVE_WORKER_API_KEY", "explicit-value")
+        assert HiveSettings().worker_api_key == "explicit-value"
+
+    def test_all_empty_is_the_disabled_default(self) -> None:
+        """No worker configuration at all resolves to empty, never to a guess."""
+        s = HiveSettings()
+        assert s.worker_base_url == ""
+        assert s.worker_api_key == ""
+        assert s.worker_model == ""
+
+
+class TestRetiredProviderSettings:
+    """HIVE-384: Ollama and OpenRouter are removed, not deprecated.
+
+    Asserted rather than reviewed by eye, so a partial revert is caught by the
+    suite instead of by a reader.
+    """
+
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "ollama_endpoint",
+            "ollama_model",
+            "openrouter_api_key",
+            "openrouter_budget",
+            "openrouter_model",
+            "openrouter_paid_model",
+        ],
+    )
+    def test_retired_field_is_gone(self, field: str) -> None:
+        assert field not in HiveSettings.model_fields

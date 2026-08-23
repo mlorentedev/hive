@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # A leading drive letter (``C:``) marks a Windows absolute path; checked
@@ -18,11 +18,24 @@ class HiveSettings(BaseSettings):
         default=Path.home() / "Projects" / "knowledge",
         validation_alias=AliasChoices("HIVE_VAULT_PATH", "VAULT_PATH"),
     )
-    ollama_endpoint: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5-coder:7b"
-    openrouter_api_key: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("HIVE_OPENROUTER_API_KEY", "OPENROUTER_API_KEY"),
+    # HIVE-384: the worker's own provider, OpenAI-compatible. Ollama and
+    # OpenRouter were removed rather than deprecated — Ollama was not running
+    # and OpenRouter was retired upstream in August 2026, so the worker reached
+    # zero models and nothing noticed.
+    #
+    # Empty base_url = worker disabled, exactly as embed_base_url means for the
+    # semantic backend. Never a guessed default: a worker that silently points
+    # somewhere is worse than one that says it is unconfigured.
+    worker_base_url: str = ""
+    worker_model: str = ""
+    # NAN_API_KEY is the launcher-side name of this credential: the consuming
+    # `dotf secrets run` resolves it from a registry that calls it that. Without
+    # the alias the launcher would inject one name and hive would read another,
+    # and authentication would fail for a reason no error message explains.
+    # Same AliasChoices pattern vault_path uses.
+    worker_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("HIVE_WORKER_API_KEY", "NAN_API_KEY"),
     )
     vault_scopes: dict[str, str] = Field(
         # ``agents`` is intentionally LAST: auto-scan (plain project name)
@@ -36,9 +49,6 @@ class HiveSettings(BaseSettings):
             "agents": "80_agents",
         },
     )
-    openrouter_budget: float = 1.0
-    openrouter_model: str = "qwen/qwen3-coder:free"
-    openrouter_paid_model: str = "qwen/qwen3-coder"
     # HIVE-211: optional semantic backend for vault_ask. Empty base_url =
     # disabled (the default) — no index, no embed-on-write, zero overhead.
     # OpenAI-compatible; default config points at NaN, Ollama is the local
@@ -91,6 +101,28 @@ class HiveSettings(BaseSettings):
     # killed them. Secret scanning now lives push-side/CI on the vault, so
     # skipping the hook here is safe. Override with HIVE_GIT_COMMIT_NO_VERIFY.
     git_commit_no_verify: bool = True
+
+    @model_validator(mode="after")
+    def _worker_falls_back_to_embed(self) -> "HiveSettings":
+        """Resolve unset ``worker_*`` from the ``embed_*`` values (HIVE-384).
+
+        The worker is not an embedder, so it earns honest names — but in the
+        default deployment both point at the same NaN endpoint, and requiring
+        both to be configured would mean a machine that works today stops
+        working on upgrade. So the fallback is per field, not all-or-nothing:
+        a deployment can override the model alone and inherit the endpoint.
+
+        Fallback fills only what is *empty*; an explicit ``worker_*`` always
+        wins. Both unset stays empty, which reads as "worker disabled" rather
+        than as a guess.
+        """
+        if not self.worker_base_url:
+            self.worker_base_url = self.embed_base_url
+        if not self.worker_api_key:
+            self.worker_api_key = self.embed_api_key
+        if not self.worker_model:
+            self.worker_model = self.embed_model
+        return self
 
     @field_validator("vault_scopes")
     @classmethod

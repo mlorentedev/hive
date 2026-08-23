@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from hive.budget import BudgetTracker
-from hive.clients import OllamaClient, OpenRouterClient
+from hive.clients import OpenAICompatibleClient
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -185,15 +185,14 @@ def budget() -> Generator[BudgetTracker, None, None]:
 
 
 @pytest.fixture
-def ollama() -> OllamaClient:
-    """Ollama client for worker tests (methods are mocked per-test)."""
-    return OllamaClient(endpoint="http://localhost:11434", model="qwen2.5-coder:7b")
-
-
-@pytest.fixture
-def openrouter() -> OpenRouterClient:
-    """OpenRouter client for worker tests (methods are mocked per-test)."""
-    return OpenRouterClient(api_key="sk-test", default_model="qwen/qwen3-coder:free")
+def worker() -> OpenAICompatibleClient:
+    """Worker client for worker tests (methods are mocked per-test)."""
+    return OpenAICompatibleClient(
+        base_url="https://api.nan.example/v1",
+        api_key="test-key",
+        default_model="deepseek-v4-flash",
+        provider_name="NaN",
+    )
 
 
 @pytest.fixture(autouse=True)

@@ -149,6 +149,29 @@ Things this PR explicitly does NOT include. Forces a sharp boundary and prevents
   config file. hive's side of this is narrow but real: it must not log the
   value, must not echo it into the crash artifact — ADR-011 §4 already requires *"no secrets/API
   keys"* there — and must be verifiable by consequence (the daemon answers) rather than by printing.
+- **[FOUND IN CODE 2026-08-23] The worker has three call sites and two tools, not one.** Besides
+  `delegate_task`'s inference path, `_try_worker` is called by **`capture_lesson`** and by
+  `delegate_task`'s own vault-summarization path. `capture_lesson`'s MCP *surface* does not change,
+  so it stays outside the declared §5 amendment — but its provider re-routes with everything else,
+  and it is a consumer whose behaviour changes. Named here so "update every in-repo caller" has a
+  known denominator rather than being discovered mid-PR.
+- **[FOUND IN CODE 2026-08-23] `delegate_task` returns a formatted string, so the error
+  classification cannot ride on an exception type.** Typed exceptions do not cross the JSON-RPC
+  boundary between the verb and the daemon, and the current `_try_worker` collapses *every* failure
+  into `(None, "some string")` — catching `(ConnectionError, RuntimeError)` and then broad
+  `Exception` into the same shape. That collapsing is exactly what exit `3` vs exit `1` forbids.
+  **The classification must travel as data in the result** (`status: ok | task_failed |
+  pool_unavailable | timeout`), with the verb mapping result → exit code client-side. This replaces
+  `_try_worker`'s error handling rather than wrapping it.
+- **[FOUND IN CODE 2026-08-23] `delegate_task` needs an additive `timeout_s` parameter**, because the
+  daemon is where `bounded_call` runs, so the deadline has to travel in the request. Additive, but a
+  surface change nonetheless: folded into the declared §5 amendment above.
+- **[CORRECTION 2026-08-23] `budget.py` shrinks; it does not disappear**, and neither does its test
+  file. `record_request` is *usage telemetry* — tokens and latency, which the reshaped
+  `worker_status` and `usage.db` both want — while `can_spend` / `month_spent` / `month_remaining` /
+  `month_stats` are the *spend cap* being removed. `cost_usd` becomes moot on a flat subscription.
+  `tasks.md`'s "delete `test_budget.py` with its subject" is too coarse: trim it to the surviving
+  behaviour instead.
 - **[OPEN] Where the verb's own smoke test can run.** It needs the worker credential present, so it belongs
   behind the existing `smoke` marker (excluded by default) rather than in `make check`. What is not
   yet decided is whether CI gets a credential or the smoke stays developer-only; the second is the

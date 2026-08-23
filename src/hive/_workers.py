@@ -292,14 +292,21 @@ def _capture_lesson_lookup(
     )
 
 
+# HIVE-384: model ids the 4.0.0 removal retired. Rejected with a message that
+# names the replacement, never silently ignored — a dead alias that is quietly
+# accepted surfaces later as a confusing inference failure instead of a clear
+# validation error, which is the difference between a break a caller can fix and
+# one they have to debug.
+_RETIRED_MODEL_ALIASES = frozenset({"auto", "ollama", "openrouter-free", "openrouter"})
+
+
 def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
     """Register worker tools on the MCP server."""
 
     def _record(resp: ClientResponse) -> None:
-        """Record a successful response in the budget tracker."""
+        """Record a successful response as usage telemetry (tokens, latency)."""
         ctx.budget.record_request(
             model=resp.model,
-            cost_usd=resp.cost_usd,
             tokens=resp.tokens,
             latency_ms=resp.latency_ms,
             task_type="delegate",
@@ -308,49 +315,53 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
     async def _try_worker(
         prompt: str,
         max_tokens: int,
-        provider: str = "ollama",
         context: str = "",
         model: str = "",
-    ) -> tuple[ClientResponse | None, str]:
-        """Try to generate via a worker provider.
+    ) -> tuple[ClientResponse | None, str, str]:
+        """Run one inference against the worker. One shot, no fallback.
 
-        Returns (response, "") on success or (None, error_detail) on failure.
+        Returns ``(response, status, detail)`` where ``status`` is one of
+        ``"ok"``, ``"pool_unavailable"`` or ``"task_failed"``.
+
+        **The classification travels as data, deliberately** (HIVE-384). The
+        previous version returned ``(None, "some string")`` for every failure,
+        catching ``(ConnectionError, RuntimeError)`` and then broad ``Exception``
+        into one shape. A caller cannot tell *the provider was unreachable* from
+        *the provider answered and the answer failed*, and those must stay
+        distinguishable: a dispatcher advances its fallback chain on the first
+        and must not on the second, because collapsing them turns a bad answer
+        into a silent retry against a different model. Exception types also do
+        not survive the JSON-RPC boundary between the daemon and its clients, so
+        the distinction has to be a value, not a type.
+
+        The fallback chain itself lives in the caller, not here: a second
+        routing authority inside a backend is exactly what the routing registry
+        exists to prevent.
         """
+        if ctx.worker is None:
+            return None, "pool_unavailable", "worker not configured"
         try:
-            if provider == "ollama":
-                resp = await ctx.ollama.generate(
-                    prompt,
-                    context=context,
-                    max_tokens=max_tokens,
-                )
-            elif ctx.openrouter is None:
-                return None, "OpenRouter not configured"
-            elif model:
-                resp = await ctx.openrouter.generate(
-                    prompt,
-                    context=context,
-                    model=model,
-                    max_tokens=max_tokens,
-                )
-            else:
-                resp = await ctx.openrouter.generate(
-                    prompt,
-                    context=context,
-                    max_tokens=max_tokens,
-                )
-            _record(resp)
-            return resp, ""
-        except (ConnectionError, RuntimeError) as exc:
-            label = f"OpenRouter ({model})" if model else provider.capitalize()
-            return None, f"{label}: {exc}"
-        except Exception as exc:
-            label = f"OpenRouter ({model})" if model else provider.capitalize()
-            _log.warning(
-                "_try_worker unexpected error for %s: %r",
-                label,
-                exc,
+            resp = await ctx.worker.generate(
+                prompt,
+                context=context,
+                model=model or ctx.worker.model,
+                max_tokens=max_tokens,
             )
-            return None, f"{label}: unexpected error ({type(exc).__name__})"
+            _record(resp)
+            return resp, "ok", ""
+        except ConnectionError as exc:
+            # Unreachable, refused, rate-limited, auth rejected — the pool did
+            # not serve the request. Retrying elsewhere is legitimate.
+            return None, "pool_unavailable", f"worker unreachable: {exc}"
+        except RuntimeError as exc:
+            # The provider answered and the answer is unusable. Retrying the
+            # same task on another model would hide a real failure.
+            return None, "task_failed", f"worker error: {exc}"
+        except Exception as exc:
+            _log.warning("_try_worker unexpected error: %r", exc)
+            # Unknown failures classify as task_failed, never as unavailable:
+            # the fail-closed direction is the one that does NOT retry.
+            return None, "task_failed", f"unexpected error ({type(exc).__name__})"
 
     @mcp.tool(annotations=_WRITE)
     async def capture_lesson(
@@ -427,31 +438,18 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                         text=safe_text,
                     )
 
-                    errors: list[str] = []
+                    # HIVE-384: capture_lesson is the worker's second consumer.
+                    # Its MCP surface is unchanged; only which provider answers
+                    # is, so the two-tier ladder collapses to the same single
+                    # shot delegate_task now makes.
                     resp: ClientResponse | None = None
-
-                    if await ctx.ollama.is_available():
-                        resp, err = await _try_worker(prompt, 2000, "ollama")
-                        if resp is None:
-                            errors.append(err)
-                    else:
-                        errors.append("Ollama: offline")
+                    resp, _status, detail = await _try_worker(prompt, 2000)
 
                     if resp is None:
-                        resp, err = await _try_worker(
-                            prompt,
-                            2000,
-                            "openrouter",
-                        )
-                        if resp is None:
-                            errors.append(err)
-
-                    if resp is None:
-                        reasons = "; ".join(errors) if errors else "no workers configured"
                         return track(
                             ctx,
                             "capture_lesson",
-                            f"All workers unavailable [{reasons}]. "
+                            f"Worker unavailable [{detail}]. "
                             "Cannot extract lessons without a worker model.",
                             project,
                         )
@@ -621,9 +619,8 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
     async def delegate_task(
         prompt: str = "",
         context: str = "",
-        model: str = "auto",
+        model: str = "",
         max_tokens: int = 2000,
-        max_cost_per_request: float = 0.0,
         project: str = "",
         section: str = "context",
         path: str = "",
@@ -638,9 +635,10 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
         Args:
             prompt: The task description or code to process.
             context: Optional system context for the model.
-            model: 'auto', 'ollama', 'openrouter-free', 'openrouter' (paid), or model ID.
+            model: Concrete model id. Empty uses the configured worker model.
+                The 4.0.0 removal retired 'auto', 'ollama', 'openrouter-free'
+                and 'openrouter'; passing one is rejected rather than ignored.
             max_tokens: Maximum tokens in the response.
-            max_cost_per_request: Max USD. 0 = free models only.
             project: Project slug for vault summarization mode.
             section: Shortcut name for summarization. Ignored if path is set.
             path: Relative path to a .md file. Overrides section.
@@ -691,28 +689,11 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                         f"and action items.\n\n{body}"
                     )
                     summary_ctx = f"Document metadata: {meta}" if meta else ""
-                    summary_resp: ClientResponse | None = None
-                    summary_errors: list[str] = []
-                    if await ctx.ollama.is_available():
-                        summary_resp, err = await _try_worker(
-                            summary_prompt,
-                            max_tokens,
-                            "ollama",
-                            summary_ctx,
-                        )
-                        if err:
-                            summary_errors.append(err)
-                    else:
-                        summary_errors.append("Ollama: offline")
-                    if summary_resp is None:
-                        summary_resp, err = await _try_worker(
-                            summary_prompt,
-                            max_tokens,
-                            "openrouter",
-                            summary_ctx,
-                        )
-                        if err:
-                            summary_errors.append(err)
+                    summary_resp, _status, summary_detail = await _try_worker(
+                        summary_prompt,
+                        max_tokens,
+                        summary_ctx,
+                    )
                     if summary_resp is not None:
                         return track(
                             ctx,
@@ -720,17 +701,19 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                             f"{header}{_format_response(summary_resp)}",
                             project,
                         )
-                    # Workers unavailable — return raw content with notice
-                    reasons = (
-                        "; ".join(summary_errors) if summary_errors else "no workers configured"
-                    )
+
+                    # Worker unavailable — degrade to raw content with a notice.
+                    # The raw file is still useful, so this stays a graceful
+                    # degradation rather than an error; the notice exists so the
+                    # caller knows it received the document rather than a summary.
                     _log.warning(
                         "delegate_task summarize fallback for %s: %s",
                         project,
-                        reasons,
+                        summary_detail,
                     )
                     fallback_notice = (
-                        f"**Note:** Summarization failed ({reasons}). Returning raw content.\n\n"
+                        f"**Note:** Summarization failed ({summary_detail}). "
+                        "Returning raw content.\n\n"
                     )
                     return track(
                         ctx,
@@ -743,82 +726,33 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                     return track(ctx, "delegate_task", "Either prompt or project is required.")
 
                 # ── Worker delegation ──
+                #
+                # HIVE-384: one worker, one shot. The tiered ladder that stood
+                # here (Ollama → OpenRouter free → OpenRouter paid → reject)
+                # went with its providers, and the shape went with it on
+                # purpose: choosing among pools is the dispatcher's job, and a
+                # backend that picks its own fallback is a second routing
+                # authority whose answer nobody can attribute.
                 _tn = "delegate_task"
 
-                # Explicit routing
-                if model == "ollama":
-                    resp, err = await _try_worker(prompt, max_tokens, "ollama", context)
-                    if resp:
-                        return track(ctx, _tn, _format_response(resp))
-                    return track(ctx, _tn, f"{err}. {_REJECT_MSG}")
-                if model == "openrouter-free":
-                    resp, err = await _try_worker(prompt, max_tokens, "openrouter", context)
-                    if resp:
-                        return track(ctx, _tn, _format_response(resp))
-                    return track(ctx, _tn, f"{err}. {_REJECT_MSG}")
-                if model == "openrouter":
-                    if not ctx.budget.can_spend(ctx.openrouter_budget, max_cost_per_request):
-                        return track(ctx, _tn, f"Monthly budget exhausted. {_REJECT_MSG}")
-                    resp, err = await _try_worker(
-                        prompt,
-                        max_tokens,
-                        "openrouter",
-                        context,
-                        model=ctx.openrouter_paid_model,
+                if model in _RETIRED_MODEL_ALIASES:
+                    return track(
+                        ctx,
+                        _tn,
+                        f"'{model}' was removed in 4.0.0 — the worker now runs a "
+                        "single OpenAI-compatible provider. Pass a concrete model "
+                        "id, or omit `model` to use the configured default.",
                     )
-                    if resp:
-                        return track(ctx, _tn, _format_response(resp))
-                    return track(ctx, _tn, f"{err}. {_REJECT_MSG}")
-                if model != "auto":
-                    resp, err = await _try_worker(
-                        prompt,
-                        max_tokens,
-                        "openrouter",
-                        context,
-                        model=model,
-                    )
-                    if resp:
-                        return track(ctx, _tn, _format_response(resp))
-                    return track(ctx, _tn, f"{err}. {_REJECT_MSG}")
 
-                # Auto routing: Ollama → OpenRouter free → OpenRouter paid → reject
-                errors: list[str] = []
-
-                # Tier 1: Ollama
-                if await ctx.ollama.is_available():
-                    resp, err = await _try_worker(prompt, max_tokens, "ollama", context)
-                    if resp is not None:
-                        return track(ctx, _tn, _format_response(resp))
-                    errors.append(err)
-                else:
-                    errors.append("Ollama: offline")
-
-                # Tier 2: OpenRouter free
-                resp, err = await _try_worker(prompt, max_tokens, "openrouter", context)
+                resp, status, detail = await _try_worker(
+                    prompt,
+                    max_tokens,
+                    context,
+                    model=model,
+                )
                 if resp is not None:
                     return track(ctx, _tn, _format_response(resp))
-                errors.append(err)
-
-                # Tier 3: OpenRouter paid (only if max_cost > 0 and budget allows)
-                if (
-                    max_cost_per_request > 0
-                    and ctx.openrouter is not None
-                    and ctx.budget.can_spend(ctx.openrouter_budget, max_cost_per_request)
-                ):
-                    resp, err = await _try_worker(
-                        prompt,
-                        max_tokens,
-                        "openrouter",
-                        context,
-                        model=ctx.openrouter_paid_model,
-                    )
-                    if resp is not None:
-                        return track(ctx, _tn, _format_response(resp))
-                    errors.append(err)
-
-                # All tiers exhausted
-                reasons = "; ".join(errors)
-                return track(ctx, _tn, f"All workers unavailable. [{reasons}]. {_REJECT_MSG}")
+                return track(ctx, _tn, f"{detail}. {_REJECT_MSG}")
         except TimeoutError:
             return track(
                 ctx,
@@ -829,66 +763,75 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
 
     @mcp.tool(annotations=_READ_ONLY)
     async def worker_status(include_models: bool = True) -> str:
-        """Show worker health: budget, connectivity, available models, and usage stats.
+        """Show worker health: configuration, reachability, model, and usage.
+
+        HIVE-384 reshaped this tool, and the reshape is the point rather than a
+        side effect. The old output led with a dollar budget and reported two
+        providers by *configuration*: it said "Ollama: offline / OpenRouter: no
+        API key" for an unknown length of time while every caller treated the
+        worker as a working capability. A status surface that cannot distinguish
+        "configured" from "answers" is how a dead backend stays invisible.
+
+        So reachability is **probed, not inferred**, and reported separately
+        from configuration. The dollar figures are gone: on a flat subscription
+        they would read zero forever, and a gauge that always says the same
+        thing looks like a working gauge.
 
         Args:
-            include_models: Include available model list from all providers. Default True.
+            include_models: Probe the provider for its model list. Default True.
+                Set False to report configuration without a network call.
         """
         try:
             async with tool_span("worker_status", ctx.tool_timeout):
-                stats = ctx.budget.month_stats(ctx.openrouter_budget)
-                ollama_up = await ctx.ollama.is_available()
+                usage = ctx.budget.month_usage()
+                configured = ctx.worker is not None
 
                 lines = [
                     "# Worker Status",
                     "",
-                    "## Budget",
-                    f"- Spent this month: ${stats['spent']:.2f}",
-                    f"- Remaining: ${stats['remaining']:.2f} / ${ctx.openrouter_budget:.1f}",
-                    f"- Requests: {stats['request_count']}",
+                    "## Provider",
+                    f"- Configured: {'yes' if configured else 'no — set HIVE_WORKER_BASE_URL'}",
+                ]
+                if configured and ctx.worker is not None:
+                    lines.append(f"- Model: {ctx.worker.model or '(none configured)'}")
+
+                # Reachability is a probe. "Configured" is not a claim that the
+                # endpoint answers, and the two must never be printed as one.
+                if configured and include_models and ctx.worker is not None:
+                    try:
+                        models = await ctx.worker.list_models()
+                        lines.append(f"- Reachable: yes ({len(models)} models)")
+                    except (ConnectionError, RuntimeError, TimeoutError) as exc:
+                        models = []
+                        lines.append(f"- Reachable: NO — {exc}")
+                else:
+                    models = []
+                    lines.append("- Reachable: unprobed")
+
+                lines += [
                     "",
-                    "## Connectivity",
-                    f"- Ollama: {'online' if ollama_up else 'offline / unavailable'}",
-                    f"- OpenRouter: {'configured' if ctx.openrouter is not None else 'no API key'}",
+                    "## Usage this month",
+                    f"- Requests: {usage['request_count']}",
+                    f"- Tokens: {usage['total_tokens']}",
                     "",
                 ]
 
-                if stats["by_model"]:
-                    lines.append("## Top Models")
-                    for model_name, model_stats in stats["by_model"].items():
-                        cost = f"${model_stats['total_cost']:.4f}"
-                        lat = f"{model_stats['avg_latency_ms']}ms"
+                if usage["by_model"]:
+                    lines.append("## By model")
+                    for model_name, model_stats in usage["by_model"].items():
                         lines.append(
-                            f"- **{model_name}**: "
-                            f"{model_stats['count']} requests, "
-                            f"{cost}, avg {lat}",
+                            f"- **{model_name}**: {model_stats['count']} requests, "
+                            f"{model_stats['tokens']} tokens, "
+                            f"avg {model_stats['avg_latency_ms']}ms",
                         )
                     lines.append("")
 
-                if include_models:
+                if include_models and models:
                     lines.append("## Available Models")
+                    for m in models:
+                        lines.append(f"- **{m.id}** — {m.name}, ctx: {m.context_length}")
                     lines.append("")
-                    ollama_status = "online" if ollama_up else "offline / unavailable"
-                    lines.append(f"### Ollama ({ollama_status})")
-                    if ollama_up:
-                        lines.append(f"- **{ctx.ollama.model}** — local, free, no token limit")
-                    lines.append("")
-                    lines.append("### OpenRouter")
-                    if ctx.openrouter is not None:
-                        try:
-                            models = await ctx.openrouter.list_models()
-                            for m in models:
-                                cost = (
-                                    "free" if m.is_free else f"${m.cost_per_million_input:.2f}/M in"
-                                )
-                                lines.append(
-                                    f"- **{m.id}** — {m.name}, ctx: {m.context_length}, {cost}",
-                                )
-                        except (ConnectionError, RuntimeError, TimeoutError) as exc:
-                            lines.append(f"- Error fetching models: {exc}")
-                    else:
-                        lines.append("- No API key configured")
 
-                return "\n".join(lines)
+                return track(ctx, "worker_status", "\n".join(lines))
         except TimeoutError:
             return "Worker status timed out. Workers may be unreachable."

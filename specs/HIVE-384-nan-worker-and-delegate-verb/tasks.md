@@ -9,6 +9,19 @@ created: "2026-08-23"
 >
 > **Inline markers**: `[P]` — no dependency on another unchecked task, safe to run in parallel. `[AC<n>]` — helps satisfy acceptance criterion #`<n>` from `proposal.md`.
 
+## PR sequence
+
+The work does not fit one atomic PR and splits on the seam this file already organises around.
+Declared here so no PR silently absorbs the next:
+
+| PR | Lands | Criteria |
+|---|---|---|
+| **1** | the provider layer: `HIVE_WORKER_*` settings with the `HIVE_EMBED_*` fallback and the `NAN_API_KEY` alias, Ollama and OpenRouter removed, the three `_try_worker` call sites re-routed, `budget.py` trimmed, `worker_status` reshaped, and the stale surfaces (`AGENTS.md`, `Makefile`, tests) | AC5, AC6, AC7 |
+| **2** | the verb: `hive delegate`, the result-carried status classification, `delegate_task`'s `timeout_s` and `model` migration, exit-code mapping, daemon routing and the degraded flag | AC1, AC2, AC3, AC4 |
+
+Both land before the release; release-please accumulates them into one `4.0.0`. **PR 1 carries the
+`feat!`** — it is where the providers and the MCP parameters actually disappear.
+
 ## Setup
 
 - [ ] Worktree + branch off `master`: `feat/nan-worker-and-delegate-verb`
@@ -78,8 +91,12 @@ created: "2026-08-23"
 - [ ] [AC6] `AGENTS.md`: replace the "Ollama … free, primary" provider list with the NaN-only reality
 - [ ] [AC6] `Makefile`: the `smoke` target's help text reads *"needs Ollama + API key"* — it becomes
       NaN and `HIVE_WORKER_API_KEY`. A help string is documentation a human acts on
-- [ ] [AC6] `tests/test_budget.py` covers the spend cap being removed; delete it with its subject
-      rather than leaving a test asserting a contract that no longer exists
+- [ ] [AC6] Trim `budget.py` to its surviving half rather than deleting it: `record_request` stays
+      (usage telemetry — tokens and latency, which the reshaped `worker_status` and `usage.db` both
+      read), while `can_spend` / `month_spent` / `month_remaining` / `month_stats` go with the spend
+      cap. `cost_usd` becomes moot on a flat subscription
+- [ ] [AC6] Trim `tests/test_budget.py` to the surviving behaviour — not a wholesale delete, which
+      would drop coverage of telemetry that is staying
 - [ ] [AC5] Re-point the `@pytest.mark.smoke` tests at NaN and `HIVE_WORKER_API_KEY`; they stay
       excluded from `make check` by the existing `-m 'not smoke'`
 - [ ] [AC5] Reshape `worker_status` to report reachability and the resolved model — the shape the
