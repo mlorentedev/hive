@@ -4,55 +4,55 @@
     "behavior": "AC1 — `hive delegate` writes exactly one JSON object to stdout carrying status, model, degraded, tokens, duration_ms and output, keeps every log line on stderr, and rejects a call missing --model, --timeout or --prompt rather than defaulting it",
     "verification": "uv run pytest tests/test_delegate_verb.py::TestWireContract tests/test_delegate_verb.py::TestRequiredArguments",
     "state": "pending",
-    "evidence": ""
+    "evidence": "10 passed, 0 skipped. Run 2026-08-25 on 66dbf17. Terminal state is the harness's to set, not an agent's (gating_rule, HIVE-118): state stays pending here and records only what was measured."
   },
   {
     "id": "HIVE-384-nan-worker-and-delegate-verb-f2",
     "behavior": "AC2 — a pool that refuses (unreachable, 429, 401/403) exits 3 so the dispatcher advances its chain, while a worker that answered with a failure exits 1 so it does not; an unrecognised status falls closed to 1",
     "verification": "uv run pytest tests/test_delegate_verb.py::TestExitCodesSeparateTheFailureClasses tests/test_pool_classification.py",
     "state": "pending",
-    "evidence": ""
+    "evidence": "15 passed, 0 skipped. Run 2026-08-25 on 66dbf17. Terminal state is the harness's to set, not an agent's (gating_rule, HIVE-118): state stays pending here and records only what was measured."
   },
   {
     "id": "HIVE-384-nan-worker-and-delegate-verb-f3",
     "behavior": "AC3 — a per-dispatch --timeout replaces the ambient tool timeout in both directions (a longer one raises the ceiling, a shorter one cuts the call short), the verb returns within the deadline rather than deadline plus the 2s grace, and the timeout detail names the deadline that actually expired",
     "verification": "uv run pytest tests/test_delegate_deadline_and_route.py::TestTheDeadlineIsTheOneAskedFor",
     "state": "pending",
-    "evidence": ""
+    "evidence": "4 passed, 0 skipped. Run 2026-08-25 on 66dbf17. Terminal state is the harness's to set, not an agent's (gating_rule, HIVE-118): state stays pending here and records only what was measured."
   },
   {
     "id": "HIVE-384-nan-worker-and-delegate-verb-f4",
     "behavior": "AC4 — degraded is false when the call went through a reachable daemon and true on the in-process fallback, asserted in BOTH directions plus the two ways a daemon can be present and unusable (stale state, TCP accepted then session failed)",
     "verification": "uv run pytest tests/test_delegate_deadline_and_route.py::TestDegradedIsReportedInBothDirections",
     "state": "pending",
-    "evidence": ""
+    "evidence": "4 passed, 0 skipped. Run 2026-08-25 on 66dbf17. Terminal state is the harness's to set, not an agent's (gating_rule, HIVE-118): state stays pending here and records only what was measured."
   },
   {
     "id": "HIVE-384-nan-worker-and-delegate-verb-f5",
     "behavior": "AC5 — the worker resolves HIVE_WORKER_BASE_URL / _MODEL / _API_KEY and falls back to the HIVE_EMBED_* counterpart per field when unset, with both unset meaning disabled rather than a guessed endpoint",
     "verification": "uv run pytest tests/test_config.py::TestWorkerSettings",
     "state": "pending",
-    "evidence": ""
+    "evidence": "3 passed, 0 skipped. Run 2026-08-25 on 66dbf17. Covers the env-resolution half of AC5 ONLY; the live-inference half is f6 and is unproved. Terminal state is the harness's to set, not an agent's (gating_rule, HIVE-118): state stays pending here and records only what was measured."
   },
   {
     "id": "HIVE-384-nan-worker-and-delegate-verb-f6",
     "behavior": "AC5 — the worker performs a real inference against a live endpoint and worker_status reports it reachable with the resolved model (skips unless one is configured AND the probe reaches it)",
     "verification": "uv run pytest tests/test_smoke.py::TestWorkerDispatch -m smoke",
     "state": "pending",
-    "evidence": ""
+    "evidence": "0 passed, 2 collected, 2 SKIPPED, exit 0. Run 2026-08-25 on 66dbf17. No worker endpoint is configured on this machine, so the probe never runs. Exit 0 is NOT evidence here - a universal skip is indistinguishable from a pass by status alone (docs/lessons/lesson-094), which is why the passed count is recorded and not the collected count. This is the one criterion genuinely unproved, and it blocks the archive. Terminal state is the harness's to set, not an agent's (gating_rule, HIVE-118): state stays pending here and records only what was measured."
   },
   {
     "id": "HIVE-384-nan-worker-and-delegate-verb-f7",
     "behavior": "AC6 — the retired providers are gone from every shipped surface: no settings field, no provider-named env alias, and no provider brand in any module that configures or describes a client",
     "verification": "uv run pytest tests/test_config.py::TestRetiredProviderSettings tests/test_provider_neutrality.py",
     "state": "pending",
-    "evidence": ""
+    "evidence": "23 passed, 0 skipped. Run 2026-08-25 on 66dbf17. Terminal state is the harness's to set, not an agent's (gating_rule, HIVE-118): state stays pending here and records only what was measured."
   },
   {
     "id": "HIVE-384-nan-worker-and-delegate-verb-f8",
     "behavior": "AC7 — a planted credential appears in no repr of the settings, no worker_status output, no log record and no result record, including when a provider echoes it back in a 401 body",
     "verification": "uv run pytest tests/test_credential_never_emitted.py",
     "state": "pending",
-    "evidence": ""
+    "evidence": "6 passed, 0 skipped. Run 2026-08-25 on 66dbf17. Terminal state is the harness's to set, not an agent's (gating_rule, HIVE-118): state stays pending here and records only what was measured."
   }
 ]
