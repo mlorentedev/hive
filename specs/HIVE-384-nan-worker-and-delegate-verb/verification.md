@@ -41,9 +41,12 @@ was re-run under `--collect-only` and confirmed to select a non-zero number of t
       Both states asserted, per the criterion's own wording, plus the two ways a daemon can be
       present and unusable: stale state files with nothing listening, and TCP accepted then session
       failed.
-- [x] AC5 (the worker reaches its configured endpoint) -> `tests/test_config.py::TestWorkerSettings`
-      (3 tests, PR 1) for the settings and fallback; `tests/test_smoke.py::TestWorkerDispatch`
-      (2 tests) for the live inference — **still PENDING as a run**, see Test status.
+- [ ] AC5 (the worker reaches its configured endpoint) — **half proved, and the box says so.**
+      `tests/test_config.py::TestWorkerSettings` (3 passed, PR 1) covers the settings and fallback.
+      `tests/test_smoke.py::TestWorkerDispatch -m smoke` covers the live inference and **has never
+      run**: 2 collected, 2 skipped, exit 0, because this machine configures no worker endpoint.
+      Previously carried as `[x]` with that caveat in the same line — the text was honest and the
+      checkbox was not, which is the half a reader scanning for green picks up. See Test status.
 - [x] AC6 (the retired providers are gone from every surface) ->
       `tests/test_config.py::TestRetiredProviderSettings` + `tests/test_provider_neutrality.py`
       (23 tests). Widened by `#392`: the criterion said "gone from every surface" and the shipped
@@ -68,6 +71,17 @@ was re-run under `--collect-only` and confirmed to select a non-zero number of t
   all clean; `pytest tests/` → `934 passed, 2 skipped, 55 deselected in 180.70s, exit 0`.
   Against the 895-passing baseline that is **+39 tests and zero regressions**. The 55 deselected are
   the `@pytest.mark.smoke` set, excluded by `-m 'not smoke'`.
+- **Every `features.json` command re-run, 2026-08-25 on `66dbf17`** (#402), recording the **passed**
+  count per row rather than a tick: f1 10, f2 15, f3 4, f4 4, f5 3, **f6 0** (2 collected, 2 skipped,
+  exit 0), f7 23, f8 6. Passed and not collected on purpose — f6 collects two tests and proves
+  nothing, so a collection count would have scored it as evidence.
+  *This file's own machinery, recorded because it nearly failed silently:* at the 4.0.0 release
+  commit `dff8af4` **all eight** of the scaffolded commands selected zero tests. They did not sneak
+  through — pytest refused every one, six with exit `4` (unresolvable path or nodeid) and two with
+  exit `5` (`-k` deselected everything) — and at that commit every row read `pending` and every box
+  was unchecked, so nothing was ever falsely closed. The near miss is that `4092bf4` rewrote the
+  commands to working ones **and** checked all seven boxes in one commit: nothing re-read them
+  independently of the change that wrote them. See `docs/lessons/lesson-094`.
 - **Mutation checks**, because passing tests are not evidence that a test would fail:
   - pinning `deadline_s` to `ctx.tool_timeout` (removing the AC3 override) → 2 of 4 AC3 tests fail.
   - removing the `_error_detail` redaction → the echoed-key test fails.
