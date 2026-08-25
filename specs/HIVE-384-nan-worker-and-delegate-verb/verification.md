@@ -9,17 +9,33 @@ created: "2026-08-23"
 
 Map every acceptance criterion from `proposal.md` to concrete proof (commit hash, test name, or observed behavior).
 
-> **Status as of 2026-08-23, after PR 2.** AC1–AC4 and AC7 carry evidence below. AC5 and AC6 were
-> implemented by PR 1 (`#390`, released as 4.0.0) and their rows now name the tests that actually
-> assert them — the commands recorded for them originally selected **zero** tests, which is why they
-> are restated here rather than trusted.
+> **Status as of 2026-08-25 (#402).** Six of seven ACs carry measured evidence below, and every
+> `features.json` row now records the **passed** count from a re-run rather than a tick. **AC5 is
+> the exception and is unchecked**: its settings half passes, its live-inference half has never run.
+> AC5 and AC6 were implemented by PR 1 (`#390`, released as 4.0.0), and the commands originally
+> recorded for them — like all eight scaffolded commands — selected **zero** tests, which is why
+> they are restated here rather than trusted.
 
-**A finding about this file's own machinery, recorded because it is the point.** Four of the eight
-`features.json` verification commands — AC5, AC6, AC7 and the smoke row — matched nothing when run.
-A recorded proof that never executes is indistinguishable from one that passes, and 4.0.0 shipped
-with those four criteria marked complete on that basis. AC7 turned out to have no test *at all*, not
-merely a broken selector; writing it in PR 2 found two real leaks. Every command in `features.json`
-was re-run under `--collect-only` and confirmed to select a non-zero number of tests.
+**A finding about this file's own machinery, recorded because it is the point.** Re-measured on
+2026-08-25 (#402), because the first version of this paragraph got it wrong in three ways and a
+paragraph about evidence discipline cannot itself carry unverified numbers.
+
+At `dff8af4`, the 4.0.0 release commit, **all eight** of the scaffolded `features.json` commands
+selected zero tests — not four. They did not sneak through: pytest refused every one, six with exit
+`4` (unresolvable path or nodeid — `tests/test_provider_removal.py` never existed) and two with exit
+`5` (`-k` deselected everything). And **4.0.0 shipped nothing marked complete**: every row read
+`pending` and every checkbox was empty. The earlier claim that four criteria shipped closed on a
+broken command was not true.
+
+What *is* true is the near miss. `4092bf4` rewrote the commands to working ones **and** checked all
+seven boxes in the same commit, so nothing ever re-read them independently of the change that wrote
+them — and the machine-readable half was left at `pending`, where it stayed until #402.
+
+The remedy is also corrected. `--collect-only` is the wrong check: **AC5's smoke row collects two
+tests and runs neither**, so a collection count scores it as evidence. Gate on pytest's exit status,
+never through a pipe — exit `4` and `5` are the command saying it proved nothing, and a pipe replaces
+that status with the last stage's — and record the **passed** count. Full write-up in
+`docs/lessons/lesson-094`.
 
 - [x] AC1 (hive delegate honours the wire contract) -> `tests/test_delegate_verb.py::TestWireContract`,
       `::TestRequiredArguments` (10 tests). One JSON object on stdout, every log line on stderr,
