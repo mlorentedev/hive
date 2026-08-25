@@ -1,0 +1,80 @@
+{
+  "$comment": [
+    "Reviewer registry for `dotf pr triage-queue` (#403).",
+    "",
+    "The queue asks ONE question: is there reviewer output on an open PR that",
+    "nobody has dispositioned? Without this file the command cannot answer, and",
+    "it exits non-zero saying so — deliberately, because an unanswerable queue",
+    "must never be mistaken for a clear one. Before this file existed, every PR",
+    "in this repository closed with the Definition of Done's evidence item",
+    "skipped rather than met.",
+    "",
+    "Only `coderabbitai` is registered, because it is the only reviewer that",
+    "runs here. mlorentedev/dotfiles additionally registers `github-actions`",
+    "for PR-Agent; hive has no such workflow, and declaring a reviewer that",
+    "cannot run would make this file assert a review that never happens.",
+    "",
+    "WHY `review_markers` IS THE SUMMARY COMMENT AND NOT THE REVIEW ITSELF.",
+    "This is the load-bearing detail and it is not obvious. On this repository",
+    "CodeRabbit files PROPER reviews through the reviews API — measured on",
+    "#401, where a 5-finding review reads `**Actionable comments posted: 5**`",
+    "in `reviews[]`. But the queue reads `gh pr list --json comments`, which",
+    "returns issue comments ONLY and never `reviews[]`. So the review itself is",
+    "invisible to this consumer, and matching on its text would leave the queue",
+    "permanently empty on a repository that is being reviewed — the exact false",
+    "clear this file exists to prevent.",
+    "",
+    "The marker below is the walkthrough comment CodeRabbit posts alongside",
+    "every review, which IS comment-shaped. Verified present on both PRs open",
+    "at the time of writing: #401 (a real review) and #406 (a decline).",
+    "",
+    "KNOWN LIMITATION, stated rather than discovered later: the walkthrough is",
+    "posted once per PR and EDITED on re-review, and `createdAt` does not move",
+    "on an edit. So a second review after a push may not re-open the queue for",
+    "a PR already triaged once. The queue is therefore a floor, not a ceiling.",
+    "Closing that gap needs a consumer that reads `reviews[]`, which is a",
+    "change to the dotfiles CLI and not to this file.",
+    "",
+    "`declined_markers` identify CodeRabbit's 'I could not review' notice.",
+    "Matched as the machine-emitted HTML marker rather than the prose, because",
+    "prose is reworded and the marker is not.",
+    "",
+    "`advisory: true` — same disposition as dotfiles, and independently",
+    "measured here: on #406 (2026-08-25) CodeRabbit was rate limited, posted",
+    "'Review limit reached', and its COMMIT STATUS READ `success`. A green",
+    "check that means no review ran is the failure this whole mechanism exists",
+    "to catch. Advisory means its decline does not refuse the change — a quota",
+    "is a billing state of a third party, not a property of the diff — while",
+    "its review still attests.",
+    "",
+    "Note what follows from the two settings together, and is intended: the",
+    "decline notice ALSO carries the walkthrough marker, so a rate-limited PR",
+    "reads as reviewer output awaiting disposition rather than as a clear",
+    "queue. That is the honest answer. A notice that no review ran leaves the",
+    "PR unreviewed, and proceeding on it is allowed — proceeding silently is",
+    "not.",
+    "",
+    "Deliberately ABSENT: the `escape` and `exempt` blocks dotfiles carries.",
+    "Those are read by its review-attestation CI gate, which hive does not",
+    "run. `prtriage` reads `reviewers` and `triage.marker` and nothing else.",
+    "A registry that declares policy no consumer here enforces would be two",
+    "files' worth of drift in one."
+  ],
+  "reviewers": [
+    {
+      "login": "coderabbitai",
+      "declined_markers": [
+        "rate limited by coderabbit.ai"
+      ],
+      "review_markers": [
+        "This is an auto-generated comment: summarize by coderabbit.ai"
+      ],
+      "advisory": true,
+      "why": "The only reviewer configured on this repository. Its findings-bearing reviews go through the reviews API and are invisible to the queue's `gh pr list --json comments` read, so the walkthrough comment is the comment-shaped proxy for 'a review happened here'. See the $comment above for the measurement and the known limitation."
+    }
+  ],
+  "triage": {
+    "marker": "## Review triage",
+    "why": "A heading, matched at the start of a line, so that quoting it inside prose does not read as a disposition. Recording the disposition on the PR is what makes the Definition of Done's Review item checkable by someone other than its author — including when there was nothing to dispose of, because 'CI green, no findings' is a disposition and leaving it unwritten is indistinguishable from nobody having looked."
+  }
+}
