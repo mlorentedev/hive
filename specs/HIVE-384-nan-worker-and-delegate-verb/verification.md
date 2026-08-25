@@ -9,17 +9,33 @@ created: "2026-08-23"
 
 Map every acceptance criterion from `proposal.md` to concrete proof (commit hash, test name, or observed behavior).
 
-> **Status as of 2026-08-23, after PR 2.** AC1–AC4 and AC7 carry evidence below. AC5 and AC6 were
-> implemented by PR 1 (`#390`, released as 4.0.0) and their rows now name the tests that actually
-> assert them — the commands recorded for them originally selected **zero** tests, which is why they
-> are restated here rather than trusted.
+> **Status as of 2026-08-25 (#402).** Six of seven ACs carry measured evidence below, and every
+> `features.json` row now records the **passed** count from a re-run rather than a tick. **AC5 is
+> the exception and is unchecked**: its settings half passes, its live-inference half has never run.
+> AC5 and AC6 were implemented by PR 1 (`#390`, released as 4.0.0), and the commands originally
+> recorded for them — like all eight scaffolded commands — selected **zero** tests, which is why
+> they are restated here rather than trusted.
 
-**A finding about this file's own machinery, recorded because it is the point.** Four of the eight
-`features.json` verification commands — AC5, AC6, AC7 and the smoke row — matched nothing when run.
-A recorded proof that never executes is indistinguishable from one that passes, and 4.0.0 shipped
-with those four criteria marked complete on that basis. AC7 turned out to have no test *at all*, not
-merely a broken selector; writing it in PR 2 found two real leaks. Every command in `features.json`
-was re-run under `--collect-only` and confirmed to select a non-zero number of tests.
+**A finding about this file's own machinery, recorded because it is the point.** Re-measured on
+2026-08-25 (#402), because the first version of this paragraph got it wrong in three ways and a
+paragraph about evidence discipline cannot itself carry unverified numbers.
+
+At `dff8af4`, the 4.0.0 release commit, **all eight** of the scaffolded `features.json` commands
+selected zero tests — not four. They did not sneak through: pytest refused every one, six with exit
+`4` (unresolvable path or nodeid — `tests/test_provider_removal.py` never existed) and two with exit
+`5` (`-k` deselected everything). And **4.0.0 shipped nothing marked complete**: every row read
+`pending` and every checkbox was empty. The earlier claim that four criteria shipped closed on a
+broken command was not true.
+
+What *is* true is the near miss. `4092bf4` rewrote the commands to working ones **and** checked all
+seven boxes in the same commit, so nothing ever re-read them independently of the change that wrote
+them — and the machine-readable half was left at `pending`, where it stayed until #402.
+
+The remedy is also corrected. `--collect-only` is the wrong check: **AC5's smoke row collects two
+tests and runs neither**, so a collection count scores it as evidence. Gate on pytest's exit status,
+never through a pipe — exit `4` and `5` are the command saying it proved nothing, and a pipe replaces
+that status with the last stage's — and record the **passed** count. Full write-up in
+`docs/lessons/lesson-094`.
 
 - [x] AC1 (hive delegate honours the wire contract) -> `tests/test_delegate_verb.py::TestWireContract`,
       `::TestRequiredArguments` (10 tests). One JSON object on stdout, every log line on stderr,
@@ -41,9 +57,12 @@ was re-run under `--collect-only` and confirmed to select a non-zero number of t
       Both states asserted, per the criterion's own wording, plus the two ways a daemon can be
       present and unusable: stale state files with nothing listening, and TCP accepted then session
       failed.
-- [x] AC5 (the worker reaches its configured endpoint) -> `tests/test_config.py::TestWorkerSettings`
-      (3 tests, PR 1) for the settings and fallback; `tests/test_smoke.py::TestWorkerDispatch`
-      (2 tests) for the live inference — **still PENDING as a run**, see Test status.
+- [ ] AC5 (the worker reaches its configured endpoint) — **half proved, and the box says so.**
+      `tests/test_config.py::TestWorkerSettings` (3 passed, PR 1) covers the settings and fallback.
+      `tests/test_smoke.py::TestWorkerDispatch -m smoke` covers the live inference and **has never
+      run**: 2 collected, 2 skipped, exit 0, because this machine configures no worker endpoint.
+      Previously carried as `[x]` with that caveat in the same line — the text was honest and the
+      checkbox was not, which is the half a reader scanning for green picks up. See Test status.
 - [x] AC6 (the retired providers are gone from every surface) ->
       `tests/test_config.py::TestRetiredProviderSettings` + `tests/test_provider_neutrality.py`
       (23 tests). Widened by `#392`: the criterion said "gone from every surface" and the shipped
@@ -68,6 +87,17 @@ was re-run under `--collect-only` and confirmed to select a non-zero number of t
   all clean; `pytest tests/` → `934 passed, 2 skipped, 55 deselected in 180.70s, exit 0`.
   Against the 895-passing baseline that is **+39 tests and zero regressions**. The 55 deselected are
   the `@pytest.mark.smoke` set, excluded by `-m 'not smoke'`.
+- **Every `features.json` command re-run, 2026-08-25 on `66dbf17`** (#402), recording the **passed**
+  count per row rather than a tick: f1 10, f2 15, f3 4, f4 4, f5 3, **f6 0** (2 collected, 2 skipped,
+  exit 0), f7 23, f8 6. Passed and not collected on purpose — f6 collects two tests and proves
+  nothing, so a collection count would have scored it as evidence.
+  *This file's own machinery, recorded because it nearly failed silently:* at the 4.0.0 release
+  commit `dff8af4` **all eight** of the scaffolded commands selected zero tests. They did not sneak
+  through — pytest refused every one, six with exit `4` (unresolvable path or nodeid) and two with
+  exit `5` (`-k` deselected everything) — and at that commit every row read `pending` and every box
+  was unchecked, so nothing was ever falsely closed. The near miss is that `4092bf4` rewrote the
+  commands to working ones **and** checked all seven boxes in one commit: nothing re-read them
+  independently of the change that wrote them. See `docs/lessons/lesson-094`.
 - **Mutation checks**, because passing tests are not evidence that a test would fail:
   - pinning `deadline_s` to `ctx.tool_timeout` (removing the AC3 override) → 2 of 4 AC3 tests fail.
   - removing the `_error_detail` redaction → the echoed-key test fails.
