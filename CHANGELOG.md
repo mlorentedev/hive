@@ -1,5 +1,24 @@
 # Changelog
 
+## [4.2.0](https://github.com/mlorentedev/hive/compare/v4.1.0...v4.2.0) (2026-08-25)
+
+
+### Features
+
+* add the reviewer registry that makes the triage queue answerable ([#407](https://github.com/mlorentedev/hive/issues/407)) ([2492151](https://github.com/mlorentedev/hive/commit/24921511de98212841016e4b0d14bcd9064d623d))
+
+
+### Bug Fixes
+
+* **spec:** record measured evidence on HIVE-384, and stop AC5 reading green ([#408](https://github.com/mlorentedev/hive/issues/408)) ([5fd5aa6](https://github.com/mlorentedev/hive/commit/5fd5aa6bb0493d3e85155ee29970f896e56189bf))
+
+
+### Documentation
+
+* correct lesson-094's premise and three reviewer findings from [#401](https://github.com/mlorentedev/hive/issues/401) ([#406](https://github.com/mlorentedev/hive/issues/406)) ([66dbf17](https://github.com/mlorentedev/hive/commit/66dbf1707015999c71d8532ce2c7a02d99823843))
+* record five lessons from the delegate-verb work ([#401](https://github.com/mlorentedev/hive/issues/401)) ([8bc66eb](https://github.com/mlorentedev/hive/commit/8bc66eb46f5f4e6fa33eb9af206004aed3e5a4d8))
+* record why the reviewer registry could not be copied ([#409](https://github.com/mlorentedev/hive/issues/409)) ([2b920ba](https://github.com/mlorentedev/hive/commit/2b920bad45a7c11d26a76bc86d1d25d6c6be2c50))
+
 ## [4.1.0](https://github.com/mlorentedev/hive/compare/v4.0.0...v4.1.0) (2026-08-23)
 
 
