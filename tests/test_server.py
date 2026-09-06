@@ -570,6 +570,33 @@ class TestVaultHealth:
         result = await mcp.call_tool("vault_health", {})
         assert "stale files" not in _text(result).lower()
 
+    async def test_updated_field_beats_old_created(self, tmp_path: Path) -> None:
+        """A note created long ago but refreshed recently is not stale."""
+        from datetime import date
+
+        project = tmp_path / "10_projects" / "refreshedproj"
+        project.mkdir(parents=True)
+        today = date.today().isoformat()
+        (project / "context.md").write_text(
+            "---\nid: ctx\ntype: project\nstatus: active\n"
+            f'created: "2024-01-01"\nupdated: "{today}"\n---\n\n# Ctx\n'
+        )
+        mcp = create_server(vault_path=tmp_path)
+        result = await mcp.call_tool("vault_health", {})
+        assert "stale files" not in _text(result).lower()
+
+    async def test_old_updated_field_is_stale(self, tmp_path: Path) -> None:
+        """An explicit old `updated` is stale even if `created` were missing."""
+        project = tmp_path / "10_projects" / "oldupdproj"
+        project.mkdir(parents=True)
+        (project / "context.md").write_text(
+            '---\nid: ctx\ntype: project\nstatus: active\nupdated: "2024-01-01"\n---\n\n# Ctx\n'
+        )
+        mcp = create_server(vault_path=tmp_path)
+        result = await mcp.call_tool("vault_health", {})
+        assert "stale files" in _text(result).lower()
+        assert "context.md" in _text(result)
+
     async def test_stale_fallback_to_mtime(self, tmp_path: Path) -> None:
         import os
 

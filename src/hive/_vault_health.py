@@ -23,6 +23,7 @@ from hive._helpers import (
     detect_obsidian_git,
     project_not_found,
     scan_project,
+    stale_reference_date,
     track,
     wrap_sync_tool,
 )
@@ -522,19 +523,14 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                         and fm is not None
                         and fm.status not in _TERMINAL_STATUSES
                     ):
-                        created_date = parse_date(fm.created) if fm.created else None
-                        if created_date is None:
-                            try:
-                                created_date = date.fromtimestamp(
-                                    f.stat().st_mtime,
-                                )
-                            except OSError:
-                                continue
-                        if created_date < stale_threshold:
+                        ref_date = stale_reference_date(fm, f)
+                        if ref_date is None:
+                            continue
+                        if ref_date < stale_threshold:
                             issues.append(
                                 f"[warning] {proj_name}/{rel}: "
-                                f"Stale (active since "
-                                f"{created_date.isoformat()}, "
+                                f"Stale (last touched "
+                                f"{ref_date.isoformat()}, "
                                 f">{ctx.stale_days}d)"
                             )
 
