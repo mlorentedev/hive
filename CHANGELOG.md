@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.2.1](https://github.com/mlorentedev/hive/compare/v4.2.0...v4.2.1) (2026-09-06)
+
+
+### Documentation
+
+* apply /insights findings (2026-09-05) ([#412](https://github.com/mlorentedev/hive/issues/412)) ([65fbed9](https://github.com/mlorentedev/hive/commit/65fbed9fbe19328542c192b648593ba54f711e13))
+
 ## [4.2.0](https://github.com/mlorentedev/hive/compare/v4.1.0...v4.2.0) (2026-08-25)
 
 
