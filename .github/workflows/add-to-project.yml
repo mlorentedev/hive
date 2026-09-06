@@ -39,7 +39,7 @@ jobs:
       # Issues: use the official action (works fine for issues)
       - name: Add issue to project
         if: github.event_name == 'issues'
-        uses: actions/add-to-project@v2.0.0
+        uses: actions/add-to-project@5afcf98fcd03f1c2f92c3c83f58ae24323cc57fd # v2.0.0
         with:
           project-url: https://github.com/users/mlorentedev/projects/1
           github-token: ${{ secrets.BITACORA_PAT }}
