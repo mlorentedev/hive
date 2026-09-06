@@ -584,6 +584,9 @@ class TestVaultHealth:
         mcp = create_server(vault_path=tmp_path)
         result = await mcp.call_tool("vault_health", {})
         assert "stale files" not in _text(result).lower()
+        # The drift-check path is a separate branch with its own date logic.
+        checked = await mcp.call_tool("vault_health", {"checks": ["stale"]})
+        assert "stale (" not in _text(checked).lower()
 
     async def test_old_updated_field_is_stale(self, tmp_path: Path) -> None:
         """An explicit old `updated` is stale even if `created` were missing."""
@@ -596,6 +599,8 @@ class TestVaultHealth:
         result = await mcp.call_tool("vault_health", {})
         assert "stale files" in _text(result).lower()
         assert "context.md" in _text(result)
+        checked = await mcp.call_tool("vault_health", {"checks": ["stale"]})
+        assert "stale (last touched 2024-01-01" in _text(checked).lower()
 
     async def test_stale_fallback_to_mtime(self, tmp_path: Path) -> None:
         import os
