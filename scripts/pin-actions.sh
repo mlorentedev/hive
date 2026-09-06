@@ -1,32 +1,57 @@
 #!/usr/bin/env bash
-# Rewrite `uses: owner/repo@vX[.Y[.Z]]` to `uses: owner/repo@<commit-sha> # vX[.Y[.Z]]`
-# for every workflow under .github/workflows and .gitea/workflows. Resolves each tag
-# through the GitHub API and dereferences annotated tags to the commit. Idempotent:
-# lines already carrying a 40-hex SHA are left alone. Prints each rewrite.
+# Rewrite `uses: owner/repo@<tag>` to `uses: owner/repo@<commit-sha> # <tag>` for every
+# workflow under .github/workflows and .gitea/workflows (.yml and .yaml). Resolves each
+# tag through the GitHub API and dereferences annotated tags to the commit; a ref that is
+# a branch (e.g. release/v1) is resolved to the branch head and marked as such in the
+# trailer. Idempotent: lines already carrying a 40-hex SHA are left alone. Quoted refs and
+# inline comments are preserved. Resolutions are cached for the run (one API call per
+# distinct owner/repo@tag, not per occurrence). Prints each rewrite.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-files=$(ls "$ROOT"/.github/workflows/*.yml "$ROOT"/.github/workflows/*.yaml "$ROOT"/.gitea/workflows/*.yml 2>/dev/null || true)
-[ -n "$files" ] || { echo "pin-actions: no workflows"; exit 0; }
+files=()
+while IFS= read -r -d '' f; do files+=("$f"); done < <(
+  find "$ROOT/.github/workflows" "$ROOT/.gitea/workflows" -maxdepth 1 -type f \
+    \( -name '*.yml' -o -name '*.yaml' \) -print0 2>/dev/null
+)
+[ "${#files[@]}" -gt 0 ] || { echo "pin-actions: no workflows"; exit 0; }
+
 declare -A cache
-resolve() { # owner/repo tag -> commit sha
-  local repo="$1" tag="$2" key="$1@$2"
-  if [ -n "${cache[$key]:-}" ]; then echo "${cache[$key]}"; return; fi
-  local obj type sha
-  obj=$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object | "\(.type) \(.sha)"' 2>/dev/null) || { echo ""; return; }
-  type=${obj%% *}; sha=${obj##* }
-  if [ "$type" = "tag" ]; then sha=$(gh api "repos/$repo/git/tags/$sha" --jq '.object.sha'); fi
-  cache[$key]="$sha"; echo "$sha"
+RESOLVED=""
+resolve() { # sets RESOLVED to "<sha> <kind>" (kind: tag|branch) or "" when unresolvable
+  local repo="$1" ref="$2" key="$1@$2" obj type sha
+  RESOLVED=""
+  if [ -n "${cache[$key]:-}" ]; then RESOLVED="${cache[$key]}"; return; fi
+  if obj=$(gh api "repos/$repo/git/ref/tags/$ref" --jq '.object | "\(.type) \(.sha)"' 2>/dev/null); then
+    type=${obj%% *}; sha=${obj##* }
+    [ "$type" = "tag" ] && sha=$(gh api "repos/$repo/git/tags/$sha" --jq '.object.sha')
+    RESOLVED="$sha tag"
+  elif sha=$(gh api "repos/$repo/git/ref/heads/$ref" --jq '.object.sha' 2>/dev/null); then
+    RESOLVED="$sha branch"
+  fi
+  [ -n "$RESOLVED" ] && cache[$key]="$RESOLVED"
 }
+
 rc=0
-for f in $files; do
-  while IFS= read -r line; do
-    ref=$(printf '%s' "$line" | grep -oE 'uses: [A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@v[0-9][0-9.]*[[:space:]]*$' | sed 's/uses: //; s/[[:space:]]*$//') || true
+for f in "${files[@]}"; do
+  # Candidate refs: not already a 40-hex SHA, not local, not docker.
+  while IFS= read -r ref; do
     [ -n "$ref" ] || continue
     full=${ref%@*}; tag=${ref##*@}; repo=$(printf '%s' "$full" | cut -d/ -f1-2)
-    sha=$(resolve "$repo" "$tag")
-    if [ -z "$sha" ]; then echo "pin-actions: could not resolve $ref in $f"; rc=1; continue; fi
-    REF="$ref" FULL="$full" SHA="$sha" TAG="$tag" perl -pi -e 's/uses: \Q$ENV{REF}\E\s*$/uses: $ENV{FULL}\@$ENV{SHA} # $ENV{TAG}\n/' "$f"
-    echo "pinned $f: $ref -> $sha"
-  done < "$f"
+    resolve "$repo" "$tag"
+    if [ -z "$RESOLVED" ]; then echo "pin-actions: could not resolve $ref in ${f#"$ROOT"/}"; rc=1; continue; fi
+    sha=${RESOLVED%% *}; kind=${RESOLVED##* }
+    trailer="$tag"; [ "$kind" = "branch" ] && trailer="$tag (branch head, re-pin deliberately)"
+    REF="$ref" FULL="$full" SHA="$sha" TRAILER="$trailer" perl -pi -e '
+      chomp;
+      s{(uses:\h+)(["\x27]?)\Q$ENV{REF}\E\2\h*(#[^\n]*)?$}{
+        my ($lead,$q,$c)=($1,$2,$3);
+        my $tr = $c ? $c : "# $ENV{TRAILER}";
+        "$lead$q$ENV{FULL}\@$ENV{SHA}$q  $tr"
+      }e;
+      $_ .= "\n"' "$f"
+    echo "pinned ${f#"$ROOT"/}: $ref -> $sha ($kind)"
+  done < <(grep -oE 'uses:[[:space:]]+["'"'"']?[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[A-Za-z0-9_./-]+' "$f" \
+    | sed -E 's/^uses:[[:space:]]+["'"'"']?//' \
+    | grep -vE '@[0-9a-f]{40}$' | grep -vE '^(\./|docker://)' | sort -u)
 done
 exit $rc
