@@ -1,0 +1,183 @@
+name: pr-agent
+
+# The reviewer whose capacity is ours rather than a vendor's.
+#
+# Measured here on 2026-09-06, over the 34 non-dependabot PRs among the 40 most recent
+# (#356..#412): 10 carried a real CodeRabbit review (`## Walkthrough`), 24 carried
+# `Review limit reached`. CodeRabbit publishes no check-run in this repository, and the
+# required checks are `check (3.12)`, `check (3.13)` and the two `cross_worker_lock`
+# jobs, so a declined review is invisible to CI and seven PRs in ten merge unread by any
+# machine. This workflow does not replace CodeRabbit — it makes the absence impossible
+# to mistake for a pass, and it reviews when the vendor's quota is spent.
+#
+# Ported from mlorentedev/ts-bridge, itself a port of mlorentedev/dotfiles (TOOL-013
+# #786) through the mlorentedev/kubelab adaptation (TOOL-021 #1140). The exclusions
+# below are re-derived from THIS repo's configuration; each one is annotated with what
+# was checked here.
+#
+# The name `pr-agent` is a two-file agreement in the repos that have the attestation
+# gate: `review-attestation.yml` declares `workflow_run: workflows: [pr-agent]` so the
+# verdict is re-read after this job finishes. hive has no gate workflow, and its
+# harness/review-attestation.json deliberately omits the `escape` and `exempt` blocks
+# that gate reads, so nothing depends on this name today — when a gate lands, it must
+# name this workflow exactly.
+
+on:
+  pull_request:
+    # `synchronize` is here so a push gets read, and it is deliberately NOT in
+    # `pr_actions` below: upstream routes synchronize through `handle_push_trigger`
+    # instead, so listing it there is a setting that looks right and asserts nothing
+    # (dotfiles #1053).
+    types: [opened, synchronize, reopened, ready_for_review]
+  # Slash commands (`/review`, `/improve`, `/describe`) on an existing PR.
+  issue_comment:
+    types: [created]
+
+concurrency:
+  # The event name is part of the key and it is load-bearing. A PR comment is an
+  # `issue_comment` whose `issue.number` IS the PR number, so without it a comment
+  # triggered run shares this group with the in-flight `pull_request` run and
+  # `cancel-in-progress` kills the review. PR-Agent is a Docker action that spends its
+  # first ~20 s building, and CodeRabbit's auto-summary comment lands inside that
+  # window reliably — measured upstream on two PRs: both cancelled mid-build, both
+  # green, zero reviews produced.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write   # the review comments are the product
+  issues: write          # slash-command replies land as issue comments
+
+jobs:
+  review:
+    # Four conditions, each doing its own work:
+    #
+    # 1. `issue_comment` fires on issues too, and an issue has no diff.
+    # 2. Draft PRs are not asking to be read yet.
+    # 3. Dependabot runs are excluded on `github.actor`, and the reason is measured
+    #    here rather than inherited: this repo's Dependabot secret store is EMPTY
+    #    (`dependabot/secrets` -> total_count: 0, checked 2026-09-06) while pip, npm
+    #    (/site), github-actions and docker file weekly. On a Dependabot-triggered run GitHub
+    #    serves a different secrets store, so `secrets.NAN_API_KEY` expands to "",
+    #    LiteLLM cannot authenticate, PR-Agent swallows the failure and exits green —
+    #    and the guard step below then fails every weekly bump. Keyed on the actor
+    #    because that is the same field GitHub reads to choose the store, so the skip
+    #    fires exactly when the credential is missing. It is also unforgeable, which a
+    #    branch name is not. A human pushing to a dependabot branch is a different
+    #    actor with the secrets present, and gets a real review.
+    # 4. Release PRs are excluded, because reviewing them is structurally noise:
+    #    release-please restates commits that were each reviewed when they landed, and
+    #    PR-Agent's ticket-compliance pass reads the CHANGELOG's issue references, looks
+    #    for their code in the diff, and reports "no requirements fulfilled" every time.
+    #    Measured here: the head ref is `release-please--branches--master` (PR #393,
+    #    the 4.1.0 release) and it is authored by `mlorentedev` through
+    #    RELEASE_PLEASE_TOKEN, not a bot — so an actor rule would not fire
+    #    and a name rule is the only one that can. Doing it at the workflow layer rather
+    #    than in `.pr_agent.toml` is deliberate: `ignore_pr_source_branches` was measured
+    #    inert on the Action path (dotfiles #1073).
+    #
+    #    A borrowed branch name cannot game this into a review: the exclusion only ever
+    #    REMOVES one, and the attestation gate's own release exemption is keyed on diff
+    #    signature, never on a name.
+    #
+    # On `issue_comment` there is no `head.ref`, so condition 4 is evaluated only on the
+    # pull_request half. A human typing `/review` on a release PR is asking on purpose.
+    #
+    # The author_association gate matters because this repository is PUBLIC:
+    # `issue_comment` runs in the base repo context with secrets available, so without
+    # it any account could spend the inference budget and exercise
+    # `pull-requests: write` on demand. The set is the one the review registry already
+    # treats as belonging here.
+    if: >
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false
+        && github.actor != 'dependabot[bot]'
+        && !startsWith(github.event.pull_request.head.ref, 'release-please--')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request
+        && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+        && startsWith(github.event.comment.body, '/'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Pinned by COMMIT, not tag: a tag is mutable, and what runs here holds
+      # NAN_API_KEY and `pull-requests: write` on a public repository. The SHA was
+      # resolved from the API rather than copied
+      # (`gh api repos/The-PR-Agent/pr-agent/git/ref/tags/v0.44.0` -> ab6ec54b,
+      # verified 2026-09-06), which is also how it stays auditable. It is the SHA
+      # ts-bridge runs; a reviewer bump is its own change with its own measurement.
+      - name: PR-Agent
+        uses: The-PR-Agent/pr-agent@ab6ec54bfeb37933ddb74259338752e9272016c6  # v0.44.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI__KEY: ${{ secrets.NAN_API_KEY }}
+          OPENAI__API_BASE: https://api.nan.builders/v1
+          CONFIG__PUBLISH_OUTPUT_PROGRESS: false
+          # Stated rather than defaulted, so the event lists are visible. `synchronize`
+          # is absent for the reason in the trigger comment above, and `push_commands`
+          # names `/review` ONLY because upstream's default is `['/describe','/review']`
+          # — enabling the push trigger without this line would quietly reinstate
+          # describe and undo the decision below.
+          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review"]'
+          github_action_config.handle_push_trigger: "true"
+          github_action_config.push_commands: '["/review"]'
+          github_action_config.push_trigger_ignore_bot_commits: "true"
+          github_action_config.push_trigger_ignore_merge_commits: "true"
+          # `describe` REWRITES the PR body, and the bodies here carry hand-written
+          # measurement tables, merge rationale and reviewer dispositions — the part
+          # worth reading. Off as a decision, not by omission.
+          github_action_config.auto_describe: "false"
+          github_action_config.auto_review: "true"
+          # Suggestions off on the automatic path to halve inference per PR: NaN allows a
+          # small number of concurrent requests shared with every other consumer of this
+          # key, including the adversarial-review pool in the sibling repos. `## PR Code
+          # Suggestions` is also deliberately NOT a review marker in
+          # harness/review-attestation.json — suggestions cannot attest a review, so the
+          # second call could never turn anything green while competing with the one that
+          # can. `/improve` on demand still works: the [pr_code_suggestions] config stays.
+          github_action_config.auto_improve: "false"
+
+      # A review that did not happen must not report success.
+      #
+      # PR-Agent swallows a failed inference into a clean exit: measured upstream, a
+      # green job with no review because the model hit NaN's concurrency limit, and
+      # nothing downstream noticed. This step asks the only question that matters — did
+      # a comment carrying the declared review marker appear? — and answers it from the
+      # registry rather than from a hardcoded string, so a reviewer change is a config
+      # edit and not a workflow rewrite.
+      #
+      # The marker is read from the BASE ref: a pull request that supplied its own
+      # registry could otherwise redefine the string that attests it.
+      - name: Fail if no review was published
+        # Only the paths that actually run `/review`. An issue_comment invoking
+        # `/describe` legitimately publishes no Guide, and failing those would teach the
+        # reader to ignore this check.
+        if: >
+          always() && (github.event_name == 'pull_request'
+            || (github.event_name == 'issue_comment'
+                && contains(github.event.comment.body, '/review')))
+        env:
+          # `github.token`, not `secrets.GITHUB_TOKEN`: identical value, but it is the
+          # automatic token rather than a declared repository secret, so nothing that
+          # counts "which secrets does this job hold" starts counting an extra one.
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          marker=$(gh api "repos/${GITHUB_REPOSITORY}/contents/harness/review-attestation.json?ref=${BASE_REF}" \
+            --jq '.content' | base64 -d \
+            | jq -r '.reviewers[] | select(.login == "github-actions") | .review_markers[0]')
+          if [ -z "${marker}" ] || [ "${marker}" = "null" ]; then
+            echo "::error::no review marker declared for github-actions in harness/review-attestation.json"
+            exit 1
+          fi
+          found=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            --paginate --jq "[.[] | select(.body | contains(\"${marker}\"))] | length")
+          if [ "${found}" -gt 0 ]; then
+            echo "review published (marker found: ${marker})"
+            exit 0
+          fi
+          echo "::error::PR-Agent reported success but published no review — no comment carries \"${marker}\"."
+          echo "::error::Most likely cause: the credential was absent or NaN concurrency was exhausted."
+          echo "::error::Check 'gh api repos/${GITHUB_REPOSITORY}/actions/secrets --jq .secrets[].name' includes NAN_API_KEY."
+          exit 1
