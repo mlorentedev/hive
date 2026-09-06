@@ -1,0 +1,24 @@
+name: Repo hygiene
+
+# Two guards that need no toolchain: lesson numbering/index integrity and
+# SHA-pinned actions. Both scripts run under bash and zsh and print what failed.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Lessons numbering and index
+        run: bash scripts/check-lessons.sh
+      - name: Actions pinned to commit SHAs
+        run: bash scripts/check-actions-pinned.sh
