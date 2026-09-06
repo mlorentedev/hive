@@ -32,7 +32,7 @@ raise TimeoutError(...)
 
 The 5s drain is intentional: gives the worker thread a chance to escape `with lock:` naturally on the happy path (Linux subprocess.communicate returns within ~100ms of SIGKILL). Eviction is the safety net for the worst case where the thread is stuck. Drain calibration {1, 5, 10} converged on 5s as the smallest value that never raced eviction in 20-run validation.
 
-**Codified in [adr/adr-012-cooperative-filelock-eviction-on-deadline.md](adr/adr-012-cooperative-filelock-eviction-on-deadline.md)** (decision) + the maintainer's cross-project multi-process-mcp-server pattern §primitive-8 (reusable form). [adr/adr-008-hard-deadline-enforcement.md](adr/adr-008-hard-deadline-enforcement.md) §5 amendment cross-references this.
+**Codified in [adr-012](../adr/adr-012-cooperative-filelock-eviction-on-deadline.md)** (decision) + the maintainer's cross-project multi-process-mcp-server pattern §primitive-8 (reusable form). [adr-008](../adr/adr-008-hard-deadline-enforcement.md) §5 amendment cross-references this.
 
 **Anti-pattern caught.** Earlier draft of HIVE-116 considered "Option A: `Popen.wait(timeout=N)` inside `_run_git`" — an inner timeout to make the thread escape voluntarily. This violates the SSOT principle from HIVE-115 audit B1 ("bounded_call is the single source of truth for deadlines, inner timeouts race the supervisor's external termination"). Eviction is the right shape because it doesn't add a second clock; it cleans up state the runaway thread is no longer authoritative over.
 
