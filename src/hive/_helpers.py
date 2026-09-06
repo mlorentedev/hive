@@ -2514,15 +2514,36 @@ def count_stale_from(
         fm = frontmatters.get(f)
         if fm is not None and fm.status in _TERMINAL_STATUSES:
             continue
-        created_date = parse_date(fm.created) if fm is not None else None
-        if created_date is None:
-            try:
-                created_date = date.fromtimestamp(f.stat().st_mtime)
-            except OSError:
-                continue
-        if created_date < threshold:
+        ref_date = stale_reference_date(fm, f)
+        if ref_date is not None and ref_date < threshold:
             stale.append(f.relative_to(project_dir).as_posix())
     return stale
+
+
+def stale_reference_date(fm: Frontmatter | None, path: Path) -> date | None:
+    """The date staleness is measured from: ``updated``, else ``created``, else mtime.
+
+    Freshness is the last touch, not the birth. A ``context.md`` rewritten every
+    session but created a year ago is the opposite of stale, yet the previous rule
+    read only ``created`` and flagged 30 active projects on 2026-09-06. ``updated``
+    is what ``/context-refresh`` writes, so it is the signal; ``created`` covers
+    notes that are never refreshed; mtime is the last resort for notes with no
+    dates at all. Returns ``None`` only when even the stat fails.
+    """
+    if fm is not None:
+        updated_raw = fm.raw.get("updated")
+        if updated_raw:
+            ref = parse_date(str(updated_raw))
+            if ref is not None:
+                return ref
+        if fm.created:
+            ref = parse_date(fm.created)
+            if ref is not None:
+                return ref
+    try:
+        return date.fromtimestamp(path.stat().st_mtime)
+    except OSError:
+        return None
 
 
 def count_stale(
