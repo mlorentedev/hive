@@ -206,7 +206,10 @@ jobs:
           # "exactly one secret" guard keeps counting what it was written to count.
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
-          BASE_REF: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
+          # The repository's OWN default branch, never `pull_request.base.ref`: the base
+          # is chosen by the PR author, and this reads the file that decides what counts
+          # as a review. kubelab's port made this call first (its tests pin it).
+          BASE_REF: ${{ github.event.repository.default_branch }}
           STARTED: ${{ steps.start.outputs.started }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
         run: |
@@ -217,14 +220,22 @@ jobs:
               | jq -r '.reviewers[] | select(.login == "github-actions") | .review_markers[0] // empty' 2>/dev/null || true
           }
           marker=$(read_marker "${BASE_REF}")
+          if [ -z "$marker" ] && [ -z "${HEAD_SHA:-}" ]; then
+            # issue_comment events carry no pull_request payload; ask the API for the head.
+            HEAD_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha' 2>/dev/null || true)
+          fi
           if [ -z "$marker" ] && [ -n "${HEAD_SHA:-}" ]; then
-            # The base has no registry (or no github-actions entry) yet: this is the PR
-            # that introduces it. Reading the marker from the PR head is safe because the
-            # comment must still be AUTHORED by github-actions[bot] after this run's
-            # start, which a PR cannot forge. Without this fallback the bootstrap PR of
-            # every repository failed with a bare "exit code 1" (gh 404 under pipefail).
-            marker=$(read_marker "${HEAD_SHA}")
-            [ -n "$marker" ] && echo "::notice::review marker read from the PR head: the base ref has no reviewer registry yet"
+            # The default branch has no github-actions entry yet: this is the PR that
+            # introduces it. The head registry only proves the entry EXISTS; the marker
+            # itself is PR-Agent's own heading, never text a PR could choose (a head-
+            # supplied marker such as "#" would match any bot comment, CWE-345). Author
+            # and start-stamp binding below still apply. Without this fallback the
+            # bootstrap PR of every repository failed with a bare "exit code 1".
+            if [ -n "$(read_marker "${HEAD_SHA}")" ]; then
+              marker="PR Reviewer Guide"
+              echo "::notice::reviewer registry entry found only on the PR head;" \
+                "using PR-Agent's own heading as the marker"
+            fi
           fi
           if [ -z "$marker" ] || [ "$marker" = "null" ]; then
             echo "::error::no review marker declared for github-actions in" \
