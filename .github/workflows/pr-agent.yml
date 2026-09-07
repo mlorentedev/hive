@@ -134,6 +134,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI__KEY: ${{ secrets.NAN_API_KEY }}
           OPENAI__API_BASE: https://api.nan.builders/v1
+          # PR-Agent loads `.pr_agent.toml` from the DEFAULT branch ("No .pr_agent.toml
+          # found; using existing settings" on every bootstrap PR, 2026-09-06), so the
+          # PR that introduces the file reviews with upstream's gpt-5.6 and NaN rejects
+          # the key. The workflow file IS read from the PR head, so the model travels
+          # here and the toml keeps every other setting. Env wins over the file in
+          # PR-Agent's settings order; keep the two in step.
+          CONFIG__MODEL: openai/mimo-v2.5
+          CONFIG__FALLBACK_MODELS: '["openai/deepseek-v4-flash"]'
+          CONFIG__CUSTOM_MODEL_MAX_TOKENS: "200000"
           CONFIG__PUBLISH_OUTPUT_PROGRESS: false
           # Stated rather than defaulted, so the event lists are visible. `synchronize`
           # is absent for the reason in the trigger comment above, and `push_commands`
@@ -216,12 +225,14 @@ jobs:
             echo "::error::no review marker declared for github-actions in harness/review-attestation.json (checked ${BASE_REF} and the PR head)"
             exit 1
           fi
-          # --slurp merges the pages into one array first; without it --paginate --jq
-          # prints one count per page and the comparison below reads only the first.
-          found=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-            --paginate --slurp --jq "[.[][] | select(.user.login == \"github-actions[bot]\"
-                                          and (.updated_at >= \"${STARTED}\")
-                                          and (.body | contains(\"${marker}\")))] | length")
+          # --paginate emits one JSON array per page; `jq -s` slurps them into one
+          # array of arrays so the count spans every page (gh's own --slurp flag is
+          # not present on the runner's gh 2.46 and printed usage instead).
+          found=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate \
+            | jq -s --arg started "${STARTED}" --arg marker "${marker}" \
+                '[.[][] | select(.user.login == "github-actions[bot]"
+                                 and (.updated_at >= $started)
+                                 and (.body | contains($marker)))] | length')
           if [ "$found" -gt 0 ]; then
             echo "review published (marker: ${marker})"
             exit 0
