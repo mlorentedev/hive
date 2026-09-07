@@ -217,6 +217,10 @@ jobs:
               | jq -r '.reviewers[] | select(.login == "github-actions") | .review_markers[0] // empty' 2>/dev/null || true
           }
           marker=$(read_marker "${BASE_REF}")
+          if [ -z "$marker" ] && [ -z "${HEAD_SHA:-}" ]; then
+            # issue_comment events carry no pull_request payload; ask the API for the head.
+            HEAD_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha' 2>/dev/null || true)
+          fi
           if [ -z "$marker" ] && [ -n "${HEAD_SHA:-}" ]; then
             # The base has no registry (or no github-actions entry) yet: this is the PR
             # that introduces it. Reading the marker from the PR head is safe because the
