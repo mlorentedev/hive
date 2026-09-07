@@ -120,12 +120,14 @@ jobs:
       # `secrets` is not an allowed context in a step `if:` (actionlint: expression),
       # so the presence test travels as a boolean env var; the value never does.
       - name: Fail if the reviewer has no credential
+        id: credential
         env:
           HAS_NAN_API_KEY: ${{ secrets.NAN_API_KEY != '' }}
         run: |
           if [ "${HAS_NAN_API_KEY}" != "true" ]; then
             echo "::error::NAN_API_KEY is not set in this repository's Actions secrets, so PR-Agent cannot review."
-            echo "::error::Remedy: add ci:${GITHUB_REPOSITORY} to NAN_API_KEY's consumers in dotfiles/secrets/registry.yaml, then run: dotf secrets sync ci --repo ${GITHUB_REPOSITORY}"
+            echo "::error::Remedy: add ci:${GITHUB_REPOSITORY} to NAN_API_KEY's consumers in" \
+              "dotfiles/secrets/registry.yaml, then run: dotf secrets sync ci --repo ${GITHUB_REPOSITORY}"
             exit 1
           fi
       - name: PR-Agent
@@ -191,10 +193,13 @@ jobs:
         # Only the paths that actually run `/review`. An issue_comment invoking
         # `/describe` or `/improve` legitimately publishes no Guide, and failing
         # those would teach the reader to ignore this check.
+        # `always()` would also run this after the credential step failed and stack a
+        # wrong NaN-concurrency diagnosis on top of the remedy; skip it in that case.
         if: >
-          always() && (github.event_name == 'pull_request'
-            || (github.event_name == 'issue_comment'
-                && contains(github.event.comment.body, '/review')))
+          always() && steps.credential.outcome != 'failure'
+            && (github.event_name == 'pull_request'
+              || (github.event_name == 'issue_comment'
+                  && contains(github.event.comment.body, '/review')))
         env:
           # `github.token`, not `secrets.GITHUB_TOKEN`: identical value, but it is
           # the automatic token rather than a declared repository secret, so the
@@ -222,7 +227,8 @@ jobs:
             [ -n "$marker" ] && echo "::notice::review marker read from the PR head: the base ref has no reviewer registry yet"
           fi
           if [ -z "$marker" ] || [ "$marker" = "null" ]; then
-            echo "::error::no review marker declared for github-actions in harness/review-attestation.json (checked ${BASE_REF} and the PR head)"
+            echo "::error::no review marker declared for github-actions in" \
+              "harness/review-attestation.json (checked ${BASE_REF} and the PR head)"
             exit 1
           fi
           # --paginate emits one JSON array per page; `jq -s` slurps them into one
@@ -237,7 +243,8 @@ jobs:
             echo "review published (marker: ${marker})"
             exit 0
           fi
-          echo "::error::PR-Agent reported success but published no review (no github-actions[bot] comment updated since ${STARTED} carries \"${marker}\")."
+          echo "::error::PR-Agent reported success but published no review" \
+            "(no github-actions[bot] comment updated since ${STARTED} carries \"${marker}\")."
           echo "::error::Most likely cause: NaN concurrency exhaustion — the cluster allows 5 simultaneous"
           echo "::error::requests, shared with pi, qq and hive embeddings. See #1107."
           exit 1
