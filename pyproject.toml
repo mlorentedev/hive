@@ -30,7 +30,7 @@ dependencies = [
     # Cap at <4 so a deliberate review happens before adopting any new
     # major release. Bump the lower bound when verifying a newer release.
     # 3.3.1 and 3.4.6 audited 2026-08-06: full suite green on both.
-    "fastmcp>=3.3.1,<4",
+    "fastmcp>=3.3.1,<5",
     "filelock>=3.13",
     "httpx>=0.27.0",
     # Pinned because src/hive/_compat.py monkey-patches

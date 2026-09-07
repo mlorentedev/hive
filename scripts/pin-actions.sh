@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
-# Rewrite `uses: owner/repo@<tag>` to `uses: owner/repo@<commit-sha> # <tag>` for every
-# workflow under .github/workflows and .gitea/workflows (.yml and .yaml). Resolves each
-# tag through the GitHub API and dereferences annotated tags to the commit; a ref that is
-# a branch (e.g. release/v1) is resolved to the branch head and marked as such in the
-# trailer. Idempotent: lines already carrying a 40-hex SHA are left alone. Quoted refs and
-# inline comments are preserved. Resolutions are cached for the run (one API call per
-# distinct owner/repo@tag, not per occurrence). Prints each rewrite.
+# Rewrite `uses: owner/repo@<tag>` to `uses: owner/repo@<commit-sha>  # <tag>` for every
+# workflow under .github/workflows and .gitea/workflows (.yml and .yaml) and every local
+# composite action manifest (.github/actions/*/action.yml). Resolves each tag through the
+# GitHub API and dereferences annotated tags to the commit; a ref that is a branch (e.g.
+# release/v1) is resolved to the branch head and marked as such in the trailer.
+# Idempotent: references already carrying a 40-hex SHA are left alone. Only YAML `uses:`
+# mapping keys are rewritten (comments and scalar values containing "uses:" are not).
+# Quoted refs and inline comments are preserved. Resolutions are cached for the run.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 files=()
 while IFS= read -r -d '' f; do files+=("$f"); done < <(
-  find "$ROOT/.github/workflows" "$ROOT/.gitea/workflows" -maxdepth 1 -type f \
-    \( -name '*.yml' -o -name '*.yaml' \) -print0 2>/dev/null
+  { find "$ROOT/.github/workflows" "$ROOT/.gitea/workflows" -maxdepth 1 -type f \
+      \( -name '*.yml' -o -name '*.yaml' \) -print0 2>/dev/null
+    find "$ROOT/.github/actions" -mindepth 2 -maxdepth 2 -type f \
+      \( -name 'action.yml' -o -name 'action.yaml' \) -print0 2>/dev/null; } || true
 )
 [ "${#files[@]}" -gt 0 ] || { echo "pin-actions: no workflows"; exit 0; }
 
@@ -33,7 +36,7 @@ resolve() { # sets RESOLVED to "<sha> <kind>" (kind: tag|branch) or "" when unre
 
 rc=0
 for f in "${files[@]}"; do
-  # Candidate refs: not already a 40-hex SHA, not local, not docker.
+  # Candidate refs from `uses:` keys only: not already a 40-hex SHA, not local, not docker.
   while IFS= read -r ref; do
     [ -n "$ref" ] || continue
     full=${ref%@*}; tag=${ref##*@}; repo=$(printf '%s' "$full" | cut -d/ -f1-2)
@@ -43,15 +46,15 @@ for f in "${files[@]}"; do
     trailer="$tag"; [ "$kind" = "branch" ] && trailer="$tag (branch head, re-pin deliberately)"
     REF="$ref" FULL="$full" SHA="$sha" TRAILER="$trailer" perl -pi -e '
       chomp;
-      s{(uses:\h+)(["\x27]?)\Q$ENV{REF}\E\2\h*(#[^\n]*)?$}{
+      s{^(\h*(?:-\h+)?uses:\h+)(["\x27]?)\Q$ENV{REF}\E\2\h*(#[^\n]*)?$}{
         my ($lead,$q,$c)=($1,$2,$3);
         my $tr = $c ? $c : "# $ENV{TRAILER}";
         "$lead$q$ENV{FULL}\@$ENV{SHA}$q  $tr"
       }e;
       $_ .= "\n"' "$f"
     echo "pinned ${f#"$ROOT"/}: $ref -> $sha ($kind)"
-  done < <(grep -oE 'uses:[[:space:]]+["'"'"']?[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[A-Za-z0-9_./-]+' "$f" \
-    | sed -E 's/^uses:[[:space:]]+["'"'"']?//' \
-    | grep -vE '@[0-9a-f]{40}$' | grep -vE '^(\./|docker://)' | sort -u)
+  done < <(grep -E '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+' "$f" \
+    | sed -E 's/^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+["'"'"']?([^"'"'"'[:space:]#]+).*/\2/' \
+    | grep -vE '@[0-9a-fA-F]{40}$' | grep -vE '^(\./|docker://)' | grep -E '@' | sort -u)
 done
 exit $rc
