@@ -225,13 +225,17 @@ jobs:
             HEAD_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha' 2>/dev/null || true)
           fi
           if [ -z "$marker" ] && [ -n "${HEAD_SHA:-}" ]; then
-            # The base has no registry (or no github-actions entry) yet: this is the PR
-            # that introduces it. Reading the marker from the PR head is safe because the
-            # comment must still be AUTHORED by github-actions[bot] after this run's
-            # start, which a PR cannot forge. Without this fallback the bootstrap PR of
-            # every repository failed with a bare "exit code 1" (gh 404 under pipefail).
-            marker=$(read_marker "${HEAD_SHA}")
-            [ -n "$marker" ] && echo "::notice::review marker read from the PR head: the base ref has no reviewer registry yet"
+            # The default branch has no github-actions entry yet: this is the PR that
+            # introduces it. The head registry only proves the entry EXISTS; the marker
+            # itself is PR-Agent's own heading, never text a PR could choose (a head-
+            # supplied marker such as "#" would match any bot comment, CWE-345). Author
+            # and start-stamp binding below still apply. Without this fallback the
+            # bootstrap PR of every repository failed with a bare "exit code 1".
+            if [ -n "$(read_marker "${HEAD_SHA}")" ]; then
+              marker="PR Reviewer Guide"
+              echo "::notice::reviewer registry entry found only on the PR head;" \
+                "using PR-Agent's own heading as the marker"
+            fi
           fi
           if [ -z "$marker" ] || [ "$marker" = "null" ]; then
             echo "::error::no review marker declared for github-actions in" \

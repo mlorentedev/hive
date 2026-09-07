@@ -21,11 +21,11 @@ index_targets() {
   # perl, not grep: a markdown target may contain escaped or %-encoded parens and spaces,
   # which no single ERE handles; the targets come back decoded, path stripped, one per line.
   perl -ne '
-    while (/\]\(\s*((?:[^()\\\s]|\\.|%[0-9A-Fa-f]{2})*?lesson-\d+(?:[^()\\\s]|\\.|%[0-9A-Fa-f]{2})*?\.md)\s*\)/g) { print "$1\n" }
+    while (/\]\(\s*((?:[^()\\\s#]|\\.|%[0-9A-Fa-f]{2})*?lesson-\d+(?:[^()\\\s#]|\\.|%[0-9A-Fa-f]{2})*?\.md)(?:#[^)\s]*)?\s*\)/g) { print "$1\n" }
     # Obsidian wikilinks may omit the .md extension; add it back so the token compares.
     while (/\[\[([^\]|\\]*?lesson-\d+[^\]|\\]*?)(?:\\?\||\]\])/g) { my $t = $1; $t .= ".md" unless $t =~ /\.md$/; print "$t\n" }
   ' "$1" 2>/dev/null \
-    | perl -pe 's/\\([()])/$1/g; s/%([0-9A-Fa-f]{2})/chr(hex($1))/ge; s#.*/##' | sort -u
+    | perl -pe 's/#[^\n]*$//; s/\\(.)/$1/g; s/%([0-9A-Fa-f]{2})/chr(hex($1))/ge; s#.*/##' | sort -u
 }
 
 # --- 1. duplicate numbers across the whole tree (a number is unique per repo) ---

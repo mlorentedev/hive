@@ -20,7 +20,8 @@ while IFS= read -r -d '' f; do files+=("$f"); done < <(
 
 # A `uses` key: optional indentation, optional "- ", the key, then the reference.
 # The reference is captured up to whitespace, a quote or a comment.
-bad="$(grep -nE '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+' "${files[@]}" \
+# -H: with a single file grep would omit the filename and the sed below would misparse.
+bad="$(grep -nHE '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+' "${files[@]}" \
   | sed -E 's/^([^:]+:[0-9]+:)[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+["'"'"']?([^"'"'"'[:space:]#]+).*/\1\3/' \
   | grep -vE ':(\./|docker://)' \
   | grep -vE '@[0-9a-fA-F]{40}$' || true)"
