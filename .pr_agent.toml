@@ -1,0 +1,146 @@
+# PR-Agent (The-PR-Agent/pr-agent, MIT) on NaN cluster inference.
+#
+# Why this repo needs a second reviewer, measured rather than assumed (2026-09-06,
+# the 34 non-dependabot PRs among the 40 most recent, #356..#412):
+#
+#   real CodeRabbit review (`## Walkthrough`)   10   (29 %)
+#   quota decline (`Review limit reached`)      24   (71 %)
+#
+# CodeRabbit is not a check-run in this repository, and the required checks are
+# `check (3.12)`, `check (3.13)` and the two `cross_worker_lock` jobs, so a declined
+# review leaves no trace in CI. Seven PRs in ten here merge with no machine review and
+# nothing says so. That is the queue this removes: a reviewer whose capacity is ours
+# rather than a vendor's.
+#
+# Ported from mlorentedev/ts-bridge (`.pr_agent.toml`), itself ported from
+# mlorentedev/dotfiles (TOOL-013 #786) via the mlorentedev/kubelab adaptation
+# (TOOL-021 #1140). Numbers, paths and the ignore list below are re-derived for this
+# repo; the model-chain reasoning is inherited and cited by issue so it can be checked
+# at source.
+
+[config]
+# `openai/` selects LiteLLM's OpenAI-compatible transport; the endpoint is NaN's, set
+# as OPENAI__API_BASE in the workflow. Nothing here talks to OpenAI.
+#
+# mimo-v2.5 leads and deepseek-v4-flash follows because the order is the only one that
+# can fail loudly. deepseek's characteristic failure is a 200 with an empty body — it
+# spends the output budget on the reasoning chain and never writes an answer — which
+# raises no exception, so LiteLLM never consults a fallback behind it. kubelab measured
+# that shape on run 32440498259 (#1205): step `success` after 4m15s, no RateLimitError,
+# the second model never attempted. mimo fails by saturation (429), which DOES raise.
+#
+# This is not a quality ranking. dotfiles' harness/reviewer-pool.json says of mimo, in
+# its own words, that no ranking against deepseek was established; both are
+# reasoning-class by profile (1M context, mandatory chain) and both are admitted there,
+# which is the line this file draws. The excluded models stay excluded by name:
+# qwen3.6/gemma4 are the latency tier, and a reviewer that PASSes cheaply converts a
+# gate into a green checkmark. tests/pr-agent-config.bats holds that at dotfiles.
+model = "openai/mimo-v2.5"
+
+# ONE fallback, and lane separation is why it is deepseek rather than a sibling of the
+# primary. NaN's limit is PER MODEL (kubelab #1107/#1203: 8 concurrent to deepseek
+# gives 5x200 + 3x429 while mimo answers 200 during the same saturation), so the second
+# bucket is a real fallback and not a re-name of the same wall. It does share a bucket
+# with the sibling repos' adversarial-review pools and with whatever model hive's own
+# delegate worker (HIVE-384) is pointed at — the trade was made at dotfiles #1149 in
+# the same direction (CI yields to the gate, because the gate blocks and CI review
+# advises), and it is recorded here rather than rediscovered.
+fallback_models = ["openai/deepseek-v4-flash"]
+
+# `model_weak` deliberately absent. Upstream defaults it to a flash tier for
+# descriptions and commit summaries; `auto_describe` is off below so it would do
+# nothing, and the model it names is the one the pool rejects here. Importing a
+# documented tension for zero behaviour is the worst of both.
+
+# NaN ids are not in LiteLLM's registry, so the budget must be stated or LiteLLM
+# assumes a small default and truncates the diff silently.
+custom_model_max_tokens = 200000
+max_model_tokens = 200000
+
+response_language = "en-US"
+
+# `AGENTS.md` is the repo's own SSOT overlay and `.claude/CLAUDE.md` the Claude tooling
+# overlay (both checked 2026-09-06; there is no root `CLAUDE.md`). Only the first is
+# named: the second is harness wiring, and handing the reviewer a source about slash
+# commands and skills would spend context on nothing it can review.
+repo_context_files = ["AGENTS.md"]
+
+[pr_reviewer]
+require_score_review = false
+require_tests_review = true
+require_security_review = true
+persistent_comment = true
+final_update_message = false
+
+# No "compliance sweep" preamble: asked for on every review and delivered once in
+# sixteen at dotfiles (#1072, recommendation was deletion). An instruction ignored 94 %
+# of the time is a comment, not a control.
+extra_instructions = """
+This repository already runs ruff check, ruff format --check, mypy on src/, pytest with
+coverage on Python 3.12 and 3.13, the cross-worker lock suite on Linux and Windows, and
+a Docker build with a smoke run. Do not restate what those report; repeating it is noise
+that trains the reader to skim.
+
+Spend the budget on what static analysis cannot see:
+
+- a test that passes vacuously. This repo has named classes of it: a field asserted in
+  only one state (reachable but never unreachable, present but never absent), an
+  absence assertion that passes because the whole section is missing (#390), and an
+  acceptance criterion that reads green because the live smoke behind it never ran
+  (#408). A finding on a test that cannot fail the way its name claims is worth more
+  than a style note.
+- a guard that cannot fail the way its comment claims, or that perturbs the thing it
+  measures.
+- error classification that tells the caller the wrong thing to do next. `delegate`
+  separates pool-unavailable (retry elsewhere) from task-failed (stop), and unknown
+  failures must fall closed to task-failed (docs/lessons/lesson-091). A branch that
+  turns a bad answer into a silent retry is a real finding.
+- deadline and cancellation semantics: `bounded_call` (ADR-008), the ghost-response
+  contract after a cancel ack (ADR-007), and the daemon fallback that must flag
+  degraded mode rather than fail or pretend (ADR-011 section 3).
+- a second writer to a database the daemon owns (`worker.db`, `usage.db`, the vault
+  index), or a commit path that bypasses the outbox queue (ADR-018).
+- cross-file consequences a single-hunk reader misses: a claim repeated in README,
+  AGENTS.md, `docs/runbooks/`, `site/src/content/docs/` and the server's own prompt
+  text in `src/hive/server.py` where only one of them is edited, or a settings name
+  documented that `HiveSettings` does not read.
+- anything that puts a credential in a transcript, a log line, an argv, a crash
+  artifact or the process table, including in documentation examples. `worker_status`
+  and `vault_health` are asserted to carry none (#390 AC7).
+
+Grade each finding REAL, THEORETICAL or SPECULATIVE and say which. REAL needs a concrete
+trace: file and line, failing input, or a command and its output. Do not flag an import
+or dependency as missing when CI compiles and tests pass; trust the manifests. Write in
+English. Conventional Commits and no AI attribution are enforced here, so do not propose
+commit messages that carry either.
+"""
+
+[pr_code_suggestions]
+# Present on purpose. Omitting this block is how upstream shipped the tool with its
+# stated function disabled: the default `dual_publishing_score_threshold` is -1, which
+# never publishes inline (dotfiles measured 2 bot comments and 0 inline across three
+# PRs before noticing). 7 is upstream's own medium boundary.
+dual_publishing_score_threshold = 7
+suggestions_score_threshold = 5
+publish_output_no_suggestions = false
+
+[ignore]
+# Applied BEFORE the model call. This repo keeps no credential material in-tree (no
+# SOPS/age store, no keys — the only secrets live in GitHub's own stores), so this list
+# is about spend and signal, not leakage:
+#   - the site build output and coverage files are machine artefacts (all gitignored,
+#     listed so a stray commit does not get reviewed as code);
+#   - `uv.lock` and the docs-site lockfile are thousands of lines of resolved URLs a
+#     human already reviewed in the PR that bumped them, and lockfiles are excluded
+#     from the review cap by policy;
+#   - archived specs are a closed audit trail, re-reviewing them spends inference on
+#     text that has already been reviewed once.
+glob = [
+  "specs/archive/**",
+  "site/dist/**",
+  "site/package-lock.json",
+  "uv.lock",
+  "**/*.log",
+  "coverage.xml",
+  ".coverage",
+]

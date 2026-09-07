@@ -9,10 +9,15 @@
     "in this repository closed with the Definition of Done's evidence item",
     "skipped rather than met.",
     "",
-    "Only `coderabbitai` is registered, because it is the only reviewer that",
-    "runs here. mlorentedev/dotfiles additionally registers `github-actions`",
-    "for PR-Agent; hive has no such workflow, and declaring a reviewer that",
-    "cannot run would make this file assert a review that never happens.",
+    "Two reviewers are registered. `coderabbitai` is the vendor reviewer that has",
+    "run here since the start. `github-actions` is PR-Agent, added 2026-09-06 with",
+    ".github/workflows/pr-agent.yml, the way mlorentedev/dotfiles and ts-bridge",
+    "register it. Until that workflow's first green run its entry is a declaration",
+    "of intent rather than of an observed actor: the marker is verified in the",
+    "sibling repos (see the entry's own `why`), and it has never yet been observed",
+    "on a hive PR. The measurement that motivates it is hive's own: of the 34",
+    "non-dependabot PRs among the 40 most recent (#356..#412, counted 2026-09-06),",
+    "24 drew `Review limit reached` and only 10 drew a `## Walkthrough`.",
     "",
     "WHY `review_markers` IS THE SUMMARY COMMENT AND NOT THE REVIEW ITSELF.",
     "This is the load-bearing detail and it is not obvious. On this repository",
@@ -71,6 +76,14 @@
       ],
       "advisory": true,
       "why": "The only reviewer configured on this repository. Its findings-bearing reviews go through the reviews API and are invisible to the queue's `gh pr list --json comments` read, so the walkthrough comment is the comment-shaped proxy for 'a review happened here'. See the $comment above for the measurement and the known limitation."
+    },
+    {
+      "login": "github-actions",
+      "declined_markers": [],
+      "review_markers": [
+        "## PR Reviewer Guide"
+      ],
+      "why": "PR-Agent (see .github/workflows/pr-agent.yml) runs under GITHUB_TOKEN and publishes through the COMMENTS api, so its reviews never enter reviews[] and a classifier that looked only at reviews would read every PR-Agent-reviewed PR as unattested. The marker is the `review` command's own heading. `## PR Code Suggestions` is deliberately NOT here: suggestions are not a review, which is also why auto_improve is off on the automatic path. MARKER PROVENANCE: verified in the sibling ports before being declared here (kubelab has 215 PR comments carrying '## PR Reviewer Guide' posted by github-actions[bot], dotfiles has 172, per the ts-bridge registry). It has NEVER been observed in hive, because this workflow has not run here: the first green run of pr-agent on a hive PR is the verification, and until then this entry is a declaration of intent, not of an actor. The workflow's own guard step fails when no comment carrying this marker appears, so an absent NAN_API_KEY reads as a red job with a diagnosis rather than a green job with no review."
     }
   ],
   "triage": {
