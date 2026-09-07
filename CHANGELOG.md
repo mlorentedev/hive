@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.2.1](https://github.com/mlorentedev/hive/compare/v4.2.0...v4.2.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **health:** measure staleness from the last touch, not the birth ([#413](https://github.com/mlorentedev/hive/issues/413)) ([e44498d](https://github.com/mlorentedev/hive/commit/e44498d14bfcb18841270882d67044b0dde1409f))
+
+
+### Documentation
+
+* add ADR-021 recording the single-provider worker decision ([#416](https://github.com/mlorentedev/hive/issues/416)) ([3ddbcf0](https://github.com/mlorentedev/hive/commit/3ddbcf09da6a679f558a5cb6f410777a92e2f246))
+* apply /insights findings (2026-09-05) ([#412](https://github.com/mlorentedev/hive/issues/412)) ([65fbed9](https://github.com/mlorentedev/hive/commit/65fbed9fbe19328542c192b648593ba54f711e13))
+
 ## [4.2.0](https://github.com/mlorentedev/hive/compare/v4.1.0...v4.2.0) (2026-08-25)
 
 
