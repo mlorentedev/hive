@@ -92,6 +92,7 @@ jobs:
     if: >
       (github.event_name == 'pull_request' && github.event.pull_request.draft == false
         && github.actor != 'dependabot[bot]'
+        && github.event.pull_request.head.repo.fork == false
         && !startsWith(github.event.pull_request.head.ref, 'release-please--')) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request
         && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
@@ -99,6 +100,34 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # `The-PR-Agent/pr-agent`, not `qodo-ai/pr-agent` as #786's body says: the
+      # project has been renamed and the old path now redirects. Pinned to a tag
+      # that was verified to exist and to carry an `action.yaml` (a Docker
+      # action) — the first draft of this file pinned `@v0.30`, which does not
+      # exist at all.
+      # Captured BEFORE PR-Agent runs so the guard below can bind its verdict to
+      # THIS run: with `persistent_comment` PR-Agent edits its earlier Guide, which
+      # moves `updated_at`; a Guide left by a previous run and never touched by
+      # this one stays older than this stamp and no longer satisfies the guard.
+      - name: Stamp run start
+        id: start
+        run: echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      # PR-Agent swallows an authentication failure and exits green, so without
+      # this step a missing secret surfaces only as "published no review" with a
+      # NaN-concurrency diagnosis that is wrong. Measured 2026-09-06 on the ten
+      # repositories that received this workflow before their NAN_API_KEY was
+      # synced. Fail here, with the remedy, before spending a run on it.
+      # PR-Agent swallows an authentication failure and exits green, so without
+      # this step a missing secret surfaces only as "published no review" with a
+      # NaN-concurrency diagnosis that is wrong. Measured 2026-09-06 on the ten
+      # repositories that received this workflow before their NAN_API_KEY was
+      # synced. Fail here, with the remedy, before spending a run on it.
+      - name: Fail if the reviewer has no credential
+        if: ${{ secrets.NAN_API_KEY == '' }}
+        run: |
+          echo "::error::NAN_API_KEY is not set in this repository's Actions secrets, so PR-Agent cannot review."
+          echo "::error::Remedy: add ci:${GITHUB_REPOSITORY} to NAN_API_KEY's consumers in dotfiles/secrets/registry.yaml, then run: dotf secrets sync ci --repo ${GITHUB_REPOSITORY}"
+          exit 1
       # Pinned by COMMIT, not tag: a tag is mutable, and what runs here holds
       # NAN_API_KEY and `pull-requests: write` on a public repository. The SHA was
       # resolved from the API rather than copied
@@ -136,48 +165,74 @@ jobs:
           # can. `/improve` on demand still works: the [pr_code_suggestions] config stays.
           github_action_config.auto_improve: "false"
 
-      # A review that did not happen must not report success.
+      # A review that did not happen must not report success (#1107).
       #
-      # PR-Agent swallows a failed inference into a clean exit: measured upstream, a
-      # green job with no review because the model hit NaN's concurrency limit, and
-      # nothing downstream noticed. This step asks the only question that matters — did
-      # a comment carrying the declared review marker appear? — and answers it from the
-      # registry rather than from a hardcoded string, so a reviewer change is a config
-      # edit and not a workflow rewrite.
+      # PR-Agent swallows a failed inference into a clean exit. Measured on run
+      # 32325012314: green job, no review, because the model returned
+      # `litellm.RateLimitError: deepseek-v4-flash concurrency limit: max 5
+      # simultaneous requests`. Six PRs in one session were affected. ADR-032
+      # already forbids it — the top tier "queues or escalates, NEVER degrades
+      # silently" — so this makes the degrade loud and does nothing else.
       #
-      # The marker is read from the BASE ref: a pull request that supplied its own
-      # registry could otherwise redefine the string that attests it.
+      # `fallback_models` names mimo-v2.5 for CONCURRENCY (per-model limit,
+      # measured), never to soften the quality bar. The marker comes from the
+      # registry, over the API since this job has no checkout, at the BASE ref
+      # since a PR supplying it could redefine it. Two more bindings, both
+      # measured as gaps by CodeRabbit on the yt-metrics-cli and svqtriana ports
+      # (2026-09-06): the comment must be AUTHORED by github-actions[bot] (on a
+      # public repo anyone can paste the marker text), and it must have been
+      # created or edited at or after this run's start stamp (`persistent_comment`
+      # edits the earlier Guide, which moves `updated_at`, so an untouched Guide
+      # from a previous run cannot vouch for this one). See #1107.
       - name: Fail if no review was published
         # Only the paths that actually run `/review`. An issue_comment invoking
-        # `/describe` legitimately publishes no Guide, and failing those would teach the
-        # reader to ignore this check.
+        # `/describe` or `/improve` legitimately publishes no Guide, and failing
+        # those would teach the reader to ignore this check.
         if: >
           always() && (github.event_name == 'pull_request'
             || (github.event_name == 'issue_comment'
                 && contains(github.event.comment.body, '/review')))
         env:
-          # `github.token`, not `secrets.GITHUB_TOKEN`: identical value, but it is the
-          # automatic token rather than a declared repository secret, so nothing that
-          # counts "which secrets does this job hold" starts counting an extra one.
+          # `github.token`, not `secrets.GITHUB_TOKEN`: identical value, but it is
+          # the automatic token rather than a declared repository secret, so the
+          # "exactly one secret" guard keeps counting what it was written to count.
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
           BASE_REF: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
+          STARTED: ${{ steps.start.outputs.started }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
         run: |
           set -euo pipefail
-          marker=$(gh api "repos/${GITHUB_REPOSITORY}/contents/harness/review-attestation.json?ref=${BASE_REF}" \
-            --jq '.content' | base64 -d \
-            | jq -r '.reviewers[] | select(.login == "github-actions") | .review_markers[0]')
-          if [ -z "${marker}" ] || [ "${marker}" = "null" ]; then
-            echo "::error::no review marker declared for github-actions in harness/review-attestation.json"
+          read_marker() { # $1 = ref; prints the marker or nothing; never aborts the step
+            gh api "repos/${GITHUB_REPOSITORY}/contents/harness/review-attestation.json?ref=$1" \
+              --jq '.content' 2>/dev/null | base64 -d 2>/dev/null \
+              | jq -r '.reviewers[] | select(.login == "github-actions") | .review_markers[0] // empty' 2>/dev/null || true
+          }
+          marker=$(read_marker "${BASE_REF}")
+          if [ -z "$marker" ] && [ -n "${HEAD_SHA:-}" ]; then
+            # The base has no registry (or no github-actions entry) yet: this is the PR
+            # that introduces it. Reading the marker from the PR head is safe because the
+            # comment must still be AUTHORED by github-actions[bot] after this run's
+            # start, which a PR cannot forge. Without this fallback the bootstrap PR of
+            # every repository failed with a bare "exit code 1" (gh 404 under pipefail).
+            marker=$(read_marker "${HEAD_SHA}")
+            [ -n "$marker" ] && echo "::notice::review marker read from the PR head: the base ref has no reviewer registry yet"
+          fi
+          if [ -z "$marker" ] || [ "$marker" = "null" ]; then
+            echo "::error::no review marker declared for github-actions in harness/review-attestation.json (checked ${BASE_REF} and the PR head)"
             exit 1
           fi
+          # --slurp merges the pages into one array first; without it --paginate --jq
+          # prints one count per page and the comparison below reads only the first.
           found=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-            --paginate --jq "[.[] | select(.body | contains(\"${marker}\"))] | length")
-          if [ "${found}" -gt 0 ]; then
-            echo "review published (marker found: ${marker})"
+            --paginate --slurp --jq "[.[][] | select(.user.login == \"github-actions[bot]\"
+                                          and (.updated_at >= \"${STARTED}\")
+                                          and (.body | contains(\"${marker}\")))] | length")
+          if [ "$found" -gt 0 ]; then
+            echo "review published (marker: ${marker})"
             exit 0
           fi
-          echo "::error::PR-Agent reported success but published no review — no comment carries \"${marker}\"."
-          echo "::error::Most likely cause: the credential was absent or NaN concurrency was exhausted."
-          echo "::error::Check 'gh api repos/${GITHUB_REPOSITORY}/actions/secrets --jq .secrets[].name' includes NAN_API_KEY."
+          echo "::error::PR-Agent reported success but published no review (no github-actions[bot] comment updated since ${STARTED} carries \"${marker}\")."
+          echo "::error::Most likely cause: NaN concurrency exhaustion — the cluster allows 5 simultaneous"
+          echo "::error::requests, shared with pi, qq and hive embeddings. See #1107."
           exit 1
