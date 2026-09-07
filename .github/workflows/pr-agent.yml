@@ -117,23 +117,17 @@ jobs:
       # NaN-concurrency diagnosis that is wrong. Measured 2026-09-06 on the ten
       # repositories that received this workflow before their NAN_API_KEY was
       # synced. Fail here, with the remedy, before spending a run on it.
-      # PR-Agent swallows an authentication failure and exits green, so without
-      # this step a missing secret surfaces only as "published no review" with a
-      # NaN-concurrency diagnosis that is wrong. Measured 2026-09-06 on the ten
-      # repositories that received this workflow before their NAN_API_KEY was
-      # synced. Fail here, with the remedy, before spending a run on it.
+      # `secrets` is not an allowed context in a step `if:` (actionlint: expression),
+      # so the presence test travels as a boolean env var; the value never does.
       - name: Fail if the reviewer has no credential
-        if: ${{ secrets.NAN_API_KEY == '' }}
+        env:
+          HAS_NAN_API_KEY: ${{ secrets.NAN_API_KEY != '' }}
         run: |
-          echo "::error::NAN_API_KEY is not set in this repository's Actions secrets, so PR-Agent cannot review."
-          echo "::error::Remedy: add ci:${GITHUB_REPOSITORY} to NAN_API_KEY's consumers in dotfiles/secrets/registry.yaml, then run: dotf secrets sync ci --repo ${GITHUB_REPOSITORY}"
-          exit 1
-      # Pinned by COMMIT, not tag: a tag is mutable, and what runs here holds
-      # NAN_API_KEY and `pull-requests: write` on a public repository. The SHA was
-      # resolved from the API rather than copied
-      # (`gh api repos/The-PR-Agent/pr-agent/git/ref/tags/v0.44.0` -> ab6ec54b,
-      # verified 2026-09-06), which is also how it stays auditable. It is the SHA
-      # ts-bridge runs; a reviewer bump is its own change with its own measurement.
+          if [ "${HAS_NAN_API_KEY}" != "true" ]; then
+            echo "::error::NAN_API_KEY is not set in this repository's Actions secrets, so PR-Agent cannot review."
+            echo "::error::Remedy: add ci:${GITHUB_REPOSITORY} to NAN_API_KEY's consumers in dotfiles/secrets/registry.yaml, then run: dotf secrets sync ci --repo ${GITHUB_REPOSITORY}"
+            exit 1
+          fi
       - name: PR-Agent
         uses: The-PR-Agent/pr-agent@ab6ec54bfeb37933ddb74259338752e9272016c6  # v0.44.0
         env:
