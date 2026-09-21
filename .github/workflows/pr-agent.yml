@@ -131,7 +131,7 @@ jobs:
             exit 1
           fi
       - name: PR-Agent
-        uses: The-PR-Agent/pr-agent@ab6ec54bfeb37933ddb74259338752e9272016c6  # v0.44.0
+        uses: The-PR-Agent/pr-agent@f3b385ea2927247ddcff2fe252472380b9c8f5fc  # v0.45.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI__KEY: ${{ secrets.NAN_API_KEY }}
