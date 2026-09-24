@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import re
 from datetime import date
 from typing import TYPE_CHECKING
@@ -188,9 +189,14 @@ def _write_lesson(
         entry_lines.append(f"**Tags:** {tag_str}\n")
     entry = "".join(entry_lines)
 
+    # O_APPEND without O_CREAT: open("a") would recreate a file deleted
+    # between the existence check above and this write (#431).
     try:
-        with lessons_file.open("a", encoding="utf-8") as f:
+        fd = os.open(lessons_file, os.O_WRONLY | os.O_APPEND)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
             f.write(entry)
+    except FileNotFoundError:
+        return "error", _missing_lessons_file_error(project)
     except OSError as exc:
         return "error", format_io_error(exc, f"{project}/90-lessons.md", "write")
 

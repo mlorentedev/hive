@@ -1303,6 +1303,26 @@ class TestCaptureLesson:
         assert "docs/lessons/" in msg
         assert not lessons_file.exists()
 
+    def test_write_lesson_does_not_recreate_a_file_deleted_mid_write(
+        self, git_vault: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """#431: a deletion between the existence check and the append still refuses."""
+        import hive._workers as workers
+
+        lessons_file = git_vault / "10_projects" / "testproject" / "90-lessons.md"
+
+        def delete_then_pass(**_kw: object) -> tuple[bool, str]:
+            lessons_file.unlink()
+            return False, ""
+
+        monkeypatch.setattr(workers, "check_lesson_recurrence", delete_then_pass)
+        status, msg = workers._write_lesson(
+            lessons_file.parent, "testproject", "T", "ctx", "prob", "sol", []
+        )
+        assert status == "error"
+        assert "docs/lessons/" in msg
+        assert not lessons_file.exists()
+
     async def test_capture_rejects_unknown_project(self, mock_vault: Path) -> None:
         mcp = create_server(vault_path=mock_vault)
         result = await mcp.call_tool(
