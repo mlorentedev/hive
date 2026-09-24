@@ -3,12 +3,14 @@ id: "HIVE-267-upgrade-swap"
 type: spec
 status: verifying # draft | implementing | verifying | archived
 created: "2026-06-24"
-issue: "hive#267"   # repo#NNN — GitHub issue / Project item that tracks this spec
+issue: "hive#292"   # repo#NNN — GitHub issue / Project item that tracks this spec
 tags: [spec, proposal]
 template_version: "1.0"
 ---
 
 # HIVE-267: Upgrade swap
+
+> **Tracking moved to hive#292 (2026-09-23).** hive#267 closed when the spike landed, but this spec's work continues: AC4 (real-hardware re-validation) gates its archive, and the end-to-end self-upgrade is hive#292 ("continues #267"), with hive#328 and mlorentedev/dotfiles#791 on its path. The spec stays active and now names the open issue it tracks. Found by the zombie-spec sweep, mlorentedev/dotfiles#1626.
 
 > **Naming**: file lives at `<repo>/specs/HIVE-267-upgrade-swap/proposal.md`.
 
