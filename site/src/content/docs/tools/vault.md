@@ -304,9 +304,9 @@ capture_lesson(
 )
 ```
 
-**Inline mode** (no `text`, no `find`): Appends a structured entry to `90-lessons.md` with date, context, problem, and solution. Creates the file with frontmatter if it doesn't exist. Deduplicates by title. Auto-commits to git. Each inline write also seeds a baseline row in the reinforcement table at `confidence=0.7`.
+**Inline mode** (no `text`, no `find`): Appends a structured entry to `90-lessons.md` with date, context, problem, and solution. Never creates the file: if the project has no `90-lessons.md` it writes nothing and returns an error naming where the lesson belongs instead — the repository's `docs/lessons/` for a project that moved its lessons there, `00_meta/patterns/` for a cross-project lesson. Deduplicates by title. Auto-commits to git. Each inline write also seeds a baseline row in the reinforcement table at `confidence=0.7`.
 
-**Batch mode** (`text` provided): Sends the text to a worker model (Ollama/OpenRouter) which extracts structured lessons (title, context, problem, solution, tags, confidence). Lessons above the confidence threshold are written to `90-lessons.md` with deduplication and seeded in the reinforcement table.
+**Batch mode** (`text` provided): Sends the text to the configured worker model, which extracts structured lessons (title, context, problem, solution, tags, confidence). Lessons above the confidence threshold are written to `90-lessons.md` with deduplication and seeded in the reinforcement table. The missing-file check runs before the worker call, so a refused capture costs no inference.
 
 **Lookup mode** (`find` provided): Greps lesson headings (codeblock-aware) for the keyword, ranks the matches by `rank_by` (default `reinforcements`), increments each surfaced lesson once, and returns the top `max_lessons`. Single-tool symmetry: `capture_lesson` writes lessons AND queries them.
 

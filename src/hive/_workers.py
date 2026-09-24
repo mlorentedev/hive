@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import re
 from datetime import date
 from typing import TYPE_CHECKING
@@ -18,7 +19,6 @@ from hive._helpers import (
     _format_metadata,
     _format_response,
     _git_commit,
-    _make_frontmatter,
     _resolve_file,
     _resolve_project_dir,
     _safe_read,
@@ -57,6 +57,23 @@ SUSPECT_PATTERNS: tuple[re.Pattern[str], ...] = (
 _CORRUPTION_COMMENT = (
     "<!-- POSSIBLE_CORRUPTION: detected XML-tag leak in input; review and clean manually -->\n"
 )
+
+
+def _missing_lessons_file_error(project: str) -> str:
+    """Refusal for a project with no 90-lessons.md (#431).
+
+    capture_lesson only appends. Under the knowledge-placement model a
+    project's lessons live in its repository, and the vault file is deleted
+    on purpose when a project migrates; recreating it would silently undo
+    that migration and report success for a lesson written to the wrong place.
+    """
+    return (
+        f"Nothing written: project '{project}' has no 90-lessons.md, and "
+        "capture_lesson appends to an existing one rather than creating it. "
+        "A project lesson belongs in the project's repository as "
+        "docs/lessons/lesson-NNN-<slug>.md (committed through a PR); a "
+        "cross-project lesson belongs in 00_meta/patterns/."
+    )
 
 
 def _scan_for_xml_leak(*fields: str) -> bool:
@@ -118,20 +135,21 @@ def _write_lesson(
     solution: str,
     tags: list[str],
 ) -> tuple[str, str]:
-    """Write a single lesson to 90-lessons.md. Returns (status, message).
+    """Append a single lesson to an existing 90-lessons.md. Returns (status, message).
 
-    Status is one of: 'written', 'skipped' (duplicate), 'error'.
+    Status is one of: 'written', 'skipped' (duplicate), 'error'. A missing
+    file is an 'error', never a create (#431).
     """
     from pathlib import Path as _Path  # noqa: F811
 
     lessons_file = _Path(project_dir) / "90-lessons.md"
 
-    existing = ""
-    if lessons_file.exists():
-        try:
-            existing = lessons_file.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            return "error", format_io_error(exc, f"{project}/90-lessons.md", "read")
+    if not lessons_file.exists():
+        return "error", _missing_lessons_file_error(project)
+    try:
+        existing = lessons_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return "error", format_io_error(exc, f"{project}/90-lessons.md", "read")
 
     if f"] {title}\n" in existing:
         return "skipped", f"Lesson already exists: '{title}'. Skipping."
@@ -171,16 +189,14 @@ def _write_lesson(
         entry_lines.append(f"**Tags:** {tag_str}\n")
     entry = "".join(entry_lines)
 
+    # O_APPEND without O_CREAT: open("a") would recreate a file deleted
+    # between the existence check above and this write (#431).
     try:
-        if not lessons_file.exists():
-            frontmatter = _make_frontmatter(f"{project}-lessons", "lesson")
-            lessons_file.write_text(
-                frontmatter + "# Lessons Learned\n" + entry,
-                encoding="utf-8",
-            )
-        else:
-            with lessons_file.open("a", encoding="utf-8") as f:
-                f.write(entry)
+        fd = os.open(lessons_file, os.O_WRONLY | os.O_APPEND)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(entry)
+    except FileNotFoundError:
+        return "error", _missing_lessons_file_error(project)
     except OSError as exc:
         return "error", format_io_error(exc, f"{project}/90-lessons.md", "write")
 
@@ -469,6 +485,16 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                         find,
                         rank_by,
                         max_lessons,
+                    )
+
+                # #431: refuse before either write mode, so batch mode spends
+                # no worker call on lessons it could not write anyway.
+                if not (project_dir / "90-lessons.md").exists():
+                    return track(
+                        ctx,
+                        "capture_lesson",
+                        _missing_lessons_file_error(project),
+                        project,
                     )
 
                 # ── Batch mode (worker extraction) ──

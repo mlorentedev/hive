@@ -1,10 +1,12 @@
 ---
 id: "HIVE-119-tool-param-aliases"
 type: spec
-status: draft # draft | implementing | verifying | archived
+status: archived # draft | implementing | verifying | archived
 created: "2026-05-31"
 tags: [spec, proposal]
 template_version: "1.0"
+review: waived
+review_waived_reason: "Shipped in hive#152 (merged 2026-05-31), which closed hive#151: all four aliases in the What table are live (subpath in _vault_read.py, old_string/new_string in _vault_write.py, regex and identifier in _vault_read.py) and tests/test_tool_param_aliases.py covers them. The spec folder landed in that same PR and its task boxes were never ticked, which is bookkeeping, not missing work. A retroactive review cannot be signed here: hive declares no reviewer pool. Swept under mlorentedev/dotfiles#1626."
 ---
 
 # HIVE-119-tool-param-aliases
@@ -62,3 +64,5 @@ Observable outcomes. Each must be testable.
 - GitHub issue: [#151](https://github.com/mlorentedev/hive/issues/151)
 - Related patterns: `00_meta/patterns/pattern-mcp-tool-design.md` (the `| None` ban / schema-clean rule)
 - Related: `.claude/CLAUDE.md` "MCP tool schema rules (load-bearing)"
+
+<!-- archived 2026-09-23 — PR: https://github.com/mlorentedev/hive/pull/152 -->

@@ -304,9 +304,9 @@ capture_lesson(
 )
 ```
 
-**Modo inline** (sin `text`, sin `find`): Agrega una entrada estructurada a `90-lessons.md` con fecha, contexto, problema y solución. Crea el archivo con frontmatter si no existe. Deduplicación por título. Auto-commit a git. Cada inline write también siembra una fila baseline en la tabla de refuerzo a `confidence=0.7`.
+**Modo inline** (sin `text`, sin `find`): Agrega una entrada estructurada a `90-lessons.md` con fecha, contexto, problema y solución. Nunca crea el archivo: si el proyecto no tiene `90-lessons.md` no escribe nada y devuelve un error que indica dónde va la lección — el `docs/lessons/` del repositorio para un proyecto que movió allí sus lecciones, `00_meta/patterns/` para una lección entre proyectos. Deduplicación por título. Auto-commit a git. Cada inline write también siembra una fila baseline en la tabla de refuerzo a `confidence=0.7`.
 
-**Modo por lotes** (`text` proporcionado): Envía el texto a un modelo worker (Ollama/OpenRouter) que extrae lecciones estructuradas (título, contexto, problema, solución, tags, confianza). Las lecciones por encima del umbral de confianza se escriben en `90-lessons.md` con deduplicación y se siembran en la tabla de refuerzo.
+**Modo por lotes** (`text` proporcionado): Envía el texto al modelo worker configurado, que extrae lecciones estructuradas (título, contexto, problema, solución, tags, confianza). Las lecciones por encima del umbral de confianza se escriben en `90-lessons.md` con deduplicación y se siembran en la tabla de refuerzo. La comprobación del archivo ausente se hace antes de llamar al worker, así que una captura rechazada no consume inferencia.
 
 **Modo look-up** (`find` proporcionado): Grepea headings de lecciones (consciente de bloques de código) por la palabra clave, rankea las coincidencias por `rank_by` (default `reinforcements`), incrementa cada lección surfaceada una vez, y devuelve las top `max_lessons`. Simetría tool-única: `capture_lesson` ESCRIBE lecciones Y las consulta.
 

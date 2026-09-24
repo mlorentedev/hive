@@ -99,7 +99,7 @@ capture_lesson(
 )
 ```
 
-The lesson is appended to the project's `90-lessons.md` with auto-generated frontmatter. If a lesson with the same title already exists, it's skipped (deduplication).
+The lesson is appended to the project's existing `90-lessons.md`; if the project has none, nothing is written and the error names where the lesson belongs. If a lesson with the same title already exists, it's skipped (deduplication).
 
 This is better than waiting until end-of-session retrospective — insights captured in the moment are more accurate and less likely to be forgotten.
 
