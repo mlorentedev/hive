@@ -99,7 +99,7 @@ capture_lesson(
 )
 ```
 
-La lección se agrega al `90-lessons.md` del proyecto con frontmatter auto-generado. Si ya existe una lección con el mismo título, se omite (deduplicación).
+La lección se agrega al `90-lessons.md` existente del proyecto; si no lo tiene, no se escribe nada y el error indica dónde va la lección. Si ya existe una lección con el mismo título, se omite (deduplicación).
 
 Esto es mejor que esperar a la retrospectiva de fin de sesión — los insights capturados en el momento son más precisos y es menos probable que se olviden.
 
