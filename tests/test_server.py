@@ -1232,12 +1232,13 @@ class TestCaptureLesson:
         lessons = (git_vault / "10_projects" / "testproject" / "90-lessons.md").read_text()
         assert lessons.count("Unique lesson XYZ") == 1
 
-    async def test_capture_creates_lessons_file_if_missing(self, git_vault: Path) -> None:
-        # Remove lessons file
-        lessons_file = git_vault / "10_projects" / "testproject" / "90-lessons.md"
-        lessons_file.unlink()
+    @staticmethod
+    def _remove_lessons_file(git_vault: Path) -> Path:
+        """Delete and commit testproject's 90-lessons.md, as a placement-model migration does."""
         import subprocess
 
+        lessons_file = git_vault / "10_projects" / "testproject" / "90-lessons.md"
+        lessons_file.unlink()
         subprocess.run(["git", "add", "."], cwd=git_vault, capture_output=True, check=True)
         subprocess.run(
             ["git", "commit", "-m", "remove lessons"],
@@ -1245,6 +1246,11 @@ class TestCaptureLesson:
             capture_output=True,
             check=True,
         )
+        return lessons_file
+
+    async def test_capture_refuses_when_lessons_file_missing(self, git_vault: Path) -> None:
+        """#431: a deleted 90-lessons.md means the lessons moved out; never recreate it."""
+        lessons_file = self._remove_lessons_file(git_vault)
 
         mcp = create_server(vault_path=git_vault)
         result = await mcp.call_tool(
@@ -1258,10 +1264,64 @@ class TestCaptureLesson:
                 "tags": ["new"],
             },
         )
-        assert "captured" in _text(result).lower()
-        assert lessons_file.exists()
-        content = lessons_file.read_text()
-        assert "First lesson" in content
+        text = _text(result)
+        assert "captured" not in text.lower()
+        assert "docs/lessons/" in text
+        assert "00_meta/patterns/" in text
+        assert not lessons_file.exists()
+
+    async def test_capture_batch_refuses_before_calling_worker(
+        self,
+        git_vault: Path,
+        worker_client: OpenAICompatibleClient,
+    ) -> None:
+        """#431: batch mode refuses up front, spending no worker call on unwritable lessons."""
+        lessons_file = self._remove_lessons_file(git_vault)
+        worker_client.generate = AsyncMock()  # type: ignore[method-assign]
+
+        mcp = create_server(vault_path=git_vault, worker_client=worker_client)
+        text = _text(
+            await mcp.call_tool(
+                "capture_lesson",
+                {"project": "testproject", "text": "some text to extract"},
+            )
+        )
+        assert "docs/lessons/" in text
+        worker_client.generate.assert_not_called()
+        assert not lessons_file.exists()
+        _close_server(mcp)
+
+    def test_write_lesson_never_creates_the_file(self, git_vault: Path) -> None:
+        """#431: the write point holds the invariant itself, not only the handler's pre-check."""
+        from hive._workers import _write_lesson
+
+        lessons_file = self._remove_lessons_file(git_vault)
+        status, msg = _write_lesson(
+            lessons_file.parent, "testproject", "T", "ctx", "prob", "sol", []
+        )
+        assert status == "error"
+        assert "docs/lessons/" in msg
+        assert not lessons_file.exists()
+
+    def test_write_lesson_does_not_recreate_a_file_deleted_mid_write(
+        self, git_vault: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """#431: a deletion between the existence check and the append still refuses."""
+        import hive._workers as workers
+
+        lessons_file = git_vault / "10_projects" / "testproject" / "90-lessons.md"
+
+        def delete_then_pass(**_kw: object) -> tuple[bool, str]:
+            lessons_file.unlink()
+            return False, ""
+
+        monkeypatch.setattr(workers, "check_lesson_recurrence", delete_then_pass)
+        status, msg = workers._write_lesson(
+            lessons_file.parent, "testproject", "T", "ctx", "prob", "sol", []
+        )
+        assert status == "error"
+        assert "docs/lessons/" in msg
+        assert not lessons_file.exists()
 
     async def test_capture_rejects_unknown_project(self, mock_vault: Path) -> None:
         mcp = create_server(vault_path=mock_vault)

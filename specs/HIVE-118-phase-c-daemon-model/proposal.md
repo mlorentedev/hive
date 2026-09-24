@@ -5,9 +5,12 @@ status: implementing # draft | implementing | verifying | archived
 created: "2026-05-29"
 tags: [spec, proposal]
 template_version: "1.0"
+issue: "hive#176"   # repo#NNN — GitHub issue / Project item that tracks this spec
 ---
 
 # HIVE-118: Phase C daemon model
+
+> **Tracking named 2026-09-23: hive#176.** This spec had no issue link. Its exit criterion, auto-activating the daemon on every machine, is hive#176, which is open, so the spec stays active and now names it. Found by the zombie-spec sweep, mlorentedev/dotfiles#1626.
 
 > **Naming**: file lives at `<repo>/specs/HIVE-118-phase-c-daemon-model/proposal.md`.
 

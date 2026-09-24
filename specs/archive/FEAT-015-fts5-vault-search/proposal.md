@@ -1,10 +1,12 @@
 ---
 id: FEAT-015-fts5-vault-search
 type: proposal
-status: active
+status: archived
 created: "2026-08-17"
 owner: manu
 tags: [search, fts5, sqlite, mcp, optimization]
+review: waived
+review_waived_reason: "Shipped in hive#381 (merged 2026-08-18), which closed hive#380; tests/test_fts.py covers the index and the BM25 ranking, and every task is ticked. A retroactive review cannot be signed in this repository: hive declares no reviewer pool (harness/reviewer-pool.json), so no signature could pass the pool check. Swept under mlorentedev/dotfiles#1626."
 ---
 
 # Proposal: FEAT-015 — SQLite FTS5 Index & BM25 Ranking for `vault_search`
@@ -46,3 +48,5 @@ By embedding a zero-dependency SQLite FTS5 index with WAL mode in `hive`, all AI
 - [ ] **AC5 — Incremental Auto-Sync:** Writing or patching a note via `vault_write` / `vault_patch` immediately updates the FTS index.
 - [ ] **AC6 — Safe Fallback:** If SQLite FTS is disabled or errors, `vault_search` falls back to linear scan without crashing.
 - [ ] **AC7 — Comprehensive Tests:** Full test suite in `tests/test_fts.py` with 100% pass rate.
+
+<!-- archived 2026-09-23 — PR: https://github.com/mlorentedev/hive/pull/381 -->
