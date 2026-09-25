@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Read [`AGENTS.md`](../AGENTS.md) first.** It is the cross-agent SSOT for this repo and carries the hive-specific content that used to live here: the MCP-server architecture + module table, the load-bearing MCP tool schema rules, the `_compat.py` cancellation shim, the worker routing order, the Makefile commands (and single-test fallback), configuration, the i18n docs-site rule, and the PR workflow. `AGENTS.md` in turn delegates the behavioural SSOT (Identity, Standing Orders, Decision Hierarchy, Model Selection, Neural Hive protocol, MCP usage rules, Spec-Driven Development gate) to the canonical dotfiles `AGENTS.md`.
+> **Read [`AGENTS.md`](../AGENTS.md) first.** It is the cross-agent SSOT for this repo and carries the hive-specific content that used to live here: the MCP-server architecture + module table, the load-bearing MCP tool schema rules, the MCP-major decision and the cancel-race guard, the worker routing order, the Makefile commands (and single-test fallback), configuration, the i18n docs-site rule, and the PR workflow. `AGENTS.md` in turn delegates the behavioural SSOT (Identity, Standing Orders, Decision Hierarchy, Model Selection, Neural Hive protocol, MCP usage rules, Spec-Driven Development gate) to the canonical dotfiles `AGENTS.md`.
 >
 > This file overlays only Claude Code-specific notes on top of `AGENTS.md`.
 

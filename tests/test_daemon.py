@@ -383,10 +383,18 @@ def test_hive_serve_rejects_bad_token(daemon_env: tuple[dict[str, str], Path]) -
     try:
         assert _wait_ready(port)
         # A bad bearer token is refused at the transport with HTTP 401 — not a
-        # generic failure. Asserting the status distinguishes auth refusal from
-        # an unrelated server error (which would surface a different code).
-        with pytest.raises(httpx.HTTPStatusError, match="401"):
-            asyncio.run(_list_tools(f"http://{HOST}:{port}/mcp", "not-the-token"))
+        # generic failure. Assert the status on the wire rather than through an
+        # MCP client: mcp 2.x wraps it in MCPError, 1.x raised HTTPStatusError,
+        # and neither wrapping is the property under test.
+        resp = httpx.post(
+            f"http://{HOST}:{port}/mcp",
+            headers={
+                "Authorization": "Bearer not-the-token",
+                "Accept": "application/json, text/event-stream",
+            },
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+        )
+        assert resp.status_code == 401, f"bad token not refused: {resp.status_code}"
     finally:
         proc.terminate()
         try:

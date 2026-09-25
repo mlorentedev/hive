@@ -4,8 +4,8 @@
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-install: ## Create venv and install deps
-	uv venv && uv pip install -e ".[dev]"
+install: ## Create venv and install the locked deps
+	uv sync --extra dev
 
 lint: ## Run ruff linter + formatter check
 	uv run ruff check src/ tests/

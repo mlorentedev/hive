@@ -1,52 +1,28 @@
-"""Compatibility shim for an upstream MCP library cancellation race.
+"""Ghost-response counter surfaced by ``vault_health``.
 
-This module monkey-patches ``mcp.shared.session.RequestResponder.respond``
-to keep the stdio receive loop alive when a response is produced *after*
-the request has already been cancelled.
+A *ghost response* is a tool result that never reached the client although
+the handler ran, so the disk state may have changed even though the client
+saw a cancellation or a timeout (ADR-007 Amendment #2). The counter makes
+those events visible as ``vault_health.ghost_responses``.
 
-When a handler finishes (or a late worker thread responds) *after* the
-client has already sent ``notifications/cancelled`` — so ``_completed``
-is True — the upstream assertion ``assert not self._completed`` fires in
-``RequestResponder.respond``, propagates to the receive loop's
-``anyio.create_task_group()``, and kills the server with
-``AssertionError('Request already responded to')``. Subsequent calls
-from any session sharing the process get ``Connection closed``. The
-patched ``respond`` short-circuits silently in exactly that state and
-records the event on :data:`GHOST_RESPONSES` (see below). Tracked
-upstream at modelcontextprotocol/python-sdk#2416 (open on ``mcp`` 1.27.x).
-
-hive is unusually exposed to this race: a tool that offloads sync work
-to a worker thread can call ``respond()`` *late*, after a cancel.
-
-The patch is self-gated to the exact failure mode (responder already
-``_completed``) so it becomes inert if upstream guards ``respond()``.
-If ``RequestResponder`` is renamed/removed in a future ``mcp`` release,
-``apply()`` logs a warning and returns without touching anything.
-
-History: a companion ``__exit__`` patch (hive issue #75; upstream
-modelcontextprotocol/python-sdk#2610, fix proposed in the still-open
-PR #2624) was removed once we confirmed the issue-#75 symptom no longer
-reproduces on the pinned ``mcp`` (>=1.27): ``Server._handle_request``
-catches the in-flight handler cancellation (``except
-anyio.get_cancelled_exc_class(): ... return`` when ``message.cancelled``)
-before it can reach ``RequestResponder.__exit__``, masking the leak
-regardless of whether #2610/#2624 land. Empirically re-validated on
-``mcp`` 1.27.2; ``tests/test_transport_recovery.py`` guards
-cross-platform against a regression in that masking behaviour.
+Until #434 this module also monkey-patched the private
+``mcp.shared.session.RequestResponder.respond``: on mcp 1.x a response
+produced after its request was cancelled tripped
+``assert not self._completed`` and killed the server
+(modelcontextprotocol/python-sdk#2416). hive now requires mcp 2.x, whose
+dispatcher never answers a cancelled request, so the patch is gone;
+``tests/test_cancel_race.py`` guards the behaviour it provided. Where the
+counter should live, and what should feed its ``cancellation`` source on
+2.x, is #442.
 """
 
 from __future__ import annotations
 
-import logging
 import threading
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Literal
 
 GhostSource = Literal["cancellation", "deadline"]
-
-_log = logging.getLogger(__name__)
-
-_PATCH_APPLIED_ATTR = "_hive_cancellation_patch_applied"
 
 
 class _GhostResponseCounter:
@@ -80,11 +56,10 @@ class _GhostResponseCounter:
         ``source`` discriminates the trigger so operators can break down
         the metric in ``vault_health.ghost_responses.by_source``:
 
-        - ``"cancellation"`` — client sent ``notifications/cancelled``
-          and ``RequestResponder.cancel()`` already wrote an ``ErrorData``
-          to the wire; our late success would be a duplicate response
-          (the original race documented in ADR-007). Default for
-          ``_compat._patched_respond`` to preserve the prior contract.
+        - ``"cancellation"`` — recorded by the mcp 1.x respond-after-cancel
+          patch (ADR-007), removed in #434. On mcp 2.x the dispatcher drops
+          a cancelled request's late response itself, so nothing records
+          this source until #442 decides its replacement.
         - ``"deadline"`` — ``bounded_call`` enforced a hard deadline
           (HIVE-115 PR-3 / ADR-008); the worker thread completed past
           the deadline and we are silencing its late respond(). The
@@ -115,107 +90,3 @@ class _GhostResponseCounter:
 
 
 GHOST_RESPONSES = _GhostResponseCounter()
-
-
-def _make_patched_respond(original_respond: Any) -> Any:
-    async def _patched_respond(self: Any, response: Any) -> None:
-        """Suppress respond() when the responder was cancelled mid-flight.
-
-        When the client has already sent ``notifications/cancelled``,
-        the upstream ``RequestResponder.cancel()`` synchronously writes
-        an ``ErrorData`` frame to the wire (empirically observed in
-        20/20 race iterations on Linux — see ADR-007 §1 Amendment #2
-        and ``tests/test_compat_shim.py::test_classify_cancellation_race``).
-        Our late success here would create a duplicate response under the
-        same ``request_id``, which some MCP clients treat as a protocol
-        error. So we silently drop the late response.
-
-        Semantic mismatch: the client receives an ErrorData ack but the
-        disk state may already be mutated by the handler that ran to
-        completion. The ack does NOT imply rollback. Correct client
-        behavior is to verify state via ``vault_query`` rather than
-        retry the operation.
-
-        Observability: every suppression bumps the module-level
-        :data:`GHOST_RESPONSES` counter and emits a WARNING log line
-        with the literal prefix
-        ``mcp.ghost_response.suppressed_after_cancel_ack`` so operators
-        can correlate user-visible "ghost response" reports with server
-        events.
-        """
-        if not self._entered:
-            raise RuntimeError(
-                "RequestResponder must be used as a context manager",
-            )
-        if self._completed:
-            tool = _tool_name_from_responder(self)
-            GHOST_RESPONSES.record(tool)
-            _log.warning(
-                "mcp.ghost_response.suppressed_after_cancel_ack "
-                "request_id=%s tool=%s — disk state may be mutated; "
-                "verify via vault_query, do not retry.",
-                self.request_id,
-                tool or "<unknown>",
-            )
-            return
-        await original_respond(self, response)
-
-    return _patched_respond
-
-
-def _tool_name_from_responder(responder: Any) -> str | None:
-    """Best-effort extraction of the tool name from a RequestResponder.
-
-    The MCP ``RequestResponder`` carries the original request as
-    ``self.request`` (a ``ClientRequest`` union). For tool calls, the
-    inner model's ``params`` has a ``name`` attribute. The chain may
-    differ across mcp versions, so every dereference is guarded — on
-    any miss we return ``None`` and the counter records the event
-    without a tool label.
-    """
-    try:
-        request = getattr(responder, "request", None)
-        if request is None:
-            return None
-        root = getattr(request, "root", request)
-        params = getattr(root, "params", None)
-        name = getattr(params, "name", None)
-        return name if isinstance(name, str) else None
-    except Exception:
-        return None
-
-
-def apply() -> None:
-    """Apply the respond-after-cancel patch to ``RequestResponder.respond``.
-
-    Idempotent and best-effort: if the upstream API has shifted such
-    that the patch cannot be applied safely, log a warning and return.
-    """
-    try:
-        from mcp.shared.session import RequestResponder
-    except ImportError as exc:
-        _log.warning(
-            "Could not import mcp.shared.session.RequestResponder — "
-            "respond-after-cancel patch skipped (#2416): %s",
-            exc,
-        )
-        return
-
-    if getattr(RequestResponder, _PATCH_APPLIED_ATTR, False):
-        return
-
-    if hasattr(RequestResponder, "respond"):
-        original_respond = RequestResponder.respond
-        RequestResponder.respond = _make_patched_respond(  # type: ignore[method-assign]
-            original_respond,
-        )
-        setattr(RequestResponder, _PATCH_APPLIED_ATTR, True)
-        _log.debug(
-            "Applied RequestResponder.respond patch (respond-after-cancel, #2416)",
-        )
-    else:
-        _log.warning(
-            "RequestResponder has no respond — respond-after-cancel patch "
-            "skipped (#2416). Server may crash with AssertionError if a "
-            "handler completes after a client cancellation.",
-        )

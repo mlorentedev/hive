@@ -279,9 +279,8 @@ def test_ghost_responses_record_backcompat_no_source() -> None:
 
     snap = GHOST_RESPONSES.snapshot()
     assert snap["total"] == 1
-    # Default source = "cancellation" (matches current behaviour of
-    # ``_compat._patched_respond``; that callsite is the only existing
-    # producer prior to PR-3).
+    # Default source = "cancellation", the contract the removed mcp 1.x
+    # respond-after-cancel patch relied on (#434).
     assert snap["by_source"] == {"cancellation": 1}
 
 
