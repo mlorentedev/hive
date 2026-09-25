@@ -1,12 +1,11 @@
 # Dependabot — weekly grouped updates; minor/patch batched, majors isolated.
 #
 # Rationale (HIVE-115 follow-up, 2026-05-22):
-# - We pin ``mcp >= 1.27, < 3.0`` in pyproject.toml because
-#   src/hive/_compat.py monkey-patches private internals of
-#   mcp.shared.session.RequestResponder (upstream tracker:
-#   modelcontextprotocol/python-sdk#2416). Dependabot's `ignore`
-#   block below keeps it from trying to lift that cap automatically;
-#   any mcp bump must be a deliberate code review against the shim.
+# - mcp and fastmcp are bounded to one audited major each in
+#   pyproject.toml (mcp >=2.2,<3; fastmcp >=4,<5 — #434). The `ignore`
+#   block below skips major *version* PRs, but it does NOT stop a
+#   requirement-range widening: that got through twice (#316, #369).
+#   tests/test_dependency_bounds.py is the guard that fails on it.
 # - Grouping routine bumps per ecosystem per week avoids the
 #   "20 stale Dependabot PRs" noise pattern. Pairs with
 #   release-please for ergonomic batch merges.
@@ -70,10 +69,9 @@ updates:
         update-types:
           - "major"
     ignore:
-      # _compat.py patches mcp internals; major bumps must be reviewed
-      # by hand against tests/test_compat_shim.py. Track upstream at
-      # modelcontextprotocol/python-sdk#2416 (NOT #2610 — the __exit__
-      # patch for that one was removed; see hive#127 and hive#336).
+      # A new mcp major is audited by hand: run tests/test_cancel_race.py
+      # and the full suite on it, then move the bounds in pyproject.toml
+      # and tests/test_dependency_bounds.py together (#434).
       - dependency-name: "mcp"
         update-types:
           - "version-update:semver-major"

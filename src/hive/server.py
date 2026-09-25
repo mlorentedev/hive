@@ -11,11 +11,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from hive import _compat as _hive_compat
-
-_hive_compat.apply()
-
-from fastmcp import FastMCP  # noqa: E402
+from fastmcp import FastMCP
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -25,10 +21,10 @@ if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.responses import Response
 
-from hive._commit_queue import CommitReconciler  # noqa: E402
-from hive._context import ServerContext  # noqa: E402
-from hive._diagnostics import LifecycleMiddleware  # noqa: E402
-from hive._helpers import (  # noqa: E402
+from hive._commit_queue import CommitReconciler
+from hive._context import ServerContext
+from hive._diagnostics import LifecycleMiddleware
+from hive._helpers import (
     _clean_stale_wal_files,
     _default_scopes,
     _resolve_file,
@@ -38,24 +34,24 @@ from hive._helpers import (  # noqa: E402
     vault_git_startup_warning,
     vault_startup_warning,
 )
-from hive._idempotency import IdempotencyStore  # noqa: E402
-from hive._lesson_reinforcement import LessonReinforcementTracker  # noqa: E402
-from hive._lock_eviction import LockEvictionTracker  # noqa: E402
-from hive._metrics import METRICS  # noqa: E402
-from hive._vault_ask import register_vault_ask  # noqa: E402
-from hive._vault_health import (  # noqa: E402
+from hive._idempotency import IdempotencyStore
+from hive._lesson_reinforcement import LessonReinforcementTracker
+from hive._lock_eviction import LockEvictionTracker
+from hive._metrics import METRICS
+from hive._vault_ask import register_vault_ask
+from hive._vault_health import (
     _hive_version,
     health_report_text,
     register_vault_health,
 )
-from hive._vault_read import list_projects_text, register_vault_read  # noqa: E402
-from hive._vault_write import register_vault_write  # noqa: E402
-from hive._workers import register_workers  # noqa: E402
-from hive.budget import BudgetTracker  # noqa: E402
-from hive.clients import OpenAICompatibleClient  # noqa: E402
-from hive.config import settings  # noqa: E402
-from hive.relevance import RelevanceTracker  # noqa: E402
-from hive.usage import UsageTracker  # noqa: E402
+from hive._vault_read import list_projects_text, register_vault_read
+from hive._vault_write import register_vault_write
+from hive._workers import register_workers
+from hive.budget import BudgetTracker
+from hive.clients import OpenAICompatibleClient
+from hive.config import settings
+from hive.relevance import RelevanceTracker
+from hive.usage import UsageTracker
 
 
 def _status_payload(ctx: ServerContext) -> dict[str, Any]:

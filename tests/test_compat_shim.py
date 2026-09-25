@@ -1,304 +1,35 @@
-"""Empirical classifier for the cancellation-race in ``_compat._patched_respond``.
+"""The ghost-response counter in ``hive._compat`` (ADR-007 Amendment #2).
 
-Resolves the [BLOCKING] risk in
-``specs/HIVE-104-write-throughput/proposal.md`` (Risk #1).
-
-The question: when the client sends ``notifications/cancelled`` while a
-``tools/call`` handler is still running, what actually reaches the wire?
-
-- **(a) ErrorData wins** — ``RequestResponder.cancel()`` calls
-  ``_send_response(ErrorData)`` at session.py:148-150 BEFORE our
-  ``_compat._patched_respond`` fires. If the cancellation ack reaches the
-  writer, our handler's late success would create a DUPLICATE response
-  sharing the same ``request_id``. Some MCP clients treat that as a
-  protocol error.
-- **(b) Our success wins** — anyio scope cancellation kills the
-  ``cancel()`` send mid-flight before it flushes. Only our late success
-  reaches the wire. This is what ADR-007's original "best-effort raw send"
-  plan assumed.
-- **(c) Both lost** — both sends are cancelled. Wire silent. Status quo
-  with our current silent-suppress.
-
-We classify by spawning a real hive subprocess (mirroring the pattern in
-``test_transport_recovery.py``), driving the race N times, and inspecting
-the JSON-RPC frames per iteration.
+The mcp 1.x respond-after-cancel patch that used to live beside it is gone
+(#434); ``tests/test_cancel_race.py`` guards the behaviour it provided.
+Counter state is reset around every test by the autouse
+``_reset_ghost_response_counter`` fixture in ``conftest.py``.
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
-import os
-import sys
-from asyncio import create_subprocess_exec as _spawn_subprocess
-from asyncio.subprocess import PIPE
-from typing import TYPE_CHECKING
-
-import pytest
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from hive import _compat as _hc
 
 
-_INIT_MSG: dict[str, object] = {
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "initialize",
-    "params": {
-        "protocolVersion": "2024-11-05",
-        "capabilities": {},
-        "clientInfo": {"name": "hive-104-classifier", "version": "0.0.0"},
-    },
-}
-
-_INITIALIZED: dict[str, object] = {
-    "jsonrpc": "2.0",
-    "method": "notifications/initialized",
-    "params": {},
-}
-
-
-async def _send(proc: asyncio.subprocess.Process, payload: dict[str, object]) -> None:
-    assert proc.stdin is not None
-    proc.stdin.write((json.dumps(payload) + "\n").encode("utf-8"))
-    await proc.stdin.drain()
-
-
-async def _drain_with_id(
-    proc: asyncio.subprocess.Process,
-    target_id: int,
-    timeout: float = 2.0,
-) -> list[dict[str, object]]:
-    """Drain stdout up to ``timeout`` seconds, collecting all messages whose ``id`` matches."""
-    assert proc.stdout is not None
-    msgs: list[dict[str, object]] = []
-    loop = asyncio.get_event_loop()
-    deadline = loop.time() + timeout
-    while True:
-        remaining = deadline - loop.time()
-        if remaining <= 0:
-            return msgs
-        try:
-            line = await asyncio.wait_for(proc.stdout.readline(), timeout=remaining)
-        except TimeoutError:
-            return msgs
-        if not line:
-            return msgs
-        try:
-            msg = json.loads(line.decode("utf-8"))
-        except json.JSONDecodeError:
-            continue
-        if msg.get("id") == target_id:
-            msgs.append(msg)
-
-
-async def _spawn(vault: Path, db_dir: Path) -> asyncio.subprocess.Process:
-    env = os.environ.copy()
-    env["VAULT_PATH"] = str(vault)
-    env["HIVE_LOG_PATH"] = str(db_dir / "hive.log")
-    env["HIVE_DB_PATH"] = str(db_dir / "worker.db")
-    env["HIVE_RELEVANCE_DB_PATH"] = str(db_dir / "relevance.db")
-    env["HIVE_LESSON_DB_PATH"] = str(db_dir / "lesson_reinforcement.db")
-    env["HIVE_LOG_LEVEL"] = "DEBUG"
-    proc = await _spawn_subprocess(
-        sys.executable,
-        "-m",
-        "hive.server",
-        stdin=PIPE,
-        stdout=PIPE,
-        stderr=PIPE,
-        env=env,
-    )
-    await _send(proc, _INIT_MSG)
-    assert proc.stdout is not None
-    while True:
-        line = await asyncio.wait_for(proc.stdout.readline(), timeout=15.0)
-        if not line:
-            raise RuntimeError("server closed stdout during init")
-        msg = json.loads(line.decode("utf-8"))
-        if msg.get("id") == 1:
-            break
-    await _send(proc, _INITIALIZED)
-    return proc
-
-
-async def _shutdown(proc: asyncio.subprocess.Process) -> None:
-    if proc.stdin is not None and not proc.stdin.is_closing():
-        proc.stdin.close()
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=5)
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
-
-
-def _classify(messages: list[dict[str, object]]) -> tuple[str, str]:
-    """Map collected messages to scenario (a/b/c/?)."""
-    if len(messages) == 0:
-        return ("c", "no response observed — both sends lost to anyio cancellation")
-    if len(messages) >= 2:
-        kinds = [("error" if "error" in m else "result") for m in messages]
-        return ("a+", f"DUPLICATE responses ({len(messages)} frames, kinds={kinds})")
-    [msg] = messages
-    if "error" in msg:
-        err = msg["error"]
-        code = err.get("code") if isinstance(err, dict) else None
-        return ("a", f"single ErrorData (code={code}) — cancel ack reached wire")
-    if "result" in msg:
-        return ("b", "single success result — our handler's response delivered")
-    return ("?", f"unrecognized frame shape: {msg!r}")
-
-
-@pytest.mark.skipif(
-    False,
-    reason="Re-enabled on all platforms as part of HIVE-116 PR-3 cross-OS CI lane",
-)
-@pytest.mark.asyncio
-@pytest.mark.diagnostic
-async def test_classify_cancellation_race(tmp_path: Path) -> None:
-    """Drive cancellation race N times against a real hive subprocess; report scenario distribution.
-
-    This is NOT a pass/fail correctness test — it is an empirical classifier
-    whose output dictates the Fase C design in HIVE-104. The assertion at the
-    end only verifies all iterations were accounted for.
-    """
-    vault = tmp_path / "vault"
-    vault.mkdir()
-    (vault / "10_projects").mkdir()
-    (vault / "00_meta").mkdir()
-    (vault / "50_work").mkdir()
-    db_dir = tmp_path / "db"
-    db_dir.mkdir()
-
-    iterations = 20
-    counts: dict[str, int] = {"a": 0, "a+": 0, "b": 0, "c": 0, "?": 0}
-    samples: dict[str, tuple[int, str, list[dict[str, object]]]] = {}
-
-    proc = await _spawn(vault, db_dir)
-    try:
-        for i in range(iterations):
-            call_id = 100 + i
-            await _send(
-                proc,
-                {
-                    "jsonrpc": "2.0",
-                    "id": call_id,
-                    "method": "tools/call",
-                    "params": {"name": "vault_list", "arguments": {}},
-                },
-            )
-            await _send(
-                proc,
-                {
-                    "jsonrpc": "2.0",
-                    "method": "notifications/cancelled",
-                    "params": {"requestId": call_id, "reason": "race-classifier"},
-                },
-            )
-            msgs = await _drain_with_id(proc, call_id, timeout=2.0)
-            scenario, detail = _classify(msgs)
-            counts[scenario] = counts.get(scenario, 0) + 1
-            if scenario not in samples:
-                samples[scenario] = (i, detail, msgs)
-    finally:
-        await _shutdown(proc)
-
-    n = iterations
-    print("\n" + "=" * 70)
-    print(f"HIVE-104 cancellation-race classifier (N={n})")
-    print("=" * 70)
-    print(f"  (a)  ErrorData wins (cancel ack delivered):    {counts['a']}/{n}")
-    print(f"  (a+) DUPLICATE responses (both delivered):     {counts['a+']}/{n}")
-    print(f"  (b)  Our success wins (cancel ack mid-flight): {counts['b']}/{n}")
-    print(f"  (c)  Both lost (silent):                       {counts['c']}/{n}")
-    print(f"  (?)  Unknown frame shape:                      {counts['?']}/{n}")
-    print("\nFirst observed sample per scenario:")
-    for sc, (idx, detail, msgs) in samples.items():
-        print(f"\n  [{sc}] iter={idx} — {detail}")
-        for j, m in enumerate(msgs[:2]):
-            print(f"      frame[{j}]: {json.dumps(m)[:250]}")
-    print("=" * 70)
-
-    total = sum(counts.values())
-    assert total == iterations, f"lost iterations: total={total}, expected={iterations}"
-
-
-# ── Fase C: observable suppression counter ─────────────────────────────
-#
-# Counter state is reset around every test by the autouse
-# ``_reset_ghost_response_counter`` fixture in ``conftest.py``.
-
-
-class _FakeResponder:
-    """Minimal stand-in for mcp.shared.session.RequestResponder.
-
-    The shim only reads ``_entered``, ``_completed`` and ``request_id``;
-    everything else upstream is irrelevant for the suppression path.
-    """
-
-    def __init__(self, request_id: int = 7, *, completed: bool = True) -> None:
-        self._entered = True
-        self._completed = completed
-        self.request_id = request_id
-
-
-@pytest.mark.asyncio
-async def test_ghost_response_counter_records_and_logs(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Suppressed late respond() emits WARNING and increments counter."""
-    import logging
-
-    from hive import _compat as _hc
-
-    async def _noop_original(self: object, response: object) -> None:
-        raise AssertionError("original respond should not be called")
-
-    patched = _hc._make_patched_respond(_noop_original)
-    responder = _FakeResponder(request_id=42, completed=True)
-
-    with caplog.at_level(logging.WARNING, logger="hive._compat"):
-        await patched(responder, response=object())
+def test_record_counts_by_source_and_keeps_the_last_tool() -> None:
+    _hc.GHOST_RESPONSES.record(tool="vault_write", source="deadline")
+    _hc.GHOST_RESPONSES.record(source="cancellation")
 
     snap = _hc.GHOST_RESPONSES.snapshot()
-    assert snap["total"] == 1
-    assert snap["last_tool"] is None or isinstance(snap["last_tool"], str)
+    assert snap["total"] == 2
+    assert snap["last_tool"] == "vault_write"
     assert isinstance(snap["last_seen"], str)
-    assert any(
-        "mcp.ghost_response.suppressed_after_cancel_ack" in rec.message for rec in caplog.records
-    ), [r.message for r in caplog.records]
-
-
-@pytest.mark.asyncio
-async def test_ghost_response_counter_passes_through_when_not_completed() -> None:
-    """Not-yet-completed responder must call original respond — no count bump."""
-    from hive import _compat as _hc
-
-    seen: list[object] = []
-
-    async def _capture(self: object, response: object) -> None:
-        seen.append(response)
-
-    patched = _hc._make_patched_respond(_capture)
-    responder = _FakeResponder(request_id=1, completed=False)
-
-    payload = object()
-    await patched(responder, response=payload)
-
-    assert seen == [payload]
-    assert _hc.GHOST_RESPONSES.snapshot()["total"] == 0
+    assert snap["by_source"] == {"deadline": 1, "cancellation": 1}
 
 
 def test_ghost_response_snapshot_defaults_empty() -> None:
     """Fresh counter snapshot has total=0, null last_* fields, empty by_source.
 
     ``by_source`` was added by HIVE-115 PR-3 to discriminate the
-    ``cancellation`` (existing) vs ``deadline`` (new, bounded_call-driven)
-    triggers. An empty dict on a fresh counter preserves the read contract
-    for clients that only look at ``total``.
+    ``cancellation`` vs ``deadline`` (bounded_call-driven) triggers. An empty
+    dict on a fresh counter preserves the read contract for clients that only
+    look at ``total``.
     """
-    from hive import _compat as _hc
-
     snap = _hc.GHOST_RESPONSES.snapshot()
     assert snap == {
         "total": 0,

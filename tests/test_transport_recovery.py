@@ -19,19 +19,19 @@ catches the in-flight handler cancellation (``except
 anyio.get_cancelled_exc_class(): ... return`` when ``message.cancelled``)
 before it can reach ``RequestResponder.__exit__``. A *separate*
 respond-after-cancel race — the ``assert not self._completed`` in
-``RequestResponder.respond`` (#2416), which #2624 does not touch — is
-still patched in ``hive._compat`` and guarded by
-``tests/test_compat_shim.py``.
+``RequestResponder.respond`` (#2416) — was patched in ``hive._compat``
+until #434 moved to mcp 2.x, whose dispatcher has neither code path; it
+is guarded by ``tests/test_cancel_race.py``.
 
 These tests are the guard that lets us depend on the upstream behaviour
 instead of the workaround:
 
 * ``TestInMemoryCancellation`` cancels at the in-process FastMCP
   boundary — fast, every platform.
-* ``TestProtocolLevelCancellation`` drives a real lowlevel ``Server``
-  receive loop over in-memory streams and sends an actual
-  ``notifications/cancelled`` mid-handler — the same protocol path
-  issue #75 broke, deterministic and cross-platform.
+* ``TestProtocolLevelCancellation`` drives the real mcp dispatcher over
+  in-memory streams and sends an actual ``notifications/cancelled``
+  mid-handler — the same protocol path issue #75 broke, deterministic
+  and cross-platform.
 * ``TestSubprocessTransportRecovery`` drives a real stdio subprocess;
   closest reproduction but Windows-only (timing-sensitive on Linux CI).
 
@@ -48,18 +48,13 @@ import sys
 from typing import TYPE_CHECKING
 
 import anyio
-import mcp.types as types
 import pytest
-from mcp.server.lowlevel import Server
-from mcp.shared.exceptions import McpError
-from mcp.shared.memory import create_connected_server_and_client_session
+from fastmcp import Client, FastMCP
 
 from hive.server import create_server
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from fastmcp import FastMCP
 
 
 def _text(result: object) -> str:
@@ -227,53 +222,26 @@ class TestSubprocessTransportRecovery:
             await self._shutdown(proc)
 
 
-# ── Protocol-level cancellation (cross-platform, real receive loop) ────
+# ── Protocol-level cancellation (cross-platform, real dispatcher) ────
 
 
-class _CancellationProbe:
-    """Coordinates a deterministic mid-handler cancellation.
+def _build_cancellation_server(started: asyncio.Event, interrupted: asyncio.Event) -> FastMCP:
+    """One tool that blocks until the server interrupts it, one that returns at once."""
+    server = FastMCP("hive-cancellation-probe")
 
-    ``started`` is set by the blocking handler the instant it begins
-    executing — and only then does the test send the cancellation, so
-    the responder is guaranteed to be ``_entered`` (otherwise
-    ``RequestResponder.cancel`` would lose the cancellation against a
-    not-yet-entered scope). ``request_id`` is captured *server-side*, so
-    the test never has to guess the client's id sequence.
-    """
+    @server.tool
+    async def block() -> str:
+        started.set()
+        try:
+            await anyio.sleep_forever()
+        except anyio.get_cancelled_exc_class():
+            interrupted.set()
+            raise
+        return "unreachable"
 
-    def __init__(self) -> None:
-        self.started = asyncio.Event()
-        self.request_id: int | str | None = None
-
-
-def _build_cancellation_server(probe: _CancellationProbe) -> Server:
-    """A minimal lowlevel MCP server with one blocking and one fast tool."""
-    server: Server = Server("hive-cancellation-probe")
-    empty_schema = {"type": "object", "properties": {}}
-
-    @server.list_tools()
-    async def _list_tools() -> list[types.Tool]:
-        return [
-            types.Tool(
-                name="block",
-                description="Blocks until cancelled.",
-                inputSchema=empty_schema,
-            ),
-            types.Tool(
-                name="ping",
-                description="Returns immediately.",
-                inputSchema=empty_schema,
-            ),
-        ]
-
-    @server.call_tool()
-    async def _call_tool(name: str, arguments: dict[str, object]) -> list[types.ContentBlock]:
-        if name == "block":
-            # Capture the id first, then announce: the test reads both.
-            probe.request_id = server.request_context.request_id
-            probe.started.set()
-            await anyio.sleep_forever()  # cancelled via notifications/cancelled
-        return [types.TextContent(type="text", text="pong")]
+    @server.tool
+    def ping() -> str:
+        return "pong"
 
     return server
 
@@ -281,41 +249,33 @@ def _build_cancellation_server(probe: _CancellationProbe) -> Server:
 class TestProtocolLevelCancellation:
     """A real notifications/cancelled mid-handler must not poison the loop.
 
-    Cross-platform counterpart to the Windows-only subprocess test: it
-    drives the genuine lowlevel ``Server`` receive loop + task group over
-    in-memory streams, exercising the same path issue #75 broke. It now
-    relies on the upstream mcp cancel guard rather than hive's removed
-    ``__exit__`` workaround — if that guard regresses, this fails on every
+    Cross-platform counterpart to the Windows-only subprocess test. The
+    in-process client runs the genuine mcp 2.x dispatcher over memory
+    streams: abandoning ``call_tool`` sends an actual
+    ``notifications/cancelled`` (``cancel_on_abandon``), and the server's
+    default ``PeerCancelMode`` interrupts the handler. ``interrupted``
+    proves the notification crossed the protocol, not just the local task.
+    If a future ``mcp`` release regresses that path, this fails on every
     platform.
     """
 
     async def test_cancelled_handler_does_not_poison_transport(self) -> None:
-        probe = _CancellationProbe()
-        server = _build_cancellation_server(probe)
+        started = asyncio.Event()
+        interrupted = asyncio.Event()
+        server = _build_cancellation_server(started, interrupted)
 
-        async with create_connected_server_and_client_session(server) as client:
+        async with Client(server) as client:
             block_call = asyncio.create_task(client.call_tool("block", {}))
 
-            # Cancel only once the handler is provably in-flight.
-            await asyncio.wait_for(probe.started.wait(), timeout=5.0)
-            assert probe.request_id is not None
+            # Abandon only once the handler is provably in flight.
+            await asyncio.wait_for(started.wait(), timeout=5.0)
+            block_call.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await block_call
 
-            await client.send_notification(
-                types.ClientNotification(
-                    types.CancelledNotification(
-                        params=types.CancelledNotificationParams(
-                            requestId=probe.request_id,
-                            reason="user rejected",
-                        ),
-                    ),
-                ),
-            )
-
-            # The cancelled call surfaces as an MCP error, not a hang.
-            with pytest.raises(McpError):
-                await asyncio.wait_for(block_call, timeout=5.0)
+            await asyncio.wait_for(interrupted.wait(), timeout=5.0)
 
             # The transport must still serve subsequent calls.
             result = await asyncio.wait_for(client.call_tool("ping", {}), timeout=5.0)
-            assert result.isError is False
+            assert result.is_error is False
             assert _text(result) == "pong"

@@ -10,9 +10,8 @@ request when the log level is INFO or below. It does not buffer or
 serialise the payload.
 
 If the request handler raises ``CancelledError``, the middleware logs
-it explicitly and re-raises. The in-flight cancellation is then absorbed
-by ``mcp``'s own ``Server._handle_request`` guard; the residual
-respond-after-cancel race is handled by the patch in :mod:`hive._compat`.
+it explicitly and re-raises. The mcp 2.x dispatcher then drops the
+cancelled request without answering it (#434).
 """
 
 from __future__ import annotations
@@ -30,6 +29,11 @@ if TYPE_CHECKING:
     from fastmcp.server.middleware import CallNext
 
 _log = logging.getLogger(__name__)
+
+# The handshake that opens a session: ``initialize`` up to protocol revision
+# 2025-11-25, ``server/discover`` from 2026-07-28 on (mcp 2.x clients never
+# send ``initialize``, so counting only it reported zero sessions — #434).
+_SESSION_OPENERS = frozenset({"initialize", "server/discover"})
 
 
 class LifecycleMiddleware(Middleware):
@@ -72,7 +76,7 @@ class LifecycleMiddleware(Middleware):
         else:
             elapsed_ms = (time.monotonic() - start) * 1000
             _record(tool, elapsed_ms, ok=True)
-            if method == "initialize":
+            if method in _SESSION_OPENERS:
                 METRICS.record_session_start()
             _log.info(
                 "mcp ok method=%s tool=%s id=%s elapsed_ms=%.0f",

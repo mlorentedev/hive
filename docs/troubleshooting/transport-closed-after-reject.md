@@ -11,6 +11,8 @@ owner: manu
 
 # MCP transport disconnect after rejecting first tool call
 
+> **Superseded mechanism (2026-09-24, [#434](https://github.com/mlorentedev/hive/issues/434)):** hive now requires `mcp` 2.x, and the `src/hive/_compat.py` patches described below are gone. The 2.x dispatcher never answers a cancelled request, so neither failure mode can occur; `tests/test_cancel_race.py` and `tests/test_transport_recovery.py` guard that. The analysis below is kept as the record of the 1.x behaviour.
+
 ## Summary
 
 Rejecting the very first `mcp__hive__*` permission prompt in a fresh Claude Code conversation poisoned the transport for the rest of the conversation. Subsequent calls to any Hive tool returned `MCP error -32000: Connection closed` and then `No such tool available`. The server process stayed alive (`claude mcp list` reported it as connected), but the per-conversation handle was dead.

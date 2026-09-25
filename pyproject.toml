@@ -27,26 +27,24 @@ dependencies = [
     # fastmcp-slim under the shared `fastmcp/` namespace. A partial or
     # skewed upgrade across that split leaves importable-looking installs
     # missing real submodules — see #319.
-    # Cap at <4 so a deliberate review happens before adopting any new
-    # major release. Bump the lower bound when verifying a newer release.
-    # 3.3.1 and 3.4.6 audited 2026-08-06: full suite green on both.
-    "fastmcp>=3.3.1,<5",
+    # 4.x is the line built on mcp 2.x (see the mcp pin below); 3.x pulls
+    # mcp 1.x, which nothing patches any more. Bounds are asserted by
+    # tests/test_dependency_bounds.py, so moving to another major means
+    # auditing it and editing that test too (#434).
+    # 4.0.9 audited 2026-09-24: full suite green.
+    "fastmcp>=4,<5",
     "filelock>=3.13",
     "httpx>=0.27.0",
-    # Pinned because src/hive/_compat.py monkey-patches
-    # mcp.shared.session.RequestResponder.respond and reads the private
-    # attributes _completed and _entered. Any minor bump can rename
-    # these silently. Upstream tracker for the cancel-race the shim
-    # fixes:
-    # https://github.com/modelcontextprotocol/python-sdk/issues/2416
-    # Cap at <2.0 so a deliberate review happens before adopting
-    # any new major release. Bump the lower bound when verifying a
-    # newer release; bump the upper bound only after auditing the
-    # _compat shim against the new internals.
-    # 1.27.2 audited 2026-05-31: tests/test_compat_shim.py (incl. the
-    # real-subprocess cancel-race) passes — the patched RequestResponder
-    # internals are unchanged.
-    "mcp>=1.27,<3.0",
+    # 2.x on purpose (#434). On 1.x a response produced after its request
+    # was cancelled tripped `assert not self._completed` and killed the
+    # server (python-sdk#2416), and hive carried a monkey-patch for it. The
+    # 2.x dispatcher never answers a cancelled request, so no patch is
+    # needed, and the floor keeps 1.x out because nothing patches it now.
+    # Bounds are asserted by tests/test_dependency_bounds.py: Dependabot's
+    # semver-major ignore rule does not stop range widening (#316, #369).
+    # tests/test_cancel_race.py is the behavioural guard.
+    # 2.2.0 audited 2026-09-24: full suite green, cancel race 0/3 crashes.
+    "mcp>=2.2,<3",
     "psutil>=5.9.0",
     "pydantic-settings>=2.0",
     "pyyaml>=6.0",

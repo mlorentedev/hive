@@ -1,18 +1,13 @@
-"""Regression tests for the multi-process hang/crash fixes.
+"""Regression tests for the multi-process git contention fix.
 
-Two distinct bugs are covered:
+``_git_commit`` serialized only intra-process (``threading.Lock``).
+Multiple hive subprocesses (one per Claude Code session) competed on
+the same ``vault/.git/index.lock`` and triggered 30s subprocess
+timeouts. Fixed by an additional inter-process ``filelock`` under
+``vault/.git/hive.lock``.
 
-1. ``RequestResponder.respond`` raised ``AssertionError('Request already
-   responded to')`` when a handler completed *after* the client had
-   already sent ``notifications/cancelled``. The assertion propagated
-   to the stdio receive loop's task group and killed the server with
-   ``CRITICAL hive: hive server exiting``. Patched in ``hive._compat``.
-
-2. ``_git_commit`` serialized only intra-process (``threading.Lock``).
-   Multiple hive subprocesses (one per Claude Code session) competed on
-   the same ``vault/.git/index.lock`` and triggered 30s subprocess
-   timeouts. Fixed by an additional inter-process ``filelock`` under
-   ``vault/.git/hive.lock``.
+The respond-after-cancel crash these tests used to cover alongside it is
+guarded by ``tests/test_cancel_race.py`` since #434.
 """
 
 from __future__ import annotations
@@ -21,59 +16,10 @@ import multiprocessing as mp
 import subprocess
 from typing import TYPE_CHECKING
 
-import pytest
-
-import hive._compat as _hive_compat
 from hive._helpers import _git_commit
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-# ── Bug 2: respond() AssertionError after client cancellation ─────────
-
-
-_hive_compat.apply()
-
-
-class _FakeResponder:
-    """Minimal stand-in matching the attribute surface our patch reads.
-
-    Calling the patched ``respond`` against this object exercises the
-    ``self._completed`` short-circuit added by ``_compat._make_patched_respond``.
-    We don't go through the full ``mcp`` session because the bug is
-    purely in the assertion logic.
-    """
-
-    def __init__(self, *, entered: bool, completed: bool) -> None:
-        self._entered = entered
-        self._completed = completed
-        self.request_id = "test-req-123"
-
-
-class TestRespondPatchPreventsKill:
-    """The patched ``respond`` must not raise when ``_completed`` is True."""
-
-    async def test_respond_after_cancel_swallowed(self) -> None:
-        """Handler finishing after a cancel must not crash with AssertionError."""
-        from mcp.shared.session import RequestResponder
-
-        fake = _FakeResponder(entered=True, completed=True)
-        # The patched respond is bound to the class — call descriptor-style.
-        # Before the patch this would raise AssertionError('Request already
-        # responded to') and kill the receive loop's TaskGroup.
-        await RequestResponder.respond(fake, {"result": "late"})
-
-    async def test_respond_normal_path_still_requires_entered(self) -> None:
-        """If never entered, original RuntimeError still surfaces."""
-        from mcp.shared.session import RequestResponder
-
-        fake = _FakeResponder(entered=False, completed=False)
-        with pytest.raises(RuntimeError, match="context manager"):
-            await RequestResponder.respond(fake, {"result": "x"})
-
-
-# ── Bug 1: inter-process git contention ───────────────────────────────
 
 
 def _init_git_repo(repo: Path) -> None:

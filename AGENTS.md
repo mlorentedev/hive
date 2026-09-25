@@ -29,7 +29,7 @@ The package layout follows a deliberate split: `server.py` is a thin registratio
 | `src/hive/_vault_write.py` | `vault_write`, `vault_patch` (both auto-commit to git) |
 | `src/hive/_vault_health.py` | `vault_health` + health report builder |
 | `src/hive/_workers.py` | `capture_lesson`, `delegate_task`, `worker_status` |
-| `src/hive/_compat.py` | MCP cancellation shim — see "Compat shim" below |
+| `src/hive/_compat.py` | Ghost-response counter surfaced by `vault_health` — see "MCP major and the cancel race" below |
 | `src/hive/config.py` | `HiveSettings` (pydantic-settings, `HIVE_*` env vars) |
 | `src/hive/budget.py` | SQLite budget tracker ($1/mo default cap, WAL mode) |
 | `src/hive/clients.py` | Async HTTP client for any OpenAI-compatible `/v1` API (httpx) |
@@ -37,16 +37,15 @@ The package layout follows a deliberate split: `server.py` is a thin registratio
 | `src/hive/frontmatter.py` | YAML frontmatter parse/validate/generate |
 | `site/` | Astro + Starlight bilingual (EN/ES) docs site |
 
-### Compat shim (do not delete blindly)
+### MCP major and the cancel race
 
-`src/hive/_compat.py` monkey-patches `mcp.shared.session.RequestResponder.respond` so that a response produced *after* the request was cancelled short-circuits silently instead of tripping the upstream `assert not self._completed`. Without it, that assertion propagates into the receive loop's task group and kills the server with `AssertionError('Request already responded to')`; every subsequent call in the process then gets `Connection closed`. Hive is unusually exposed because a tool that offloads sync work (git) to a worker thread can call `respond()` late. The patch is self-gated to the exact state (responder already `_completed`) and `apply()` logs a warning and no-ops if the symbol is gone. Delete only after confirming the upstream fix has shipped.
+hive runs on **mcp 2.x / fastmcp 4.x on purpose** (#434): `pyproject.toml` has `mcp>=2.2,<3` and `fastmcp>=4,<5`, and `uv.lock` resolves mcp 2.2.0 / fastmcp 4.0.9.
 
-**Upstream tracker:** [modelcontextprotocol/python-sdk#2416](https://github.com/modelcontextprotocol/python-sdk/issues/2416) — open; maintainer-confirmed on `main` and `v1.x`, and a contributor volunteered to fix it on 2026-07-11.
-
-Two corrections worth carrying, because the stale versions of both are still quoted in places:
-
-- **The `__exit__` patch is gone.** A companion patch for [#2610](https://github.com/modelcontextprotocol/python-sdk/issues/2610) (hive issue #75) was removed once we confirmed that symptom no longer reproduces on `mcp >= 1.27`: `Server._handle_request` catches the in-flight cancellation before it can reach `RequestResponder.__exit__`. So this shim's fate is tied to **#2416**, not #2610, and #2610 already has an upstream fix PR ([#2624](https://github.com/modelcontextprotocol/python-sdk/pull/2624)) — writing another would duplicate it. [#127](https://github.com/mlorentedev/hive/issues/127) still describes the old premise.
-- **The pin guards the shim again — the note above it used not to.** `pyproject.toml` has `mcp>=1.27,<2.0`. #316 had widened it to `<3.0` while leaving the adjacent rationale untouched, so the file documented a guard it no longer had; #345 re-narrowed the cap and corrected that comment (#342). The cap matters because `_compat.py` patches a **private** method, `RequestResponder.respond`, and private internals carry no compatibility promise across a major release — `<3.0` admitted the whole 2.x line, precisely the boundary the cap exists to exclude. `apply()` degrading quietly is a real mitigation but the wrong one to lean on here: quiet degradation means the cancel-race crash returns with no failing build to announce it. `mcp` currently resolves to 1.28.1, comfortably inside the cap.
+- **Why the 1.x shim is gone.** On mcp 1.x, a response produced after its request was cancelled tripped `assert not self._completed` in `RequestResponder.respond`; the assertion reached the stdio receive loop's task group and killed the server, and every later call got `Connection closed` ([python-sdk#2416](https://github.com/modelcontextprotocol/python-sdk/issues/2416), still open for 1.x). hive monkey-patched that private method in `src/hive/_compat.py`. The 2.x dispatcher never answers a cancelled request, and the #2416 repro crashes 3/3 on 1.x and 0/3 on 2.x, so the patch was deleted rather than retargeted. The floors keep 1.x out, because nothing patches it any more.
+- **What guards it now.** `tests/test_cancel_race.py` drives hive's own server with an uncancellable sync tool and fails if a cancelled call is answered twice or the server stops answering; it fails on 1.x without the patch. `tests/test_dependency_bounds.py` fails if either bound leaves its audited major, and if the suite runs on a version outside it. Dependabot's `semver-major` ignore rule is **not** a guard: it does not stop requirement-range widening, which got through twice (#316, #369).
+- **CI installs from the lock.** `uv sync --locked --extra dev`, and `make install` runs `uv sync --extra dev`. The old `uv pip install -e .` resolved fresh from `pyproject.toml`, then the first `uv run` silently re-synced to `uv.lock`, so the install log showed mcp 2.2.0 while the tests ran on 1.28.1 (#434).
+- **Still open.** `_compat.py` keeps only `GHOST_RESPONSES`, which `vault_health` reports as `ghost_responses` (ADR-007). Its `deadline` source still fires; nothing records its `cancellation` source on 2.x. Where the counter lives and what feeds that source is a separate, spec'd change.
+- **2.x protocol notes.** A client on protocol revision 2026-07-28 opens with `server/discover` and never sends `initialize`, so anything keyed on `initialize` alone misses it (the daemon's `/status` session count did). `ToolAnnotations` takes snake_case fields (`read_only_hint`); the camelCase names are wire aliases.
 
 ### Worker routing order
 
@@ -85,7 +84,7 @@ These rules are not stylistic — violating them breaks the server in subtle, ha
 All routine commands go through the Makefile (uv-based):
 
 ```bash
-make install    # uv venv + uv pip install -e ".[dev]"
+make install    # uv sync --extra dev (installs exactly what uv.lock pins)
 make lint       # ruff check src/ tests/
 make typecheck  # mypy --strict src/
 make test       # pytest with coverage (smoke tests auto-excluded via addopts)

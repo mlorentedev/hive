@@ -201,31 +201,23 @@ claude mcp add -s user hive \
 
 **Síntoma:** En Claude Code (y probablemente otros hosts MCP), rechazar el primer prompt de permisos de `mcp__hive__*` envenena el transporte durante el resto de la conversación. Las llamadas siguientes a cualquier herramienta de Hive devuelven `MCP error -32000: Connection closed` y después `No such tool available`. Reiniciar la conversación lo soluciona, y `claude mcp list` sigue reportando el servidor como conectado a nivel de proceso.
 
-**Causa:** Una condición de carrera en el SDK Python `mcp` upstream alrededor de `mcp.shared.session.RequestResponder`. Cuando el cliente envía `notifications/cancelled` para una petición en vuelo, pueden dispararse dos modos de fallo:
+**Causa:** Una condición de carrera en el SDK Python `mcp` upstream **1.x**. Cuando el cliente cancela una petición en vuelo y el handler termina después, la llamada tardía a `RequestResponder.respond()` falla con `AssertionError("Request already responded to")`. La excepción escapa del receive loop del servidor y lo mata: el proceso sigue vivo pero deja de leer stdin ([upstream python-sdk#2416](https://github.com/modelcontextprotocol/python-sdk/issues/2416)). Un segundo modo de fallo, una `CancelledError` espuria desde `RequestResponder.__exit__` ([python-sdk#2610](https://github.com/modelcontextprotocol/python-sdk/issues/2610), [issue #75](https://github.com/mlorentedev/hive/issues/75)), dejó de reproducirse en `mcp` 1.27.
 
-1. El `CancelScope` de anyio del responder vuelve a lanzar un `CancelledError` después de que la respuesta de cancelación ya se haya enviado. Esa excepción espuria se propaga al `task_group` del receive loop del servidor y lo mata — el proceso sigue vivo pero deja de leer stdin.
-2. El handler termina *después* de que el cliente ya haya enviado la cancelación, y la llamada tardía a `RequestResponder.respond()` falla con `AssertionError("Request already responded to")`. La excepción escapa del receive loop y mata el mismo `task_group`.
-
-**Solución:** Hive aplica dos monkey-patches quirúrgicos al arrancar en [`src/hive/_compat.py`](https://github.com/mlorentedev/hive/blob/master/src/hive/_compat.py):
-
-- `RequestResponder.__exit__` — ignora la `CancelledError` espuria una vez el responder está marcado como completado.
-- `RequestResponder.respond` — corta en seco la llamada tardía con un log WARNING (`mcp.ghost_response.suppressed_after_cancel_ack`) e incrementa un contador expuesto en `vault_health`.
-
-Ambos patches están auto-acotados al modo de fallo exacto (`_completed=True`), por lo que quedan inertes cuando upstream corrija el bug.
-
-Seguimiento en [issue #75](https://github.com/mlorentedev/hive/issues/75) y [upstream python-sdk#2610](https://github.com/modelcontextprotocol/python-sdk/issues/2610). Tests de regresión: [`tests/test_transport_recovery.py`](https://github.com/mlorentedev/hive/blob/master/tests/test_transport_recovery.py) + [`tests/test_compat_shim.py`](https://github.com/mlorentedev/hive/blob/master/tests/test_compat_shim.py).
+**Solución:** Hive requiere `mcp` 2.x ([#434](https://github.com/mlorentedev/hive/issues/434)). Su dispatcher de peticiones nunca responde a una petición cancelada, así que la carrera no puede ocurrir. Las versiones anteriores lo esquivaban con un monkey-patch al arrancar sobre `RequestResponder.respond`; ese patch ya no existe. Tests de regresión: [`tests/test_cancel_race.py`](https://github.com/mlorentedev/hive/blob/master/tests/test_cancel_race.py) + [`tests/test_transport_recovery.py`](https://github.com/mlorentedev/hive/blob/master/tests/test_transport_recovery.py).
 
 **Si la desconexión persiste:**
 
-1. Confirma que estás en `hive-vault >= 1.14.0` — versiones anteriores no incluían el segundo patch (respond-after-cancel).
-2. Revisa `~/.local/share/hive/hive.log` buscando líneas WARNING `mcp.ghost_response.suppressed_after_cancel_ack` (siempre logueadas) o líneas debug `Swallowed spurious cancellation on completed responder` (activa con `HIVE_LOG_LEVEL=DEBUG`).
+1. Actualiza a la última versión de `hive-vault`. Una instalación que todavía resuelve `mcp` 1.x viene de una versión anterior.
+2. Busca en `~/.local/share/hive/hive.log` un `AssertionError` o un `Connection closed` alrededor de la llamada rechazada, y abre un issue con ese extracto.
 3. Como solución temporal, acepta siempre la primera llamada de Hive en una conversación nueva. Los rechazos posteriores no rompen el transporte.
 
 ## Cancelé una Llamada Pero el Vault Cambió de Todas Formas
 
+> **Con `mcp` 2.x** ([#434](https://github.com/mlorentedev/hive/issues/434)) el servidor nunca responde a una llamada cancelada, y el contador `ghost_responses` de abajo solo registra timeouts por deadline duro, no cancelaciones. La regla no cambia: una cancelación no deshace nada, así que verifica con `vault_query` y no reintentes. El resto de esta sección describe el comportamiento de `mcp` 1.x y se revisará junto con el contador.
+
 **Síntoma:** Tú (o tu cliente) cancelaste a mitad de ejecución una llamada `vault_write` / `vault_patch` / `capture_lesson` — recibiste un `ErrorData` diciendo *"Request cancelled"* — pero en el siguiente `vault_query` el archivo muestra el contenido nuevo como si la operación hubiera tenido éxito.
 
-**Causa:** No es un bug, es un desajuste semántico documentado ([ADR-007](https://github.com/mlorentedev/hive/blob/master/docs/architecture/adr-007-mcp-cancellation-response.md), enmendado dos veces). Cuando llega la cancelación, el `RequestResponder.cancel()` upstream escribe el frame `ErrorData` al wire de inmediato — empíricamente 20/20 veces en Linux, ver [`tests/test_compat_shim.py::test_classify_cancellation_race`](https://github.com/mlorentedev/hive/blob/master/tests/test_compat_shim.py). Pero el hilo del handler sigue ejecutándose hasta acabar; Hive no puede interrumpir con seguridad una escritura parcial (Python `asyncio.timeout` cancela la corutina que espera pero no puede interrumpir el hilo bloqueante). Por eso el disco se muta **después** de que el ack de cancelación llegue al cliente.
+**Causa:** No es un bug, es un desajuste semántico documentado ([ADR-007](https://github.com/mlorentedev/hive/blob/master/docs/architecture/adr-007-mcp-cancellation-response.md), enmendado dos veces). Cuando llega la cancelación, el `RequestResponder.cancel()` upstream escribe el frame `ErrorData` al wire de inmediato — empíricamente 20/20 veces en Linux con `mcp` 1.x (ADR-007, enmienda #2). Pero el hilo del handler sigue ejecutándose hasta acabar; Hive no puede interrumpir con seguridad una escritura parcial (Python `asyncio.timeout` cancela la corutina que espera pero no puede interrumpir el hilo bloqueante). Por eso el disco se muta **después** de que el ack de cancelación llegue al cliente.
 
 **El ack ErrorData NO implica rollback.** La regla de corrección del cliente es: *verifica el estado vía `vault_query` en lugar de reintentar.* Reintentar un `vault_write(operation="append", ...)` después de un ghost-response duplica contenido; reintentar `vault_patch` puede producir errores de coincidencia ambigua contra el resultado ya aplicado.
 

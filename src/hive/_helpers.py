@@ -165,8 +165,8 @@ def project_not_found(project: str) -> str:
     return f"Project '{project}' not found in vault."
 
 
-_READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
-_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False)
+_READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True)
+_WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False)
 
 SECTION_SHORTCUTS: dict[str, str] = {
     "context": "00-context.md",
@@ -1778,8 +1778,8 @@ async def run_sync_tool(
     the underlying thread — see lesson 2026-03-13. This helper still uses
     it because the goal is to give the client a fast response (and unblock
     the MCP receive loop) even when the sync work is stuck on a lock or
-    subprocess; the thread eventually returns and its late ``respond()``
-    call is silenced by the ``_compat`` shim.
+    subprocess; the thread eventually returns and its result is discarded,
+    because the request has already been answered.
 
     HIVE-116 AC-6: write tools (``vault_write`` / ``vault_patch``) opt into
     a partial-state response via :data:`_PARTIAL_STATE_CV`. The CV holds a
