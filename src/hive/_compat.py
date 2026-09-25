@@ -13,7 +13,7 @@ produced after its request was cancelled tripped
 dispatcher never answers a cancelled request, so the patch is gone;
 ``tests/test_cancel_race.py`` guards the behaviour it provided. Where the
 counter should live, and what should feed its ``cancellation`` source on
-2.x, is decided separately.
+2.x, is #442.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ class _GhostResponseCounter:
         - ``"cancellation"`` — recorded by the mcp 1.x respond-after-cancel
           patch (ADR-007), removed in #434. On mcp 2.x the dispatcher drops
           a cancelled request's late response itself, so nothing records
-          this source until its replacement is decided.
+          this source until #442 decides its replacement.
         - ``"deadline"`` — ``bounded_call`` enforced a hard deadline
           (HIVE-115 PR-3 / ADR-008); the worker thread completed past
           the deadline and we are silencing its late respond(). The

@@ -213,7 +213,7 @@ claude mcp add -s user hive \
 
 ## Cancelé una Llamada Pero el Vault Cambió de Todas Formas
 
-> **Con `mcp` 2.x** ([#434](https://github.com/mlorentedev/hive/issues/434)) el servidor nunca responde a una llamada cancelada, y el contador `ghost_responses` de abajo solo registra timeouts por deadline duro, no cancelaciones. La regla no cambia: una cancelación no deshace nada, así que verifica con `vault_query` y no reintentes. El resto de esta sección describe el comportamiento de `mcp` 1.x y se revisará junto con el contador.
+> **Con `mcp` 2.x** ([#434](https://github.com/mlorentedev/hive/issues/434)) el servidor nunca responde a una llamada cancelada, y el contador `ghost_responses` de abajo solo registra timeouts por deadline duro, no cancelaciones. La regla no cambia: una cancelación no deshace nada, así que verifica con `vault_query` y no reintentes. El resto de esta sección describe el comportamiento de `mcp` 1.x y se revisará junto con el contador ([#442](https://github.com/mlorentedev/hive/issues/442)).
 
 **Síntoma:** Tú (o tu cliente) cancelaste a mitad de ejecución una llamada `vault_write` / `vault_patch` / `capture_lesson` — recibiste un `ErrorData` diciendo *"Request cancelled"* — pero en el siguiente `vault_query` el archivo muestra el contenido nuevo como si la operación hubiera tenido éxito.
 

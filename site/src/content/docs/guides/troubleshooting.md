@@ -213,7 +213,7 @@ claude mcp add -s user hive \
 
 ## Cancelled a Tool Call but the Vault Changed Anyway
 
-> **On `mcp` 2.x** ([#434](https://github.com/mlorentedev/hive/issues/434)) the server never answers a cancelled call, and the `ghost_responses` counter below records only hard-deadline timeouts, not cancellations. The rule is unchanged: a cancellation does not roll anything back, so verify with `vault_query` and do not retry. The rest of this section describes the `mcp` 1.x behaviour and will be revised with the counter.
+> **On `mcp` 2.x** ([#434](https://github.com/mlorentedev/hive/issues/434)) the server never answers a cancelled call, and the `ghost_responses` counter below records only hard-deadline timeouts, not cancellations. The rule is unchanged: a cancellation does not roll anything back, so verify with `vault_query` and do not retry. The rest of this section describes the `mcp` 1.x behaviour and will be revised with the counter ([#442](https://github.com/mlorentedev/hive/issues/442)).
 
 **Symptom:** You (or your client) cancelled a `vault_write` / `vault_patch` / `capture_lesson` call mid-flight — got an `ErrorData` response back saying *"Request cancelled"* — but on the next `vault_query` the file shows the new content as if the operation had succeeded.
 
