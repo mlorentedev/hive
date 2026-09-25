@@ -59,6 +59,9 @@ dev = [
     "mypy>=1.13",
     "types-PyYAML>=6.0",
     "types-psutil>=5.9.0",
+    # tests/test_dependency_bounds.py parses the declared bounds; declared
+    # here rather than relied on through pytest's own dependency.
+    "packaging>=23",
     # HIVE-211 PR3: numpy in dev so the retrieval engine tests always run;
     # the "extra absent" branch is tested via monkeypatching, not by
     # genuinely removing numpy from the install.
