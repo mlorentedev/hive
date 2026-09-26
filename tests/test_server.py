@@ -650,6 +650,68 @@ class TestVaultHealth:
         assert "## ghost_responses" not in result
 
 
+# ── vault_health: global and project-scoped checks agree (#346) ─────
+
+
+_AGREEMENT_SCOPES = {"projects": "10_projects", "meta": "00_meta", "work": "50_work"}
+
+
+def _issue_lines(text: str) -> set[str]:
+    return {line for line in text.splitlines() if line.startswith(("[error]", "[warning]"))}
+
+
+class TestVaultHealthScopeAgreement:
+    """#346 reported the global frontmatter sweep flagging files that the
+    project-scoped run passed. It did not reproduce, so this pins the property
+    the issue asked for: a whole-vault run reports exactly the union of the
+    per-project runs, and required keys are found wherever they sit.
+    """
+
+    @pytest.fixture
+    def agreement_vault(self, tmp_path: Path) -> Path:
+        alpha = tmp_path / "10_projects" / "alpha"
+        (alpha / "research").mkdir(parents=True)
+        (alpha / "memory").mkdir()
+        # Required keys after other keys, in positions 4-6.
+        (alpha / "research" / "late-keys.md").write_text(
+            "---\ntags: [research]\nowner: someone\nsession_id: abc\n"
+            'status: active\ntype: research\nid: "late-keys"\n---\n\n# Late\n'
+        )
+        (alpha / "no-status.md").write_text(
+            "---\nid: no-status\ntype: session\nagent: claude\n---\n\n# Missing\n"
+        )
+        (alpha / "bare.md").write_text("# No frontmatter\n")
+        (alpha / "memory" / "MEMORY.md").write_text("# Exempt\n")
+        beta = tmp_path / "50_work" / "beta"
+        beta.mkdir(parents=True)
+        (beta / "mixed.md").write_text(
+            "---\ntype: note\ncreated: not-a-date\nid: mixed\nstatus: draft\n---\n\n# Beta\n"
+        )
+        return tmp_path
+
+    async def test_global_run_is_union_of_scoped_runs(self, agreement_vault: Path) -> None:
+        mcp = create_server(vault_path=agreement_vault, vault_scopes=_AGREEMENT_SCOPES)
+        args = {"checks": ["frontmatter"], "max_issues": 1000}
+        global_issues = _issue_lines(_text(await mcp.call_tool("vault_health", args)))
+        scoped_issues: set[str] = set()
+        for project in ("alpha", "beta"):
+            result = await mcp.call_tool("vault_health", {**args, "project": project})
+            project_issues = _issue_lines(_text(result))
+            # A scoped run that ignored `project` would still union to the
+            # global set; each run must report only its own project.
+            assert project_issues
+            assert all(f"] {project}/" in line for line in project_issues)
+            scoped_issues |= project_issues
+
+        assert global_issues == scoped_issues
+        # Non-vacuous: both sides found the genuinely broken files.
+        assert global_issues == {
+            "[error] alpha/bare.md: Missing or invalid frontmatter",
+            "[error] alpha/no-status.md: Frontmatter missing fields: status",
+            "[warning] beta/mixed.md: Unparseable date: 'not-a-date'",
+        }
+
+
 # ── vault_health (server identity + runtime, issue #109) ─────────────
 
 
