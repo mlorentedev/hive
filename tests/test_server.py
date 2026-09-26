@@ -696,7 +696,12 @@ class TestVaultHealthScopeAgreement:
         scoped_issues: set[str] = set()
         for project in ("alpha", "beta"):
             result = await mcp.call_tool("vault_health", {**args, "project": project})
-            scoped_issues |= _issue_lines(_text(result))
+            project_issues = _issue_lines(_text(result))
+            # A scoped run that ignored `project` would still union to the
+            # global set; each run must report only its own project.
+            assert project_issues
+            assert all(f"] {project}/" in line for line in project_issues)
+            scoped_issues |= project_issues
 
         assert global_issues == scoped_issues
         # Non-vacuous: both sides found the genuinely broken files.
