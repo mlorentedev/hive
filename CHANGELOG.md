@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.2.2](https://github.com/mlorentedev/hive/compare/v4.2.1...v4.2.2) (2026-09-25)
+
+
+### Bug Fixes
+
+* **capture_lesson:** append without O_CREAT so a mid-write deletion still refuses ([#436](https://github.com/mlorentedev/hive/issues/436)) ([db99497](https://github.com/mlorentedev/hive/commit/db994975c82a0ef4cadb72fe5e6b34807a2f21b0))
+* **capture_lesson:** refuse instead of recreating a missing 90-lessons.md ([#433](https://github.com/mlorentedev/hive/issues/433)) ([caf1ea5](https://github.com/mlorentedev/hive/commit/caf1ea57cba04a816cdf57dab409624161bb3036))
+* **deps:** adopt mcp 2.x on purpose and drop the 1.x respond-after-cancel shim ([#443](https://github.com/mlorentedev/hive/issues/443)) ([dd09409](https://github.com/mlorentedev/hive/commit/dd094097be20647caa6e54a3d2989253a836d7ea))
+
+
+### Documentation
+
+* **lessons:** lesson 099 on stand-in patch tests, and the O_CREAT follow-up to 098 ([#440](https://github.com/mlorentedev/hive/issues/440)) ([7519b3a](https://github.com/mlorentedev/hive/commit/7519b3a1b02214d50a579addedef53dfa6601a61))
+
 ## [4.2.1](https://github.com/mlorentedev/hive/compare/v4.2.0...v4.2.1) (2026-09-07)
 
 
