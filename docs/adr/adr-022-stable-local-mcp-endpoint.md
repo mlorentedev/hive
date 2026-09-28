@@ -50,6 +50,11 @@ MCP defines the HTTP endpoint and session protocol, but it does not standardize
 local port discovery. A rotating endpoint therefore creates a Hive-specific
 control-plane problem that every host must solve independently.
 
+The broader industry invariant is a **stable rendezvous endpoint**, not
+necessarily a fixed numeric TCP port. Docker, Podman, and systemd commonly use a
+stable Unix socket or named pipe. Hive selects loopback HTTP because the target
+MCP hosts share HTTP support but do not share support for platform-specific IPC.
+
 The required invariants are:
 
 1. The supported connection is deterministic across Windows, Linux, and MCP
@@ -99,11 +104,16 @@ reliably.
 
 ## Decision
 
-### Stable front door
+### Stable rendezvous
 
-Hive will expose one stable Streamable HTTP endpoint on `127.0.0.1` using a
-documented default port and a configuration override. The steady-state daemon
-MUST NOT silently select another port.
+Hive will expose one stable Streamable HTTP rendezvous endpoint on `127.0.0.1`
+using a documented default port and a configuration override. The steady-state
+daemon MUST NOT silently select another port.
+
+The fixed loopback port is the cross-platform realization of the stable
+rendezvous invariant for the current host matrix. A future Unix socket or
+Windows named-pipe adapter is compatible with this decision if it preserves the
+same stable address and does not reintroduce per-restart discovery.
 
 If the configured port is occupied by another process, startup fails closed with
 an actionable diagnostic. The supervisor must not publish a replacement endpoint
@@ -111,8 +121,8 @@ or rewrite clients around the conflict.
 
 The daemon bearer token persists across ordinary restarts in an owner-only store.
 Token rotation is explicit or security-triggered, not coupled to process
-lifetime. Hive continues to validate authentication and HTTP Origin and binds
-only to loopback.
+lifetime. Hive follows the MCP Streamable HTTP security requirements: validate
+the `Origin` header, bind only to localhost, and authenticate every connection.
 
 ### Client contract
 
@@ -127,6 +137,10 @@ The adapter must:
   supported Windows baseline;
 - report daemon unavailability explicitly;
 - never hide a broken daemon by starting an unmanaged competing owner.
+
+For stdio, credentials come from the process environment or an owner-only local
+store rather than an OAuth negotiation, matching MCP's authorization guidance
+for stdio transports.
 
 All generated agent configurations derive from one declarative registry.
 Reconciliation compares the effective command or URL, not mere entry presence.
@@ -171,9 +185,9 @@ runtime selected.
 
 ## Rationale
 
-A fixed loopback front door removes the only state that currently forces every
-MCP host to participate in daemon lifecycle management. The port is configuration,
-not discovery data.
+A stable loopback rendezvous removes the only state that currently forces every
+MCP host to participate in daemon lifecycle management. The port is
+configuration, not discovery data.
 
 The design keeps the single-owner daemon and HTTP performance selected by
 ADR-011 while preserving stdio interoperability through a genuinely lightweight
@@ -230,4 +244,6 @@ transaction rather than an in-place mutation of a live Python environment.
 - ADR-015 — Windows daemon supervision and auto-upgrade
 - ADR-019 — launcher ownership on Windows
 - ADR-020 — client upgrade policy
-- MCP Streamable HTTP transport specification
+- [Enterprise pattern research](../research/copilot-20260928-141709-stable-local-mcp-endpoint.md)
+- [MCP Streamable HTTP transport specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+- [MCP authorization specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
