@@ -34,7 +34,8 @@ The Windows deployment violates that assumption:
 
 - GitHub Copilot CLI terminates a local stdio MCP process if initialization takes
   about 4.1 seconds. `hive client` took 4.586 seconds, while direct daemon HTTP
-  initialized in about 17 milliseconds.
+  initialized in about 17 milliseconds. Its MCP `timeout: 30000` setting does
+  not extend this separate initialize-handshake deadline.
 - Direct HTTP made Copilot usable, but its stored endpoint remained
   `127.0.0.1:49859` after the daemon restarted on `127.0.0.1:60412`.
 - The daemon was healthy but unmanaged: the official `HiveVaultDaemon` task was
@@ -142,12 +143,17 @@ Creation and replacement are atomic: write a new file, enforce and verify
 owner-only permissions or ACLs, then publish it. A permission failure is a
 startup failure, not a warning.
 
-Rotation is explicit or security-triggered, not coupled to process lifetime. The
-daemon accepts the old and new token only during a bounded handoff window while
-Hive atomically updates registrations it owns; expiry revokes the old token.
-Missing or corrupt credentials fail closed and require the same generate,
-permission-verify, publish, and client-handoff sequence. Tokens never appear in
-stdout, stderr, logs, or diagnostics.
+Rotation is explicit or security-triggered, not coupled to process lifetime.
+Before publishing the new token, Hive atomically persists a rotation record with
+the old and new token identifiers and an absolute expiry timestamp. The daemon
+accepts both tokens only while that persisted record is unexpired and Hive
+atomically updates registrations it owns. Startup recovery reads the record
+before accepting requests: at or after expiry it accepts only the new token and
+removes the old credential, so a crash cannot extend the handoff window.
+
+Missing or corrupt credentials or rotation state fail closed and require the
+same generate, permission-verify, publish, and client-handoff sequence. Tokens
+never appear in stdout, stderr, logs, or diagnostics.
 
 Hive follows the MCP Streamable HTTP security requirements: validate the
 `Origin` header, bind only to localhost, and authenticate every connection.
@@ -172,6 +178,12 @@ for stdio transports.
 
 All generated agent configurations derive from one declarative registry.
 Reconciliation compares the effective command or URL, not mere entry presence.
+
+ADR-019 launcher ownership and #328 executable resolution remain implementation
+prerequisites, not work replaced by this decision. The downstream spec must
+cover a launcher that resolves through `current`, verified executable-resolution
+order, a fresh-shell `hive --version`, and service installation with a broken uv
+trampoline present.
 
 ### Supervisor and reconciliation
 
@@ -294,7 +306,8 @@ transaction rather than an in-place mutation of a live Python environment.
   implementations for representative POSIX UIDs and Windows SIDs.
 - Tests prove atomic credential creation, checked Windows ACLs and POSIX modes,
   cross-restart continuity, bounded dual-token rotation, old-token revocation,
-  and recovery from missing or corrupt credentials.
+  crash recovery before and after persisted expiry, and recovery from missing or
+  corrupt credentials or rotation state.
 - Tests prove no token appears in stdout, stderr, logs, or generated diagnostics.
 
 ## References
