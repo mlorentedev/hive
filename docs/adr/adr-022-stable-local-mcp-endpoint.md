@@ -115,22 +115,42 @@ rendezvous invariant for the current host matrix. A future Unix socket or
 Windows named-pipe adapter is compatible with this decision if it preserves the
 same stable address and does not reintroduce per-restart discovery.
 
-The documented default is per-user, not machine-wide: it is deterministically
-derived from the invoking OS account (POSIX UID or Windows SID string) hashed
-into a documented range, so two accounts on a shared machine resolve to
-different defaults without coordination. The formula and range are published so
-`hive service status` and clients can independently recompute the expected port.
-The configuration override handles the residual hash-collision case; it is not
-the primary means of avoiding multi-user conflict.
+The documented default is per-user, not machine-wide. Every implementation uses
+the same versioned formula:
+
+```text
+identity = "posix:" + decimal_uid | "windows:" + canonical_sid
+digest   = SHA-256("hive-daemon-port-v1\0" + identity)
+port     = 49152 + (big_endian_uint16(digest[0:2]) mod 16384)
+```
+
+`decimal_uid` is base-10 with no leading zeros. `canonical_sid` is the numeric
+`S-1-...` string returned for the process token, never an account or domain
+name.
+
+The range is the IANA dynamic/private range. The formula lets `hive service
+status`, setup, and clients independently compute the same endpoint without a
+runtime discovery file. The configuration override handles the residual hash
+collision; it is not the primary means of avoiding multi-user conflict.
 
 If the configured port is occupied by another process, startup fails closed with
 an actionable diagnostic. The supervisor must not publish a replacement endpoint
 or rewrite clients around the conflict.
 
 The daemon bearer token persists across ordinary restarts in an owner-only store.
-Token rotation is explicit or security-triggered, not coupled to process
-lifetime. Hive follows the MCP Streamable HTTP security requirements: validate
-the `Origin` header, bind only to localhost, and authenticate every connection.
+Creation and replacement are atomic: write a new file, enforce and verify
+owner-only permissions or ACLs, then publish it. A permission failure is a
+startup failure, not a warning.
+
+Rotation is explicit or security-triggered, not coupled to process lifetime. The
+daemon accepts the old and new token only during a bounded handoff window while
+Hive atomically updates registrations it owns; expiry revokes the old token.
+Missing or corrupt credentials fail closed and require the same generate,
+permission-verify, publish, and client-handoff sequence. Tokens never appear in
+stdout, stderr, logs, or diagnostics.
+
+Hive follows the MCP Streamable HTTP security requirements: validate the
+`Origin` header, bind only to localhost, and authenticate every connection.
 
 ### Client contract
 
@@ -177,15 +197,33 @@ Hive's versioned A3 runtime is the only supported Windows update target. Update
 automation must not call `uv tool upgrade hive-vault`.
 
 Compatible releases within the configured major-version channel may auto-apply
-through this sequence:
+only when an acquisition trust profile is configured. The profile must bind the
+exact version to an allow-listed package origin and verify the downloaded
+artifact digest against authenticated release metadata or provenance. TLS,
+readiness, and tool-catalog checks alone do not establish artifact authenticity.
+If provenance or digest verification is unavailable, Hive remains notify-only
+under ADR-020.
 
-1. Build the candidate beside the active version.
-2. Start it on an ephemeral validation port.
-3. Require version, readiness, MCP initialize, and tool-catalog contract checks.
-4. Stop the active daemon and atomically repoint `current`.
-5. Start the candidate on the stable endpoint.
-6. Require post-switch readiness within a bounded deadline.
-7. On failure, restore the previous pointer and restart the previous version.
+An eligible update uses this sequence:
+
+1. Resolve an exact candidate version and verify its origin, digest, and
+   provenance before executing any candidate code.
+2. Build the candidate beside the active version and write an immutable manifest
+   binding the directory to that version and digest.
+3. Start it on an ephemeral validation port. A retry must re-verify the manifest,
+   artifact digest, and validation checks; an existing directory is never
+   accepted merely because it exists.
+4. Require version, readiness, MCP initialize, and tool-catalog contract checks.
+5. Persist an atomic transition record naming active, previous, and candidate
+   runtimes.
+6. Stop the active daemon and atomically repoint `current`.
+7. Start the candidate on the stable endpoint.
+8. Require post-switch readiness within a bounded deadline.
+9. On failure or interrupted recovery, restore the recorded previous pointer and
+   restart the previous version.
+10. Retain the previous runtime until post-switch readiness succeeds and the
+    rollback window closes; garbage collection cannot remove last-known-good
+    before then.
 
 Major-version changes remain explicit until their compatibility policy is
 accepted separately. A failed update is visible and leaves the last known-good
@@ -220,8 +258,12 @@ transaction rather than an in-place mutation of a live Python environment.
 - Hive must reserve and document a default per-user port and its per-account
   derivation formula.
 - A stable bearer token has a longer lifetime and requires explicit rotation.
+- Secure rotation requires a bounded dual-token handoff and atomic client
+  registration updates.
 - Candidate validation and rollback add installer and integration-test
   complexity.
+- Unattended updates require verifiable artifact provenance; deployments without
+  it remain notify-only.
 - A fixed-port conflict stops the service instead of silently moving it.
 
 ### Neutral
@@ -243,6 +285,16 @@ transaction rather than an in-place mutation of a live Python environment.
 - Tests prove that a readiness timeout terminates the spawned process tree.
 - Tests prove that a failed candidate cannot change the selected runtime or
   leave client configuration pointing at a dead endpoint.
+- Tests prove that retries revalidate an existing candidate, interrupted
+  transitions restore the recorded previous runtime, and garbage collection
+  cannot remove last-known-good before the rollback window closes.
+- Tests prove that an unattended candidate with missing, mismatched, or
+  untrusted provenance/digest is rejected before candidate code executes.
+- Tests prove deterministic port parity across Python, PowerShell, and shell
+  implementations for representative POSIX UIDs and Windows SIDs.
+- Tests prove atomic credential creation, checked Windows ACLs and POSIX modes,
+  cross-restart continuity, bounded dual-token rotation, old-token revocation,
+  and recovery from missing or corrupt credentials.
 - Tests prove no token appears in stdout, stderr, logs, or generated diagnostics.
 
 ## References
