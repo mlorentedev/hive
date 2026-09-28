@@ -113,3 +113,4 @@ These three open questions did not need the Windows spike and are decided here, 
 - Builds on: [adr-004-thread-safety-model.md](adr-004-thread-safety-model.md), [adr-008-hard-deadline-enforcement.md](adr-008-hard-deadline-enforcement.md), [adr-009-multi-process-wal-policy.md](adr-009-multi-process-wal-policy.md), [adr-012-cooperative-filelock-eviction-on-deadline.md](adr-012-cooperative-filelock-eviction-on-deadline.md).
 - Checkpoint: GitHub #124 (Phase C decision, due 2026-06-05).
 - Related DX work (separate): #151 / HIVE-119 (tool param aliases).
+- Amended by: [adr-022-stable-local-mcp-endpoint.md](adr-022-stable-local-mcp-endpoint.md) (2026-09-28) — replaces §2's OS-assigned loopback port with a deterministic per-user default plus fail-closed conflict handling, and moves the per-daemon token from process lifetime to an owner-only persistent store. §1, §3, §5, and §6 are unaffected.

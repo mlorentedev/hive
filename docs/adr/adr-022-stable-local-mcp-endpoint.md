@@ -115,6 +115,14 @@ rendezvous invariant for the current host matrix. A future Unix socket or
 Windows named-pipe adapter is compatible with this decision if it preserves the
 same stable address and does not reintroduce per-restart discovery.
 
+The documented default is per-user, not machine-wide: it is deterministically
+derived from the invoking OS account (POSIX UID or Windows SID string) hashed
+into a documented range, so two accounts on a shared machine resolve to
+different defaults without coordination. The formula and range are published so
+`hive service status` and clients can independently recompute the expected port.
+The configuration override handles the residual hash-collision case; it is not
+the primary means of avoiding multi-user conflict.
+
 If the configured port is occupied by another process, startup fails closed with
 an actionable diagnostic. The supervisor must not publish a replacement endpoint
 or rewrite clients around the conflict.
@@ -209,7 +217,8 @@ transaction rather than an in-place mutation of a live Python environment.
 
 ### Negative
 
-- Hive must reserve and document a default per-user port.
+- Hive must reserve and document a default per-user port and its per-account
+  derivation formula.
 - A stable bearer token has a longer lifetime and requires explicit rotation.
 - Candidate validation and rollback add installer and integration-test
   complexity.

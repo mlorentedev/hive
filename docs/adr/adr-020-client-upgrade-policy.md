@@ -178,4 +178,5 @@ reintroducing it one path over would be a poor trade.
 - [ADR-019](adr-019-launcher-ownership.md) — launcher ownership; Windows-only, and deliberately
   silent on upgrade policy
 - `src/hive/_runtime.py` — `latest_version()`, `build_version()`, `self_upgrade()`
-- `src/hive/_vault_health.py` — the `## server` identity block option (a) builds on
+- `src/hive/_vault_health.py` — the `## server` identity block that implements option (a)
+- Amended by: [adr-022-stable-local-mcp-endpoint.md](adr-022-stable-local-mcp-endpoint.md) (2026-09-28) — narrows, rather than removes, the (c) auto-apply gate: compatible releases within the configured major-version channel may auto-apply only through ADR-022's health-gated, rollback-capable sequence. Major-version changes remain gated as decided here.

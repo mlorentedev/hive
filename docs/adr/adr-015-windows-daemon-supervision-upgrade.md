@@ -88,3 +88,4 @@ The spike validates A3 (preferred) feasibility with uv on Windows; if too invasi
 - Rollout: `mlorentedev/dotfiles` `setup-windows.ps1` (daemon-supervision block), `tests/hive-upgrade-timer.bats`.
 - External (reference audit): Windows self-update rename-then-replace idiom; NSSM `AppExit=Restart` supervisor semantics; Task Scheduler `RestartOnFailure` schema.
 - Spike (to land in spec): S4U windowless + wrapper-loop restart validated 2026-06-04; upgrade-swap (A) pending.
+- Amended by: [adr-022-stable-local-mcp-endpoint.md](adr-022-stable-local-mcp-endpoint.md) (2026-09-28) — the transactional self-update sequence (build beside, ephemeral validation port, atomic repoint, bounded readiness, rollback) supersedes the (A) upgrade-swap resolution recorded here. The (B) restart and (C) windowless mechanisms are unaffected.
