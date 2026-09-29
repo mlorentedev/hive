@@ -31,9 +31,9 @@ created: "2026-09-28"
   invalid override rejection.
 - [x] [AC1] Add `src/hive/_endpoint.py` with stdlib-only identity and endpoint
   resolution; run `uv run python -m pytest tests/test_endpoint.py -q`.
-- [ ] [AC2] [AC6] Add failing daemon unit tests for persistent token reuse,
+- [x] [AC2] [AC6] Add failing daemon unit tests for persistent token reuse,
   atomic publication, permission verification failure, and fixed-port conflict.
-- [ ] [AC2] [AC6] Implement credential loading/creation and deterministic default
+- [x] [AC2] [AC6] Implement credential loading/creation and deterministic default
   binding in `src/hive/_daemon.py`; keep `daemon.port` diagnostic-only.
 - [ ] [AC3] [AC4] Add failing tests proving the console entrypoint selects the
   client path without importing `hive.server`/FastMCP and refuses unavailable or

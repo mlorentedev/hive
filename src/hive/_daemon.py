@@ -18,26 +18,33 @@ import importlib
 import importlib.metadata as metadata
 import logging
 import os
+import re
 import secrets
 import socket
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import filelock
 
+from hive._endpoint import (
+    DEFAULT_HOST,
+    MCP_PATH,
+    configured_daemon_port,
+    current_user_identity,
+    daemon_state_dir,
+    lock_file_path,
+    port_file_path,
+    token_file_path,
+)
 from hive.config import settings
 
 if TYPE_CHECKING:
     import uvicorn
     from fastmcp.server.auth import AuthProvider
 
-DEFAULT_HOST = "127.0.0.1"
-MCP_PATH = "/mcp"
-TOKEN_FILENAME = "daemon.token"
-PORT_FILENAME = "daemon.port"
-LOCK_FILENAME = "daemon.lock"
 PACKAGE_NAME = "hive-vault"  # PyPI distribution name (the `hive` name was taken)
 NOT_FOUND = "<not-found>"  # _current_version sentinel for the upgrade swap window
 # EX_TEMPFAIL: a drift-triggered clean stop exits non-zero so a `Restart=on-failure`
@@ -51,50 +58,114 @@ GRACEFUL_SHUTDOWN_S = 2
 
 _log = logging.getLogger(__name__)
 IS_WINDOWS = sys.platform == "win32"
+_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,}$")
 
 
-def daemon_state_dir() -> Path:
-    """Directory holding the token + port state files (beside the SQLite DBs)."""
-    return Path(settings.db_path).parent
-
-
-def token_file_path() -> Path:
-    return daemon_state_dir() / TOKEN_FILENAME
-
-
-def port_file_path() -> Path:
-    return daemon_state_dir() / PORT_FILENAME
-
-
-def lock_file_path() -> Path:
-    return daemon_state_dir() / LOCK_FILENAME
-
-
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind((DEFAULT_HOST, 0))
-        return int(s.getsockname()[1])
-
-
-def write_owner_only(path: Path, content: str) -> None:
-    """Write *content* to *path* so only the current user can read it.
-
-    POSIX: mode ``0600``. Windows: strip inherited ACEs and grant the current
-    user only via ``icacls`` (a bare ``chmod`` cannot express an owner-only ACL
-    on NTFS). Both forms are validated by the transport spike on each OS.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-    if os.name == "nt":
-        user = os.environ.get("USERNAME") or os.environ.get("USER") or ""
-        subprocess.run(  # noqa: S603,S607 — fixed args, owner derived from env
-            ["icacls", str(path), "/inheritance:r", "/grant:r", f"{user}:(F)"],
+def _run_icacls(path: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
+    try:
+        return subprocess.run(  # noqa: S603,S607
+            ["icacls", str(path), *args],
             check=False,
             capture_output=True,
             text=True,
         )
-    else:
-        path.chmod(0o600)
+    except Exception:  # noqa: BLE001 — permission verification must fail closed
+        return None
+
+
+def _enforce_owner_only(path: Path) -> None:
+    """Apply owner-only permissions, raising when the OS cannot enforce them."""
+    if os.name == "nt":
+        sid = current_user_identity().split(":", 1)[1]
+        result = _run_icacls(path, "/inheritance:r", "/grant:r", f"*{sid}:(F)")
+        if result is None or result.returncode != 0:
+            detail = "" if result is None else result.stderr.strip()
+            raise RuntimeError(f"could not enforce owner-only daemon credential ACL: {detail}")
+        return
+    path.chmod(0o600)
+
+
+def _verify_owner_only(path: Path) -> bool:
+    """Verify that only the current user can read the daemon credential."""
+    if os.name != "nt":
+        stat_result = path.stat()
+        getuid = getattr(os, "getuid", None)
+        return (
+            callable(getuid)
+            and stat_result.st_uid == getuid()
+            and stat_result.st_mode & 0o077 == 0
+        )
+    sid = current_user_identity().split(":", 1)[1]
+    listing = _run_icacls(path)
+    owner = _run_icacls(path, "/findsid", f"*{sid}")
+    verified = _run_icacls(path, "/verify")
+    if None in (listing, owner, verified):
+        return False
+    assert listing is not None and owner is not None and verified is not None
+    ace_count = sum(":(" in line for line in listing.stdout.splitlines())
+    return (
+        listing.returncode == 0
+        and owner.returncode == 0
+        and verified.returncode == 0
+        and ace_count == 1
+    )
+
+
+def _read_token(path: Path) -> str:
+    try:
+        token = path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise RuntimeError(f"could not read daemon credential at {path}: {exc}") from exc
+    if not _TOKEN_RE.fullmatch(token):
+        raise RuntimeError(f"invalid daemon credential at {path}; reinstall or rotate it")
+    if not _verify_owner_only(path):
+        raise RuntimeError(f"daemon credential at {path} is not owner-only")
+    return token
+
+
+def _create_token(path: Path) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    token = secrets.token_urlsafe(32)
+    fd, raw_temp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temp = Path(raw_temp)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(token)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _enforce_owner_only(temp)
+        if not _verify_owner_only(temp):
+            raise RuntimeError("daemon credential candidate is not owner-only")
+        os.replace(temp, path)
+    finally:
+        with contextlib.suppress(OSError):
+            temp.unlink()
+    return token
+
+
+def load_or_create_token() -> str:
+    """Reuse a valid credential, or atomically create it on first install."""
+    path = token_file_path()
+    if path.exists():
+        return _read_token(path)
+    return _create_token(path)
+
+
+def write_owner_only(path: Path, content: str) -> None:
+    """Write non-secret daemon metadata with owner-only permissions."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    _enforce_owner_only(path)
+
+
+def _port_available(host: str, port: int) -> bool:
+    """Return whether the configured rendezvous can be bound right now."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as candidate:
+            candidate.bind((host, port))
+    except OSError:
+        return False
+    return True
 
 
 def _token_verifier(token: str) -> AuthProvider:
@@ -368,9 +439,8 @@ def _serve_owned(host: str, port: int, token: str) -> bool:
 def run_serve(host: str = DEFAULT_HOST, port: int = 0) -> int:
     """Run hive as a single-owner daemon over loopback Streamable-HTTP + token.
 
-    Generates a per-daemon token, publishes it (owner-only) and the chosen port
-    to the state dir, then serves the real ``create_server()`` instance. A
-    ``port`` of 0 picks a free loopback port.
+    Reuses one persistent owner-only token and binds the deterministic per-user
+    port unless ``port`` explicitly overrides it.
 
     Returns a process exit code: ``EXIT_RESTART_ON_UPGRADE`` when an in-place
     package upgrade triggered a clean stop (so a ``Restart=on-failure``
@@ -398,15 +468,17 @@ def run_serve(host: str = DEFAULT_HOST, port: int = 0) -> int:
         # locks cannot race a live sibling daemon (ADR-011 startup self-heal).
         _startup_self_heal(settings.vault_path)
 
-        resolved_port = port or _free_port()
-        token = secrets.token_urlsafe(32)
-        # Each startup republishes a fresh token + port, overwriting any state a
-        # prior daemon left behind. We deliberately do NOT clean these up on stop:
-        # uvicorn's SIGTERM handling exits the process via the signal (rc -15),
-        # bypassing `finally`/`atexit`, and SIGTERM is exactly how systemd / kill
-        # stop the daemon. Stale state is benign — the client's TCP liveness probe
-        # falls back (`daemon_unreachable`) and a restart overwrites it.
-        write_owner_only(token_file_path(), token)
+        resolved_port = port or configured_daemon_port()
+        if not _port_available(host, resolved_port):
+            print(
+                f"hive: stable daemon port {resolved_port} is already in use; "
+                "stop the conflicting process or set HIVE_DAEMON_PORT",
+                file=sys.stderr,
+            )
+            return 1
+        token = load_or_create_token()
+        # Retained temporarily as diagnostic migration metadata. Clients derive
+        # the endpoint independently and never discover it through this file.
         write_owner_only(port_file_path(), str(resolved_port))
 
         drifted = _serve_owned(host, resolved_port, token)

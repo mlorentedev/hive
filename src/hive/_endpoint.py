@@ -50,6 +50,15 @@ def _windows_sid() -> str:
     """Read the current process token's numeric SID through the Windows API."""
     advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    advapi32.OpenProcessToken.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.HANDLE),
+    ]
+    advapi32.OpenProcessToken.restype = wintypes.BOOL
     token = wintypes.HANDLE()
     if not advapi32.OpenProcessToken(
         kernel32.GetCurrentProcess(),
@@ -68,6 +77,14 @@ def _sid_from_token(
     kernel32: object,
     token: wintypes.HANDLE,
 ) -> str:
+    advapi32.GetTokenInformation.argtypes = [  # type: ignore[attr-defined]
+        wintypes.HANDLE,
+        ctypes.c_uint,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    advapi32.GetTokenInformation.restype = wintypes.BOOL  # type: ignore[attr-defined]
     needed = wintypes.DWORD()
     advapi32.GetTokenInformation(  # type: ignore[attr-defined]
         token,
@@ -83,7 +100,7 @@ def _sid_from_token(
         token,
         _TOKEN_USER_CLASS,
         buffer,
-        needed,
+        needed.value,
         ctypes.byref(needed),
     ):
         raise ctypes.WinError(ctypes.get_last_error())
@@ -92,6 +109,13 @@ def _sid_from_token(
 
 
 def _sid_to_string(advapi32: object, kernel32: object, sid: int) -> str:
+    advapi32.ConvertSidToStringSidW.argtypes = [  # type: ignore[attr-defined]
+        ctypes.c_void_p,
+        ctypes.POINTER(wintypes.LPWSTR),
+    ]
+    advapi32.ConvertSidToStringSidW.restype = wintypes.BOOL  # type: ignore[attr-defined]
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]  # type: ignore[attr-defined]
+    kernel32.LocalFree.restype = ctypes.c_void_p  # type: ignore[attr-defined]
     value = wintypes.LPWSTR()
     if not advapi32.ConvertSidToStringSidW(  # type: ignore[attr-defined]
         sid,
