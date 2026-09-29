@@ -26,10 +26,10 @@ created: "2026-09-28"
 
 ## Implementation
 
-- [ ] [AC1] Add failing table-driven tests in `tests/test_endpoint.py` for the
+- [x] [AC1] Add failing table-driven tests in `tests/test_endpoint.py` for the
   v1 UID/SID port vectors, private-range invariant, environment override, and
   invalid override rejection.
-- [ ] [AC1] Add `src/hive/_endpoint.py` with stdlib-only identity and endpoint
+- [x] [AC1] Add `src/hive/_endpoint.py` with stdlib-only identity and endpoint
   resolution; run `uv run python -m pytest tests/test_endpoint.py -q`.
 - [ ] [AC2] [AC6] Add failing daemon unit tests for persistent token reuse,
   atomic publication, permission verification failure, and fixed-port conflict.
