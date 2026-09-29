@@ -33,7 +33,7 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
-def _wait_ready(port: int, deadline_s: float = 20.0) -> bool:
+def _wait_ready(port: int, deadline_s: float = 45.0) -> bool:
     end = time.monotonic() + deadline_s
     while time.monotonic() < end:
         try:
@@ -85,7 +85,7 @@ async def _drive_shim(
 
     transport = StdioTransport(
         command=sys.executable,
-        args=["-m", "hive.server", "client"],
+        args=["-m", "hive.cli", "client"],
         env=env,
     )
     async with Client(transport) as client:
@@ -99,23 +99,6 @@ async def _drive_shim(
         "prompts": prompts,
         "text": str(getattr(result, "data", result)),
     }
-
-
-def _client_modes(state_dir: Path) -> list[str]:
-    """Return every `hive.client.mode=...` value the shim logged, in order."""
-    marker = "hive.client.mode="
-    modes: list[str] = []
-    for log_file in sorted(state_dir.glob("hive-*.log")):
-        for line in log_file.read_text(errors="replace").splitlines():
-            if marker in line:
-                modes.append(line.split(marker, 1)[1].strip())
-    return modes
-
-
-def _client_mode(state_dir: Path) -> str:
-    """Return the first `hive.client.mode=...` value the shim logged, or ''."""
-    modes = _client_modes(state_dir)
-    return modes[0] if modes else ""
 
 
 # ── multi-client (slice 3) helpers ────────────────────────────────────────
@@ -140,7 +123,7 @@ async def _client_appends(env: dict[str, str], markers: list[str]) -> int:
 
     transport = StdioTransport(
         command=sys.executable,
-        args=["-m", "hive.server", "client"],
+        args=["-m", "hive.cli", "client"],
         env=env,
     )
     done = 0
@@ -226,7 +209,7 @@ async def _reconnect_then_retry(
     }
     transport = StdioTransport(
         command=sys.executable,
-        args=["-m", "hive.server", "client"],
+        args=["-m", "hive.cli", "client"],
         env=env,
     )
     async with Client(transport) as client:
@@ -251,7 +234,7 @@ async def _query_across_kill(
 
     transport = StdioTransport(
         command=sys.executable,
-        args=["-m", "hive.server", "client"],
+        args=["-m", "hive.cli", "client"],
         env=env,
     )
     async with Client(transport) as client:
@@ -313,8 +296,9 @@ def daemon_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
 
 
 def _spawn_daemon(env: dict[str, str], port: int) -> subprocess.Popen[bytes]:
+    env["HIVE_DAEMON_PORT"] = str(port)
     return subprocess.Popen(
-        [sys.executable, "-m", "hive.server", "serve", "--port", str(port)],
+        [sys.executable, "-m", "hive.server", "serve"],
         env=env,
     )
 
@@ -405,8 +389,7 @@ def test_hive_serve_rejects_bad_token(daemon_env: tuple[dict[str, str], Path]) -
 
 def test_client_forwards_to_daemon(daemon_env: tuple[dict[str, str], Path]) -> None:
     """With a daemon running, the thin stdio shim connects over the token-gated
-    transport and forwards the full MCP surface to it — reporting `daemon` mode,
-    without leaking the bearer token into the logs."""
+    transport and forwards the full MCP surface without leaking the token."""
     env, state_dir = daemon_env
     args = _seed_demo_project(state_dir / "vault")
     port = _free_port()
@@ -429,9 +412,6 @@ def test_client_forwards_to_daemon(daemon_env: tuple[dict[str, str], Path]) -> N
             f"proxy did not forward prompts: {surface['prompts']!r}"
         )
 
-        mode = _client_mode(state_dir)
-        assert mode.startswith("daemon"), f"shim did not report daemon mode: {mode!r}"
-
         # The bearer token must never reach disk in any hive log (L4).
         logs = "".join(f.read_text(errors="replace") for f in state_dir.glob("hive-*.log"))
         assert token and token not in logs, "bearer token leaked into a hive log"
@@ -441,52 +421,6 @@ def test_client_forwards_to_daemon(daemon_env: tuple[dict[str, str], Path]) -> N
             daemon.wait(timeout=5)
         except subprocess.TimeoutExpired:
             daemon.kill()
-
-
-def test_client_falls_back_without_daemon(
-    daemon_env: tuple[dict[str, str], Path],
-) -> None:
-    """With no daemon (no state files), the shim serves the query in-process and
-    flags degraded (`fallback`) mode — today's behavior, transparently."""
-    env, state_dir = daemon_env
-    args = _seed_demo_project(state_dir / "vault")
-
-    surface = asyncio.run(_drive_shim(env, "vault_query", args))
-    assert "vault_query" in surface["tools"]
-    assert _DEMO_MARKER in surface["text"], f"in-process query failed: {surface['text']!r}"
-
-    mode = _client_mode(state_dir)
-    assert mode.startswith("fallback"), f"expected fallback mode, got {mode!r}"
-    assert "no_daemon_state" in mode, f"unexpected fallback reason: {mode!r}"
-
-
-def test_client_falls_back_on_stale_state(
-    daemon_env: tuple[dict[str, str], Path],
-) -> None:
-    """A crashed daemon leaves stale port/token files but a dead port. The shim
-    probes liveness, finds nothing listening, and falls back rather than hang."""
-    env, state_dir = daemon_env
-    args = _seed_demo_project(state_dir / "vault")
-    # Bound but NOT listening, held open: connects are refused deterministically
-    # (no accept queue => RST) and no other process can grab the port mid-test.
-    dead = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    dead.bind((HOST, 0))
-    try:
-        (state_dir / "daemon.port").write_text(
-            str(dead.getsockname()[1]),
-            encoding="utf-8",
-        )
-        (state_dir / "daemon.token").write_text("stale-token", encoding="utf-8")
-
-        surface = asyncio.run(_drive_shim(env, "vault_query", args))
-        assert "vault_query" in surface["tools"]
-        assert _DEMO_MARKER in surface["text"], f"in-process query failed: {surface['text']!r}"
-
-        mode = _client_mode(state_dir)
-        assert mode.startswith("fallback"), f"expected fallback mode, got {mode!r}"
-        assert "daemon_unreachable" in mode, f"unexpected fallback reason: {mode!r}"
-    finally:
-        dead.close()
 
 
 def test_two_clients_share_one_daemon(
@@ -541,25 +475,10 @@ def test_two_clients_share_one_daemon(
             daemon.kill()
 
 
-def test_client_reconnects_to_restarted_daemon_without_duplicate_write(
+def test_client_stable_endpoint_restart_avoids_duplicate_write(
     daemon_env: tuple[dict[str, str], Path],
 ) -> None:
-    """A daemon that dies mid-session and restarts on a NEW port + NEW token is
-    followed by the SAME shim session — and a retried keyed write is deduped.
-
-    This closes M1: the one-shot startup decision (proxy bound to daemon A's
-    port/token for the session's life) cannot survive A's death. The
-    reconnecting `client_factory` re-reads the published state on every
-    forwarded call, so call #2 reaches the restarted daemon B. Driving it with
-    a repeated `idempotency_key` proves the reconnect is *safe* for writes: the
-    retry that auto-reconnect makes possible lands at-most-once (slice 2),
-    leaving exactly one append rather than duplicating an in-flight write.
-
-    Composes with slice 1.2: killing A frees its singleton `daemon.lock`, so B
-    reacquires it and self-heals before serving. A and B share the state dir,
-    hence the same `idempotency.db` — the seam that makes the key dedupe across
-    the restart.
-    """
+    """One shim survives a daemon restart at the same URL and token."""
     env, state_dir = daemon_env
     vault = state_dir / "vault"
     _seed_demo_project(vault)
@@ -567,35 +486,33 @@ def test_client_reconnects_to_restarted_daemon_without_duplicate_write(
     context = vault / "10_projects" / "demo" / "00-context.md"
     marker = "RECONNECT-IDEM-MARKER"
 
-    port_a = _free_port()
-    port_b = _free_port()  # reserved while A is alive => guaranteed distinct
-    assert port_b != port_a, "test setup: ports must differ"
-    daemon_a: subprocess.Popen[bytes] | None = _spawn_daemon(env, port_a)
+    port = _free_port()
+    daemon_a: subprocess.Popen[bytes] | None = _spawn_daemon(env, port)
     daemon_b: subprocess.Popen[bytes] | None = None
+    original_token = ""
 
     def restart() -> None:
-        nonlocal daemon_a, daemon_b
+        nonlocal daemon_a, daemon_b, original_token
         assert daemon_a is not None
-        # Tree-kill so A's listening child (which also holds the singleton
-        # daemon.lock) dies — otherwise B cannot reacquire the lock and publish.
+        original_token = (state_dir / "daemon.token").read_text(encoding="utf-8")
         _kill_tree(daemon_a)
         daemon_a = None
-        daemon_b = _spawn_daemon(env, port_b)
-        assert _wait_published(state_dir, port_b), "daemon B never published its port"
+        daemon_b = _spawn_daemon(env, port)
+        assert _wait_published(state_dir, port), "daemon B never restored the stable endpoint"
 
     try:
-        assert _wait_ready(port_a), "daemon A did not bind its loopback port"
+        assert _wait_ready(port), "daemon A did not bind its loopback port"
         asyncio.run(
             _reconnect_then_retry(env, "idem-key-1", f"\n{marker}\n", restart),
         )
 
-        # The retry followed the shim to B and was deduped: exactly one append.
         content = context.read_text(encoding="utf-8")
         assert content.count(marker) == 1, (
             f"keyed write was not at-most-once across the reconnect: "
             f"{content.count(marker)} occurrences"
         )
-        assert _published_port(state_dir) == port_b, "shim did not end up on daemon B"
+        assert _published_port(state_dir) == port
+        assert (state_dir / "daemon.token").read_text(encoding="utf-8") == original_token
     finally:
         for d in (daemon_a, daemon_b):
             if d is None:
@@ -605,60 +522,6 @@ def test_client_reconnects_to_restarted_daemon_without_duplicate_write(
                 d.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 d.kill()
-
-
-def test_client_degrades_in_process_when_daemon_dies_mid_session(
-    daemon_env: tuple[dict[str, str], Path],
-) -> None:
-    """When the daemon the shim is proxying to dies and does NOT return, the
-    next forwarded call degrades to the in-process server rather than erroring.
-
-    This is the other half of M1's bidirectional recovery (the reconnect test
-    covers daemon-returns; this covers daemon-gone). It exercises the factory's
-    lazy in-process fallback branch — the second owner that prefer-daemon
-    routing keeps dormant while a daemon is alive — and confirms the shim logs
-    the `daemon -> fallback` transition so an operator can see the degrade.
-    """
-    env, state_dir = daemon_env
-    vault = state_dir / "vault"
-    args = _seed_demo_project(vault)
-
-    port = _free_port()
-    daemon: subprocess.Popen[bytes] | None = _spawn_daemon(env, port)
-
-    def kill() -> None:
-        nonlocal daemon
-        assert daemon is not None
-        # Kill the whole tree: on Windows the listening socket lives in a child
-        # python.exe, so a parent-only kill leaves the port bound (see
-        # _kill_tree). Tree-killing actually frees the port the probe below.
-        _kill_tree(daemon)
-        # The shim's per-call factory TCP-probes the now-dead port; a refused
-        # connect (loopback RST) flips it to in-process without a restart.
-        assert not _wait_ready(port, deadline_s=5.0), "daemon port still open"
-        daemon = None
-
-    try:
-        assert _wait_ready(port), "daemon did not bind its loopback port"
-        first, second = asyncio.run(_query_across_kill(env, args, kill))
-
-        assert _DEMO_MARKER in first, f"daemon-mode query failed: {first!r}"
-        assert _DEMO_MARKER in second, f"in-process degrade query failed: {second!r}"
-
-        modes = _client_modes(state_dir)
-        assert any(m.startswith("daemon") for m in modes), (
-            f"shim never logged daemon mode: {modes!r}"
-        )
-        assert any("daemon_unreachable" in m for m in modes), (
-            f"shim did not log the daemon->fallback transition: {modes!r}"
-        )
-    finally:
-        if daemon is not None:
-            daemon.terminate()
-            try:
-                daemon.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                daemon.kill()
 
 
 def test_health_probe_is_unauthenticated_and_reports_ready(

@@ -35,19 +35,19 @@ created: "2026-09-28"
   atomic publication, permission verification failure, and fixed-port conflict.
 - [x] [AC2] [AC6] Implement credential loading/creation and deterministic default
   binding in `src/hive/_daemon.py`; keep `daemon.port` diagnostic-only.
-- [ ] [AC3] [AC4] Add failing tests proving the console entrypoint selects the
+- [x] [AC3] [AC4] Add failing tests proving the console entrypoint selects the
   client path without importing `hive.server`/FastMCP and refuses unavailable or
   invalid daemon state without fallback.
-- [ ] [AC3] Add `src/hive/cli.py`, repoint both console scripts in
+- [x] [AC3] Add `src/hive/cli.py`, repoint both console scripts in
   `pyproject.toml`, and replace the FastMCP proxy in `src/hive/_client.py` with a
   stdlib-only relay.
-- [ ] [AC5] Add failing relay tests for JSON, notifications, SSE frames,
+- [x] [AC5] Add failing relay tests for JSON, notifications, SSE frames,
   `Mcp-Session-Id`, and negotiated `MCP-Protocol-Version`; implement the minimum
   HTTP bridge to pass them.
-- [ ] [AC2] [AC7] Add a black-box restart test in `tests/test_daemon.py` that
+- [x] [AC2] [AC7] Add a black-box restart test in `tests/test_daemon.py` that
   reuses one URL and token across two daemon processes and calls both
   `tools/list` and `vault_health`.
-- [ ] [AC3] Add a cold subprocess benchmark test with a one-second initialize
+- [x] [AC3] Add a cold subprocess benchmark test with a one-second initialize
   deadline, isolated from the full server import graph.
 - [ ] [AC1] [AC4] [AC6] Update `README.md` and CLI help for
   `HIVE_DAEMON_PORT`, persistent token handling, explicit no-fallback behavior,
