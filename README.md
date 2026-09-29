@@ -79,12 +79,29 @@ When a tool call is cancelled mid-flight (slow worker, client timeout), the serv
 
 ## Daemon mode (optional)
 
-The default `uvx hive-vault` runs a fresh server per session. **Daemon mode** instead runs one long-lived `hive serve` that owns the vault, with each session connecting through a thin `hive client` shim — useful for concurrent sessions, single-owner guarantees ([ADR-011](docs/adr/adr-011-phase-c-daemon-model.md)), and automatic version adoption. It always degrades to an in-process server if the daemon is down, so it never breaks a session.
+The default `uvx hive-vault` runs a fresh server per session. **Daemon mode**
+instead runs one long-lived `hive serve` that owns the vault, with each
+stdio-only session connecting through `hive client`. The adapter starts without
+importing the Hive server or FastMCP, then relays JSON-RPC to the daemon's stable
+loopback endpoint. If the daemon or credential is unavailable, it fails
+explicitly rather than starting a competing in-process owner.
+
+The default endpoint is a deterministic per-user port in `49152..65535`, so an
+ordinary daemon restart does not invalidate client configuration. Override it
+with `HIVE_DAEMON_PORT` when the derived port conflicts with another local
+service; Hive fails closed rather than silently moving to a different port. The
+owner-only bearer token persists across ordinary restarts in the daemon state
+directory. `daemon.port` remains diagnostic migration metadata, not client
+discovery state. See [ADR-022](docs/adr/adr-022-stable-local-mcp-endpoint.md).
 
 ```bash
 uv tool install --upgrade hive-vault   # >= 1.32.0
 hive service install                   # supervise hive serve (systemd --user / Task Scheduler)
 ```
+
+HTTP-capable clients should connect directly to
+`http://127.0.0.1:<derived-or-overridden-port>/mcp`; stdio-only clients should
+run `hive client`. Never print or copy the token into logs or shell history.
 
 To install a newer release, use the platform-specific command:
 

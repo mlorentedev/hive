@@ -709,7 +709,12 @@ def _run_serve(argv: list[str]) -> int:
 
     parser = argparse.ArgumentParser(prog="hive serve")
     parser.add_argument("--host", default=DEFAULT_HOST)
-    parser.add_argument("--port", type=int, default=0, help="0 = pick a free port")
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help="stable loopback port (default: HIVE_DAEMON_PORT or per-user derivation)",
+    )
     opts = parser.parse_args(argv)
     return run_serve(host=opts.host, port=opts.port)
 
@@ -805,8 +810,8 @@ usage: hive [COMMAND]
 
 Commands:
   (no args)                            run the stdio MCP server (v1 per-session contract)
-  serve                                run the single-owner daemon (ADR-011)
-  client                               run the thin stdio shim that proxies to the daemon
+  serve                                run the daemon on its stable local endpoint
+  client                               relay stdio to the daemon; never starts a fallback owner
   delegate --model M --timeout S       run one task against one model; JSON on stdout
                                        (exit 1 task failed, 3 pool unavailable, 4 timeout)
   service {install,uninstall,status}   manage the daemon as a per-user OS service

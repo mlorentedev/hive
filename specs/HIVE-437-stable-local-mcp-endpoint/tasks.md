@@ -49,7 +49,7 @@ created: "2026-09-28"
   `tools/list` and `vault_health`.
 - [x] [AC3] Add a cold subprocess benchmark test with a one-second initialize
   deadline, isolated from the full server import graph.
-- [ ] [AC1] [AC4] [AC6] Update `README.md` and CLI help for
+- [x] [AC1] [AC4] [AC6] Update `README.md` and CLI help for
   `HIVE_DAEMON_PORT`, persistent token handling, explicit no-fallback behavior,
   and the temporary diagnostic role of `daemon.port`.
 - [ ] Refactor only after all targeted tests are green; keep production
