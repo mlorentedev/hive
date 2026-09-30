@@ -22,3 +22,8 @@ test('the published favicon is a 32px PNG', () => {
 	assert.equal(png.readUInt32BE(16), 32);
 	assert.equal(png.readUInt32BE(20), 32);
 });
+
+test('the published SVG favicon is available alongside the PNG', () => {
+	const svg = readFileSync(new URL('../dist/favicon.svg', import.meta.url), 'utf8');
+	assert.match(svg, /<svg\b[^>]*>/);
+});
