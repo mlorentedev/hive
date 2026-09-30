@@ -18,7 +18,6 @@ import importlib
 import importlib.metadata as metadata
 import logging
 import os
-import re
 import secrets
 import socket
 import subprocess
@@ -29,6 +28,7 @@ from typing import TYPE_CHECKING
 
 import filelock
 
+from hive._credential import _read_token, _verify_owner_only
 from hive._endpoint import (
     DEFAULT_HOST,
     MCP_PATH,
@@ -58,7 +58,6 @@ GRACEFUL_SHUTDOWN_S = 2
 
 _log = logging.getLogger(__name__)
 IS_WINDOWS = sys.platform == "win32"
-_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,}$")
 
 
 def _run_icacls(path: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
@@ -69,7 +68,7 @@ def _run_icacls(path: Path, *args: str) -> subprocess.CompletedProcess[str] | No
             capture_output=True,
             text=True,
         )
-    except Exception:  # noqa: BLE001 — permission verification must fail closed
+    except Exception:  # noqa: BLE001 — permission enforcement must fail closed
         return None
 
 
@@ -83,44 +82,6 @@ def _enforce_owner_only(path: Path) -> None:
             raise RuntimeError(f"could not enforce owner-only daemon credential ACL: {detail}")
         return
     path.chmod(0o600)
-
-
-def _verify_owner_only(path: Path) -> bool:
-    """Verify that only the current user can read the daemon credential."""
-    if os.name != "nt":
-        stat_result = path.stat()
-        getuid = getattr(os, "getuid", None)
-        return (
-            callable(getuid)
-            and stat_result.st_uid == getuid()
-            and stat_result.st_mode & 0o077 == 0
-        )
-    sid = current_user_identity().split(":", 1)[1]
-    listing = _run_icacls(path)
-    owner = _run_icacls(path, "/findsid", f"*{sid}")
-    verified = _run_icacls(path, "/verify")
-    if None in (listing, owner, verified):
-        return False
-    assert listing is not None and owner is not None and verified is not None
-    ace_count = sum(":(" in line for line in listing.stdout.splitlines())
-    return (
-        listing.returncode == 0
-        and owner.returncode == 0
-        and verified.returncode == 0
-        and ace_count == 1
-    )
-
-
-def _read_token(path: Path) -> str:
-    try:
-        token = path.read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        raise RuntimeError(f"could not read daemon credential at {path}: {exc}") from exc
-    if not _TOKEN_RE.fullmatch(token):
-        raise RuntimeError(f"invalid daemon credential at {path}; reinstall or rotate it")
-    if not _verify_owner_only(path):
-        raise RuntimeError(f"daemon credential at {path} is not owner-only")
-    return token
 
 
 def _create_token(path: Path) -> str:

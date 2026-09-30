@@ -4831,6 +4831,14 @@ class TestCliDispatch:
         assert server._dispatch(["serve", "--port", "9"]) == 0
         assert seen["argv"] == ["--port", "9"]
 
+    def test_client_dispatch_preserves_nonzero_exit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from hive import server
+
+        monkeypatch.setattr(server, "_run_client", lambda argv: 1)
+        assert server._dispatch(["client"]) == 1
+
     def test_bare_invocation_runs_stdio_server(
         self,
         monkeypatch: pytest.MonkeyPatch,

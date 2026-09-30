@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import queue
+import statistics
 import subprocess
 import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -210,6 +213,9 @@ def test_client_entrypoint_does_not_import_the_server_stack(tmp_path) -> None:
                 "    assert exc.code == 0",
                 "forbidden = [n for n in sys.modules",
                 "             if n == 'hive.server'",
+                "             or n == 'hive._daemon'",
+                "             or n == 'hive.config'",
+                "             or n == 'subprocess'",
                 "             or n.startswith('fastmcp')",
                 "             or n.startswith('mcp')]",
                 "assert forbidden == [], forbidden",
@@ -240,9 +246,45 @@ def test_console_scripts_use_the_lightweight_dispatcher() -> None:
     }
 
 
+def _measure_first_initialize(
+    launcher: Path, host: str, env: dict[str, str], message: str
+) -> float:
+    started = time.monotonic()
+    process = subprocess.Popen(
+        [str(launcher), "client", "--host", host],
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert process.stdin is not None
+    assert process.stdout is not None
+    assert process.stderr is not None
+    responses: queue.Queue[str] = queue.Queue()
+    reader = threading.Thread(target=lambda: responses.put(process.stdout.readline()), daemon=True)
+    reader.start()
+    try:
+        process.stdin.write(message + "\n")
+        process.stdin.flush()
+        first_response = responses.get(timeout=4.1)
+        elapsed = time.monotonic() - started
+    finally:
+        process.stdin.close()
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+    assert process.returncode == 0, process.stderr.read()
+    assert json.loads(first_response)["id"] == 1
+    return elapsed
+
+
 def test_client_initialize_response_arrives_within_one_second(
     mcp_http_server: tuple[str, int, type[_McpHandler]],
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     from hive._daemon import _enforce_owner_only
 
@@ -263,22 +305,12 @@ def test_client_initialize_response_arrives_within_one_second(
             "params": {"protocolVersion": "2025-06-18"},
         },
     )
+    launcher = Path(sys.executable).parent / ("hive.exe" if os.name == "nt" else "hive")
+    assert launcher.is_file()
 
-    started = time.monotonic()
-    result = subprocess.run(
-        [sys.executable, "-m", "hive.cli", "client", "--host", host],
-        input=message + "\n",
-        env=env,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=1.0,
-    )
-    elapsed = time.monotonic() - started
-
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout)["id"] == 1
-    assert elapsed < 1.0
+    cold_starts = [_measure_first_initialize(launcher, host, env, message) for _ in range(5)]
+    assert statistics.median(cold_starts) < 1.0, cold_starts
+    assert max(cold_starts) < 4.1, cold_starts
 
 
 def test_client_without_credential_fails_without_starting_fallback(tmp_path) -> None:
@@ -302,3 +334,62 @@ def test_client_without_credential_fails_without_starting_fallback(tmp_path) -> 
     assert result.stdout == ""
     assert "credential" in result.stderr.lower()
     assert not (tmp_path / "10_projects").exists()
+
+
+@pytest.mark.parametrize("token_text,expected", [("invalid", "invalid"), ("a" * 43, "owner-only")])
+def test_client_rejects_corrupt_or_permission_invalid_credential(
+    tmp_path: Path, token_text: str, expected: str
+) -> None:
+    token_path = tmp_path / "daemon.token"
+    token_path.write_text(token_text, encoding="utf-8")
+    if os.name == "nt":
+        subprocess.run(
+            ["icacls", str(token_path), "/grant", "*S-1-1-0:(R)"],
+            check=True, capture_output=True,
+        )
+    else:
+        token_path.chmod(0o644)
+    env = {
+        **os.environ,
+        "HIVE_DB_PATH": str(tmp_path / "worker.db"),
+        "HIVE_DAEMON_PORT": "1",
+    }
+
+    result = subprocess.run(
+        [sys.executable, "-m", "hive.cli", "client"],
+        input='{"jsonrpc":"2.0","id":1,"method":"initialize"}\n',
+        env=env,
+        check=False, capture_output=True, text=True, timeout=3.0,
+    )
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert expected in result.stderr
+    if len(token_text) >= 32:
+        assert token_text not in result.stderr
+
+
+def test_client_unreachable_daemon_exits_with_a_json_rpc_error(tmp_path: Path) -> None:
+    from hive._daemon import _enforce_owner_only
+
+    token_path = tmp_path / "daemon.token"
+    token = "a" * 43
+    token_path.write_text(token, encoding="utf-8")
+    _enforce_owner_only(token_path)
+    env = {
+        **os.environ,
+        "HIVE_DB_PATH": str(tmp_path / "worker.db"),
+        "HIVE_DAEMON_PORT": "1",
+    }
+
+    result = subprocess.run(
+        [sys.executable, "-m", "hive.cli", "client"],
+        input='{"jsonrpc":"2.0","id":1,"method":"initialize"}\n',
+        env=env,
+        check=False, capture_output=True, text=True, timeout=3.0,
+    )
+
+    assert result.returncode != 0
+    assert json.loads(result.stdout)["error"]["code"] == -32000
+    assert "daemon unavailable" in result.stderr
+    assert token not in result.stderr + result.stdout

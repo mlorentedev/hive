@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
@@ -23,11 +25,13 @@ def test_load_or_create_token_reuses_existing_token(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    import hive._credential as credential
     import hive._daemon as daemon
 
     _patch_state_paths(monkeypatch, tmp_path)
     monkeypatch.setattr(daemon, "_enforce_owner_only", lambda path: None)
     monkeypatch.setattr(daemon, "_verify_owner_only", lambda path: True)
+    monkeypatch.setattr(credential, "_verify_owner_only", lambda path: True)
 
     first = daemon.load_or_create_token()
     second = daemon.load_or_create_token()
@@ -57,11 +61,12 @@ def test_existing_invalid_token_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    import hive._credential as credential
     import hive._daemon as daemon
 
     _patch_state_paths(monkeypatch, tmp_path)
     (tmp_path / "daemon.token").write_text("not a token", encoding="utf-8")
-    monkeypatch.setattr(daemon, "_verify_owner_only", lambda path: True)
+    monkeypatch.setattr(credential, "_verify_owner_only", lambda path: True)
 
     with pytest.raises(RuntimeError, match="invalid daemon credential"):
         daemon.load_or_create_token()
@@ -71,26 +76,65 @@ def test_existing_permission_invalid_token_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    import hive._credential as credential
     import hive._daemon as daemon
 
     _patch_state_paths(monkeypatch, tmp_path)
     (tmp_path / "daemon.token").write_text("a" * 43, encoding="utf-8")
-    monkeypatch.setattr(daemon, "_verify_owner_only", lambda path: False)
+    monkeypatch.setattr(credential, "_verify_owner_only", lambda path: False)
 
     with pytest.raises(RuntimeError, match="owner-only"):
         daemon.load_or_create_token()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL verification")
+def test_windows_credential_verification_avoids_subprocesses(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import hive._credential as credential
+    from hive._daemon import _enforce_owner_only
+
+    path = tmp_path / "synthetic.token"
+    path.write_text("a" * 43, encoding="utf-8")
+    _enforce_owner_only(path)
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *args, **kwargs: pytest.fail("credential validation launched a subprocess"),
+    )
+
+    assert credential._verify_owner_only(path)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL verification")
+def test_windows_credential_verification_rejects_an_extra_principal(tmp_path: Path) -> None:
+    import hive._credential as credential
+    from hive._daemon import _enforce_owner_only
+
+    path = tmp_path / "synthetic.token"
+    path.write_text("a" * 43, encoding="utf-8")
+    _enforce_owner_only(path)
+    assert not credential._windows_owner_only(path, "S-1-5-21-0-0-0-999")
+    subprocess.run(
+        ["icacls", str(path), "/grant", "*S-1-1-0:(R)"],
+        check=True,
+        capture_output=True,
+    )
+
+    assert not credential._verify_owner_only(path)
 
 
 def test_run_serve_uses_stable_port_and_token_across_restarts(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    import hive._credential as credential
     import hive._daemon as daemon
 
     _patch_state_paths(monkeypatch, tmp_path)
     monkeypatch.setattr(daemon, "_startup_self_heal", lambda vault: None)
     monkeypatch.setattr(daemon, "_enforce_owner_only", lambda path: None)
     monkeypatch.setattr(daemon, "_verify_owner_only", lambda path: True)
+    monkeypatch.setattr(credential, "_verify_owner_only", lambda path: True)
     monkeypatch.setattr(daemon, "configured_daemon_port", lambda: 54282)
     monkeypatch.setattr(daemon, "_port_available", lambda host, port: True)
     served: list[tuple[int, str]] = []

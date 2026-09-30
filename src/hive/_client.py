@@ -8,7 +8,7 @@ import json
 import sys
 from typing import Any
 
-from hive._daemon import _read_token
+from hive._credential import _read_token
 from hive._endpoint import (
     DEFAULT_HOST,
     MCP_PATH,
