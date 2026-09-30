@@ -23,10 +23,19 @@ import argparse
 import asyncio
 import json
 import logging
+import socket
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from hive._credential import _read_token
+from hive._endpoint import DEFAULT_HOST, MCP_PATH, configured_daemon_port, token_file_path
+
+if TYPE_CHECKING:
+    from fastmcp import Client
 
 _log = logging.getLogger("hive.delegate")
+_PROBE_TIMEOUT_S = 0.5
+_DAEMON_INIT_TIMEOUT_S = 5.0
 
 # Exit codes, from HIVE-384's contract table. These are a CROSS-REPO contract:
 # `dotf agent run` advances its chain on EXIT_POOL_UNAVAILABLE and must not on
@@ -63,6 +72,34 @@ required and why the exit code distinguishes a pool that would not serve the
 request (3, try the next entry) from a worker that answered with a failure
 (1, do not).
 """
+
+
+def _read_state() -> tuple[int, str] | None:
+    """Resolve the stable daemon endpoint and validate its credential."""
+    try:
+        return configured_daemon_port(), _read_token(token_file_path())
+    except (OSError, RuntimeError, ValueError) as exc:
+        _log.warning("daemon state unavailable; dispatching locally: %s", exc)
+        return None
+
+
+def _daemon_reachable(host: str, port: int) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=_PROBE_TIMEOUT_S):
+            return True
+    except OSError:
+        return False
+
+
+def _remote_client(host: str, port: int, token: str) -> Client[Any]:
+    from fastmcp import Client
+    from fastmcp.client.transports import StreamableHttpTransport
+
+    transport = StreamableHttpTransport(
+        f"http://{host}:{port}{MCP_PATH}",
+        headers={"Authorization": "Bearer " + token},
+    )
+    return Client(transport, init_timeout=_DAEMON_INIT_TIMEOUT_S)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -172,11 +209,6 @@ async def _dispatch_async(
     context: str,
     max_tokens: int,
 ) -> dict[str, Any]:
-    # DEFAULT_HOST from its defining module, not re-exported through the shim:
-    # mypy --strict rejects the indirect import, and one origin is one fact.
-    from hive._client import _daemon_reachable, _read_state, _remote_client
-    from hive._daemon import DEFAULT_HOST
-
     payload = {
         "prompt": prompt,
         "model": model,

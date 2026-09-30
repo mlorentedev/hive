@@ -705,26 +705,35 @@ def _run_serve(argv: list[str]) -> int:
     """
     import argparse
 
-    from hive._daemon import DEFAULT_HOST, run_serve
+    from hive._daemon import run_serve
+    from hive._endpoint import DEFAULT_HOST
 
     parser = argparse.ArgumentParser(prog="hive serve")
     parser.add_argument("--host", default=DEFAULT_HOST)
-    parser.add_argument("--port", type=int, default=0, help="0 = pick a free port")
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help=(
+            "daemon-only port override (default: HIVE_DAEMON_PORT or per-user port); "
+            "clients require a matching HIVE_DAEMON_PORT"
+        ),
+    )
     opts = parser.parse_args(argv)
     return run_serve(host=opts.host, port=opts.port)
 
 
-def _run_client(argv: list[str]) -> None:
-    """``hive client`` — thin stdio shim: proxy to the daemon, else fallback."""
+def _run_client(argv: list[str]) -> int:
+    """``hive client`` — relay stdio to the stable daemon without fallback."""
     import argparse
 
     from hive._client import run_client
-    from hive._daemon import DEFAULT_HOST
+    from hive._endpoint import DEFAULT_HOST
 
     parser = argparse.ArgumentParser(prog="hive client")
     parser.add_argument("--host", default=DEFAULT_HOST)
     opts = parser.parse_args(argv)
-    run_client(host=opts.host)
+    return run_client(host=opts.host)
 
 
 def _run_service(argv: list[str]) -> int:
@@ -805,8 +814,8 @@ usage: hive [COMMAND]
 
 Commands:
   (no args)                            run the stdio MCP server (v1 per-session contract)
-  serve                                run the single-owner daemon (ADR-011)
-  client                               run the thin stdio shim that proxies to the daemon
+  serve                                run the daemon on its stable local endpoint
+  client                               relay stdio to the daemon; never starts a fallback owner
   delegate --model M --timeout S       run one task against one model; JSON on stdout
                                        (exit 1 task failed, 3 pool unavailable, 4 timeout)
   service {install,uninstall,status}   manage the daemon as a per-user OS service
@@ -853,8 +862,7 @@ def _dispatch(argv: list[str]) -> int:
     if cmd == "self-upgrade":
         return _run_self_upgrade(argv[1:])
     if cmd == "client":
-        _run_client(argv[1:])
-        return 0
+        return _run_client(argv[1:])
     if cmd == "delegate":
         from hive._delegate import run_delegate
 
@@ -869,9 +877,9 @@ def main() -> None:
 
     Bare ``hive`` runs the stdio MCP server (the v1 per-session contract).
     ``hive serve`` runs the Phase C single-owner daemon over loopback HTTP +
-    bearer token (ADR-011). ``hive client`` runs the thin stdio shim that
-    proxies to that daemon (falling back to the in-process server when none is
-    reachable). ``hive service {install,uninstall,status}`` manages the daemon
+    bearer token (ADR-011). ``hive client`` relays stdio to that daemon
+    without fallback.
+    ``hive service {install,uninstall,status}`` manages the daemon
     as a per-user OS service. ``hive --version`` / ``--help`` print and exit;
     an unknown token is a usage error (exit 2). ``create_server()`` is called
     here rather than at module import so importing ``hive.server`` is

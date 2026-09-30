@@ -1,0 +1,44 @@
+[
+  {
+    "id": "HIVE-437-stable-local-mcp-endpoint-f1",
+    "behavior": "The v1 per-user identity formula and explicit override resolve one validated private-range daemon port.",
+    "verification": "uv run python -m pytest tests/test_endpoint.py -q",
+    "state": "pending",
+    "evidence": "uv run python -m pytest tests/test_endpoint.py -q: 13 passed"
+  },
+  {
+    "id": "HIVE-437-stable-local-mcp-endpoint-f2",
+    "behavior": "Ordinary daemon restarts bind the same endpoint and reuse one atomically published owner-only token.",
+    "verification": "uv run python -m pytest tests/test_daemon_state.py tests/test_daemon.py -k \"token or stable_port or stable_endpoint_restart\" -q",
+    "state": "pending",
+    "evidence": "token/stable_port/stable_endpoint_restart selector: 8 passed"
+  },
+  {
+    "id": "HIVE-437-stable-local-mcp-endpoint-f3",
+    "behavior": "The installed hive client entrypoint avoids the server import graph and initializes through the daemon within one second.",
+    "verification": "uv run python -m pytest tests/test_client.py -k \"entrypoint or console_scripts or initialize_response\" -q",
+    "state": "pending",
+    "evidence": "entrypoint/console_scripts/initialize_response selector: 3 passed on Windows; prior loaded-host runs were intermittent"
+  },
+  {
+    "id": "HIVE-437-stable-local-mcp-endpoint-f4",
+    "behavior": "The stdio adapter explicitly rejects unavailable or invalid daemon state and never starts an unmanaged fallback server.",
+    "verification": "uv run python -m pytest tests/test_client.py tests/test_daemon_state.py -k \"credential or connection_failure or existing_invalid_token or existing_permission_invalid_token\" -q",
+    "state": "pending",
+    "evidence": "credential/connection_failure/invalid_token selector: 8 passed"
+  },
+  {
+    "id": "HIVE-437-stable-local-mcp-endpoint-f5",
+    "behavior": "The adapter preserves Streamable HTTP JSON, SSE, protocol-version, and legacy session behavior without exposing credentials.",
+    "verification": "uv run python -m pytest tests/test_client.py -k \"relay or session or protocol or secret\" -q",
+    "state": "pending",
+    "evidence": "relay/session/protocol/secret selector: 4 passed; in-flight cancellation is not covered (#454)"
+  },
+  {
+    "id": "HIVE-437-stable-local-mcp-endpoint-f6",
+    "behavior": "A client configured once lists tools and calls vault_health before and after a daemon restart at the same URL.",
+    "verification": "uv run python -m pytest tests/test_daemon.py -k \"stable_endpoint_restart\" -q",
+    "state": "pending",
+    "evidence": "stable_endpoint_restart selector: 1 passed"
+  }
+]

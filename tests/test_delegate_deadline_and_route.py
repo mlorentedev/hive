@@ -205,13 +205,24 @@ class _BrokenRemoteClient:
 class TestDegradedIsReportedInBothDirections:
     """A flag observed in one state only would pass while hardcoded."""
 
+    def test_state_uses_stable_port_not_diagnostic_port(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from hive import _delegate
+
+        monkeypatch.setattr(_delegate, "configured_daemon_port", lambda: 54282)
+        monkeypatch.setattr(_delegate, "token_file_path", lambda: "credential-path")
+        monkeypatch.setattr(_delegate, "_read_token", lambda path: "synthetic-token")
+
+        assert _delegate._read_state() == (54282, "synthetic-token")
+
     def test_a_reachable_daemon_reports_not_degraded(self) -> None:
         from hive import _delegate
 
         with (
-            patch("hive._client._read_state", return_value=(4242, "a-token")),
-            patch("hive._client._daemon_reachable", return_value=True),
-            patch("hive._client._remote_client", return_value=_RemoteClient()),
+            patch("hive._delegate._read_state", return_value=(4242, "a-token")),
+            patch("hive._delegate._daemon_reachable", return_value=True),
+            patch("hive._delegate._remote_client", return_value=_RemoteClient()),
         ):
             record = _delegate._dispatch_once(
                 prompt="x", model="m", timeout_s=5.0, context="", max_tokens=10
@@ -224,7 +235,7 @@ class TestDegradedIsReportedInBothDirections:
 
         local = AsyncMock(return_value=_ToolResult())
         with (
-            patch("hive._client._read_state", return_value=None),
+            patch("hive._delegate._read_state", return_value=None),
             patch("hive.server.create_server") as make,
         ):
             make.return_value.call_tool = local
@@ -245,9 +256,9 @@ class TestDegradedIsReportedInBothDirections:
 
         local = AsyncMock(return_value=_ToolResult())
         with (
-            patch("hive._client._read_state", return_value=(4242, "a-token")),
-            patch("hive._client._daemon_reachable", return_value=True),
-            patch("hive._client._remote_client", return_value=_BrokenRemoteClient()),
+            patch("hive._delegate._read_state", return_value=(4242, "a-token")),
+            patch("hive._delegate._daemon_reachable", return_value=True),
+            patch("hive._delegate._remote_client", return_value=_BrokenRemoteClient()),
             patch("hive.server.create_server") as make,
         ):
             make.return_value.call_tool = local
@@ -263,8 +274,8 @@ class TestDegradedIsReportedInBothDirections:
 
         local = AsyncMock(return_value=_ToolResult())
         with (
-            patch("hive._client._read_state", return_value=(4242, "a-token")),
-            patch("hive._client._daemon_reachable", return_value=False),
+            patch("hive._delegate._read_state", return_value=(4242, "a-token")),
+            patch("hive._delegate._daemon_reachable", return_value=False),
             patch("hive.server.create_server") as make,
         ):
             make.return_value.call_tool = local
