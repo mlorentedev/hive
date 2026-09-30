@@ -9,6 +9,7 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'Hive',
+			favicon: '/favicon.png',
 			customCss: ['./src/styles/custom.css'],
 			defaultLocale: 'root',
 			locales: {
