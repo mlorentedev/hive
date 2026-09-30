@@ -98,7 +98,8 @@ def test_windows_credential_verification_avoids_subprocesses(
     path.write_text("a" * 43, encoding="utf-8")
     _enforce_owner_only(path)
     monkeypatch.setattr(
-        subprocess, "run",
+        subprocess,
+        "run",
         lambda *args, **kwargs: pytest.fail("credential validation launched a subprocess"),
     )
 

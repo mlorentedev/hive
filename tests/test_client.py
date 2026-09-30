@@ -345,7 +345,8 @@ def test_client_rejects_corrupt_or_permission_invalid_credential(
     if os.name == "nt":
         subprocess.run(
             ["icacls", str(token_path), "/grant", "*S-1-1-0:(R)"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
     else:
         token_path.chmod(0o644)
@@ -359,7 +360,10 @@ def test_client_rejects_corrupt_or_permission_invalid_credential(
         [sys.executable, "-m", "hive.cli", "client"],
         input='{"jsonrpc":"2.0","id":1,"method":"initialize"}\n',
         env=env,
-        check=False, capture_output=True, text=True, timeout=3.0,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=3.0,
     )
 
     assert result.returncode != 0
@@ -386,7 +390,10 @@ def test_client_unreachable_daemon_exits_with_a_json_rpc_error(tmp_path: Path) -
         [sys.executable, "-m", "hive.cli", "client"],
         input='{"jsonrpc":"2.0","id":1,"method":"initialize"}\n',
         env=env,
-        check=False, capture_output=True, text=True, timeout=3.0,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=3.0,
     )
 
     assert result.returncode != 0

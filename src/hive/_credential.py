@@ -31,8 +31,14 @@ def _windows_security_api() -> tuple[ctypes.CDLL, ctypes.CDLL]:
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     pointer = ctypes.POINTER(ctypes.c_void_p)
     advapi.GetNamedSecurityInfoW.argtypes = [
-        wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD,
-        pointer, pointer, pointer, pointer, pointer,
+        wintypes.LPCWSTR,
+        ctypes.c_int,
+        wintypes.DWORD,
+        pointer,
+        pointer,
+        pointer,
+        pointer,
+        pointer,
     ]
     advapi.GetNamedSecurityInfoW.restype = wintypes.DWORD
     advapi.ConvertStringSidToSidW.argtypes = [wintypes.LPCWSTR, pointer]
@@ -54,8 +60,14 @@ def _windows_owner_only(path: Path, sid: str) -> bool:
     user = ctypes.c_void_p()
     try:
         status = advapi.GetNamedSecurityInfoW(
-            str(path), 1, 5, ctypes.byref(owner), None,
-            ctypes.byref(dacl), None, ctypes.byref(descriptor),
+            str(path),
+            1,
+            5,
+            ctypes.byref(owner),
+            None,
+            ctypes.byref(dacl),
+            None,
+            ctypes.byref(descriptor),
         )
         if status != 0 or not owner.value or not dacl.value:
             return False
@@ -85,9 +97,7 @@ def _verify_owner_only(path: Path) -> bool:
         stat_result = path.stat()
         getuid = getattr(os, "getuid", None)
         return (
-            callable(getuid)
-            and stat_result.st_uid == getuid()
-            and stat_result.st_mode & 0o077 == 0
+            callable(getuid) and stat_result.st_uid == getuid() and stat_result.st_mode & 0o077 == 0
         )
     sid = current_user_identity().split(":", 1)[1]
     return _windows_owner_only(path, sid)
