@@ -38,7 +38,9 @@ created: "2026-09-28"
 
 - Feature selectors in `features.json`: f1 13 passed, f2 8 passed, f4
   8 passed, f5 4 passed, f6 1 passed in earlier local Windows runs. The
-  f3 selector passed 3 tests on a fresh isolated run.
+  f3 selector passed 3 tests on a fresh isolated run. The `state` fields
+  remain `pending`: the feature harness owns the terminal gate; measured
+  results belong in this verification log, not a manually promoted state.
 - `uv run ruff check src/ tests/`: passed.
 - `uv run mypy --strict src/`: passed, 35 source files.
 - `uv run python -m pytest tests/test_endpoint.py tests/test_daemon_state.py
