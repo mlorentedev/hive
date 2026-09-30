@@ -24,6 +24,8 @@ created: "2026-09-28"
 - [ ] AC5: `test_relay_preserves_json_session_protocol_and_sse`,
   `test_relay_adds_current_protocol_metadata_header`, and
   `test_relay_reinitializes_after_daemon_restart_loses_session` pass.
+  `test_relay_rediscovers_after_daemon_restart_for_2026_protocol` also
+  verifies rediscovery without `initialize` and preserves the protocol header.
   In-flight cancellation is not forwarded until the current HTTP call returns;
   the concurrent dispatch/abort contract is tracked in #454.
 - [x] AC6: `tests/test_daemon_state.py` covers atomic token publication,

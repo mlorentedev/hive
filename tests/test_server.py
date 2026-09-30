@@ -4831,6 +4831,17 @@ class TestCliDispatch:
         assert server._dispatch(["serve", "--port", "9"]) == 0
         assert seen["argv"] == ["--port", "9"]
 
+    def test_serve_port_help_warns_clients_need_matching_environment(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from hive.server import _run_serve
+
+        with pytest.raises(SystemExit, match="0"):
+            _run_serve(["--help"])
+        help_text = capsys.readouterr().out
+        assert "HIVE_DAEMON_PORT" in help_text
+        assert "client" in help_text
+
     def test_client_dispatch_preserves_nonzero_exit(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from hive import server
 

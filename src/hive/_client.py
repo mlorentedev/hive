@@ -95,7 +95,7 @@ class HttpRelay:
         self._token = token
         self._session_id = ""
         self._protocol_version = ""
-        self._initialize_message: dict[str, Any] | None = None
+        self._bootstrap_message: dict[str, Any] | None = None
         self._initialized_message: dict[str, Any] | None = None
 
     def _headers(self, message: dict[str, Any]) -> dict[str, str]:
@@ -143,8 +143,8 @@ class HttpRelay:
     def forward(self, message: dict[str, Any]) -> list[dict[str, Any]]:
         """Forward one client request/notification and return response frames."""
         method = message.get("method")
-        if method == "initialize":
-            self._initialize_message = message.copy()
+        if method in ("initialize", "server/discover"):
+            self._bootstrap_message = message.copy()
         elif method == "notifications/initialized":
             self._initialized_message = message.copy()
         return self._forward(message, allow_reinitialize=True)
@@ -186,11 +186,13 @@ class HttpRelay:
 
     def _reinitialize(self) -> None:
         """Restore the backend session after a daemon restart."""
-        if self._initialize_message is None:
-            raise ClientError("Hive daemon lost the MCP session before initialize")
+        if self._bootstrap_message is None:
+            raise ClientError("Hive daemon lost the MCP session before discovery or initialize")
         self._session_id = ""
         self._protocol_version = ""
-        self._forward(self._initialize_message, allow_reinitialize=False)
+        self._forward(self._bootstrap_message, allow_reinitialize=False)
+        if self._bootstrap_message["method"] == "server/discover":
+            return
         initialized = self._initialized_message or {
             "jsonrpc": "2.0",
             "method": "notifications/initialized",
@@ -203,8 +205,10 @@ class HttpRelay:
         message: dict[str, Any],
         frames: list[dict[str, Any]],
     ) -> None:
-        if message.get("method") != "initialize":
+        if message.get("method") not in ("initialize", "server/discover"):
             return
+        if message.get("method") == "server/discover":
+            self._protocol_version = _metadata_protocol(message)
         for frame in frames:
             result = frame.get("result")
             if isinstance(result, dict) and isinstance(result.get("protocolVersion"), str):

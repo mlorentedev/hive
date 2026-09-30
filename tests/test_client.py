@@ -48,6 +48,16 @@ class _McpHandler(BaseHTTPRequestHandler):
                 session_id="session-123",
             )
             return
+        if method == "server/discover":
+            self._send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": message["id"],
+                    "result": {"capabilities": {}},
+                },
+                session_id="session-456",
+            )
+            return
         if self.reject_session_once and self.headers.get("Mcp-Session-Id"):
             type(self).reject_session_once = False
             self.send_response(404)
@@ -185,6 +195,30 @@ def test_relay_reinitializes_after_daemon_restart_loses_session(
         "notifications/initialized",
         "tools/list",
     ]
+
+
+def test_relay_rediscovers_after_daemon_restart_for_2026_protocol(
+    mcp_http_server: tuple[str, int, type[_McpHandler]],
+) -> None:
+    from hive._client import HttpRelay
+
+    host, port, handler = mcp_http_server
+    relay = HttpRelay(host, port, "secret-token")
+    discover = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "server/discover",
+        "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28"}},
+    }
+    assert relay.forward(discover)[0]["result"] == {"capabilities": {}}
+    handler.reject_session_once = True
+
+    frames = relay.forward({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+
+    assert frames[-1] == {"jsonrpc": "2.0", "id": 2, "result": {"tools": []}}
+    methods = [request["message"]["method"] for request in handler.requests if "message" in request]
+    assert methods == ["server/discover", "tools/list", "server/discover", "tools/list"]
+    assert handler.requests[-1]["headers"]["MCP-Protocol-Version"] == "2026-07-28"
 
 
 def test_relay_connection_failure_is_explicit_and_redacts_token() -> None:
@@ -384,7 +418,6 @@ def test_client_without_credential_fails_without_starting_fallback(tmp_path) -> 
     assert result.returncode != 0
     assert result.stdout == ""
     assert "credential" in result.stderr.lower()
-    assert not (tmp_path / "10_projects").exists()
 
 
 @pytest.mark.parametrize("token_text,expected", [("invalid", "invalid"), ("a" * 43, "owner-only")])

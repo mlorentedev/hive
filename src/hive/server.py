@@ -714,7 +714,10 @@ def _run_serve(argv: list[str]) -> int:
         "--port",
         type=int,
         default=0,
-        help="stable loopback port (default: HIVE_DAEMON_PORT or per-user derivation)",
+        help=(
+            "daemon-only port override (default: HIVE_DAEMON_PORT or per-user port); "
+            "clients require a matching HIVE_DAEMON_PORT"
+        ),
     )
     opts = parser.parse_args(argv)
     return run_serve(host=opts.host, port=opts.port)

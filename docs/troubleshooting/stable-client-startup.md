@@ -16,6 +16,9 @@ An MCP host closes `hive client` before its first `initialize` response, or
 the client reports an unavailable daemon without starting a fallback server.
 The fixed endpoint and token survive ordinary daemon restarts, but service
 installation and client-registration rollout are separate work (#176).
+If the daemon was launched with `hive serve --port`, the client still derives
+its port independently: set the same `HIVE_DAEMON_PORT` in both environments
+or remove `--port` to use the default per-user endpoint.
 
 ## Diagnosis
 

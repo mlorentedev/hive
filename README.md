@@ -88,9 +88,11 @@ explicitly rather than starting a competing in-process owner.
 
 The default endpoint is a deterministic per-user port in `49152..65535`, so an
 ordinary daemon restart does not invalidate client configuration. Override it
-with `HIVE_DAEMON_PORT` when the derived port conflicts with another local
-service; Hive fails closed rather than silently moving to a different port. The
-owner-only bearer token persists across ordinary restarts in the daemon state
+with `HIVE_DAEMON_PORT` in both the daemon and every client environment when
+the derived port conflicts with another local service. `hive serve --port`
+changes only the daemon's bind port; it does not reconfigure `hive client` or
+`hive delegate`. Hive fails closed rather than silently moving to a different
+port. The owner-only bearer token persists across ordinary restarts in the daemon state
 directory. `daemon.port` remains diagnostic migration metadata, not client
 discovery state. See [ADR-022](docs/adr/adr-022-stable-local-mcp-endpoint.md).
 
