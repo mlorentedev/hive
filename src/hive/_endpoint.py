@@ -30,6 +30,15 @@ class _TokenUser(ctypes.Structure):
     _fields_ = [("user", _SidAndAttributes)]
 
 
+def _last_windows_error() -> OSError:
+    win_error = getattr(ctypes, "WinError")  # noqa: B009
+    last_error = getattr(ctypes, "get_last_error")  # noqa: B009
+    error = win_error(last_error())
+    if not isinstance(error, OSError):
+        raise RuntimeError("Windows API did not return an OS error")
+    return error
+
+
 def canonical_identity(
     *,
     platform: str,
@@ -48,8 +57,9 @@ def canonical_identity(
 
 def _windows_sid() -> str:
     """Read the current process token's numeric SID through the Windows API."""
-    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    win_dll = getattr(ctypes, "WinDLL")  # noqa: B009
+    advapi32: ctypes.CDLL = win_dll("advapi32", use_last_error=True)
+    kernel32: ctypes.CDLL = win_dll("kernel32", use_last_error=True)
     kernel32.GetCurrentProcess.restype = wintypes.HANDLE
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel32.CloseHandle.restype = wintypes.BOOL
@@ -65,7 +75,7 @@ def _windows_sid() -> str:
         _TOKEN_QUERY,
         ctypes.byref(token),
     ):
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise _last_windows_error()
     try:
         return _sid_from_token(advapi32, kernel32, token)
     finally:
@@ -94,7 +104,7 @@ def _sid_from_token(
         ctypes.byref(needed),
     )
     if needed.value == 0:
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise _last_windows_error()
     buffer = ctypes.create_string_buffer(needed.value)
     if not advapi32.GetTokenInformation(  # type: ignore[attr-defined]
         token,
@@ -103,7 +113,7 @@ def _sid_from_token(
         needed.value,
         ctypes.byref(needed),
     ):
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise _last_windows_error()
     token_user = ctypes.cast(buffer, ctypes.POINTER(_TokenUser)).contents
     return _sid_to_string(advapi32, kernel32, token_user.user.sid)
 
@@ -121,7 +131,7 @@ def _sid_to_string(advapi32: object, kernel32: object, sid: int) -> str:
         sid,
         ctypes.byref(value),
     ):
-        raise ctypes.WinError(ctypes.get_last_error())
+        raise _last_windows_error()
     try:
         result = value.value or ""
     finally:

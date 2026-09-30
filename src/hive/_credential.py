@@ -27,8 +27,9 @@ class _Acl(ctypes.Structure):
 
 
 def _windows_security_api() -> tuple[ctypes.CDLL, ctypes.CDLL]:
-    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    win_dll = getattr(ctypes, "WinDLL")  # noqa: B009
+    advapi: ctypes.CDLL = win_dll("advapi32", use_last_error=True)
+    kernel: ctypes.CDLL = win_dll("kernel32", use_last_error=True)
     pointer = ctypes.POINTER(ctypes.c_void_p)
     advapi.GetNamedSecurityInfoW.argtypes = [
         wintypes.LPCWSTR,
