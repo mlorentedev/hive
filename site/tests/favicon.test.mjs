@@ -9,6 +9,10 @@ for (const page of ['index.html', 'es/index.html']) {
 			/<link rel="shortcut icon" href="\/hive\/favicon\.png" type="image\/png"\/>/.test(html),
 			`PNG favicon missing from ${page}`,
 		);
+		const svg = html.match(
+			/<link(?=[^>]*\brel="icon")(?=[^>]*\btype="image\/svg\+xml")(?=[^>]*\bhref="\/hive\/favicon\.svg")[^>]*>/,
+		);
+		assert.ok(svg, `SVG favicon missing from ${page}`);
 	});
 }
 

@@ -2,10 +2,12 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
+const siteBase = '/hive';
+
 // https://astro.build/config
 export default defineConfig({
 	site: 'https://mlorentedev.github.io',
-	base: '/hive',
+	base: siteBase,
 	integrations: [
 		starlight({
 			title: 'Hive',
@@ -23,6 +25,7 @@ export default defineConfig({
 				},
 			},
 			head: [
+				{ tag: 'link', attrs: { rel: 'icon', type: 'image/svg+xml', href: `${siteBase}/favicon.svg` } },
 				{ tag: 'meta', attrs: { name: 'theme-color', content: '#0e7490' } },
 				{
 					tag: 'script',
