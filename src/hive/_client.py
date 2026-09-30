@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import http.client
 import json
+import math
 import sys
 from typing import Any
 
@@ -17,6 +18,7 @@ from hive._endpoint import (
 )
 
 _CONNECT_TIMEOUT_S = 0.75
+_READ_TIMEOUT_S = 70.0
 _MAX_ERROR_BODY = 4096
 
 
@@ -44,6 +46,17 @@ def _message_name(message: dict[str, Any]) -> str:
         if isinstance(value, str):
             return value
     return ""
+
+
+def _read_timeout(message: dict[str, Any]) -> float:
+    params = message.get("params")
+    if isinstance(params, dict):
+        arguments = params.get("arguments")
+        if isinstance(arguments, dict):
+            deadline = arguments.get("timeout_s")
+            if isinstance(deadline, (int, float)) and math.isfinite(deadline) and deadline > 0:
+                return max(_READ_TIMEOUT_S, deadline + 10.0)
+    return _READ_TIMEOUT_S
 
 
 def _json_frame(raw: bytes) -> dict[str, Any]:
@@ -116,7 +129,7 @@ class HttpRelay:
         try:
             connection.connect()
             if connection.sock is not None:
-                connection.sock.settimeout(None)
+                connection.sock.settimeout(_read_timeout(message or {}))
             body = None if message is None else json.dumps(message, separators=(",", ":"))
             headers = self._headers(message or {})
             connection.request(method, MCP_PATH, body=body, headers=headers)
@@ -164,6 +177,10 @@ class HttpRelay:
                 raise ClientError(f"Hive daemon returned unsupported content type {content_type!r}")
             self._capture_protocol(message, frames)
             return frames
+        except (OSError, http.client.HTTPException) as exc:
+            raise ClientError(
+                f"Hive daemon unavailable at http://{self._host}:{self._port}{MCP_PATH}",
+            ) from exc
         finally:
             connection.close()
 

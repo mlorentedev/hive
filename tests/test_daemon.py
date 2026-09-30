@@ -192,10 +192,9 @@ async def _reconnect_then_retry(
 ) -> None:
     """One shim session straddling a daemon restart.
 
-    Append *content* under idempotency *key* against daemon A, run *restart*
-    (kill A, bring up B on a new port+token), then retry the SAME keyed write.
-    The second call must follow the shim to B and dedupe — exercising both the
-    reconnect (per-call state re-read) and at-most-once (idempotency_key).
+    Append *content* under idempotency *key* against daemon A, restart it
+    at the same endpoint, then retry the SAME keyed write. The second call
+    must follow the shim to B and dedupe without reconfiguring the client.
     """
     from fastmcp import Client
     from fastmcp.client.transports import StdioTransport
@@ -213,8 +212,12 @@ async def _reconnect_then_retry(
         env=env,
     )
     async with Client(transport) as client:
+        assert "vault_health" in {tool.name for tool in await client.list_tools()}
+        assert not (await client.call_tool("vault_health", {})).is_error
         await client.call_tool("vault_write", args)  # lands on daemon A
         await asyncio.to_thread(restart)  # A dies, B takes over
+        assert "vault_health" in {tool.name for tool in await client.list_tools()}
+        assert not (await client.call_tool("vault_health", {})).is_error
         await client.call_tool("vault_write", args)  # must follow to daemon B
 
 

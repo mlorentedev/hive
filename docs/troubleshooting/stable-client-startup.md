@@ -53,3 +53,7 @@ uv run python -m pytest tests/test_delegate_deadline_and_route.py tests/test_del
 The second command guards `hive delegate`: its independent pre-submission
 fallback must still work after the stdio client's old proxy helpers are
 removed. `hive client` itself never falls back to another vault owner.
+The relay uses a finite read timeout (the default tool deadline plus a margin,
+extended for an explicit `timeout_s` on `tools/call`), so a stalled daemon
+produces an error rather than leaving the client waiting forever. In-flight
+MCP cancellation is a separate, open transport limitation (#454).

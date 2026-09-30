@@ -21,15 +21,18 @@ created: "2026-09-28"
 - [x] AC4: `test_client_without_credential_fails_without_starting_fallback`,
   `test_client_rejects_corrupt_or_permission_invalid_credential`, and
   `test_relay_connection_failure_is_explicit_and_redacts_token` pass.
-- [x] AC5: `test_relay_preserves_json_session_protocol_and_sse`,
+- [ ] AC5: `test_relay_preserves_json_session_protocol_and_sse`,
   `test_relay_adds_current_protocol_metadata_header`, and
   `test_relay_reinitializes_after_daemon_restart_loses_session` pass.
+  In-flight cancellation is not forwarded until the current HTTP call returns;
+  the concurrent dispatch/abort contract is tracked in #454.
 - [x] AC6: `tests/test_daemon_state.py` covers atomic token publication,
   rejection of invalid credentials and Windows ACLs, and restart reuse;
   `test_relay_connection_failure_is_explicit_and_redacts_token` checks an
   adapter failure, and `test_daemon.py` checks Hive logs for token leakage.
 - [x] AC7: `test_client_stable_endpoint_restart_avoids_duplicate_write`
-  passed with a single client configuration across daemon restarts.
+  passed with a single client configuration across daemon restarts; it now
+  lists tools and calls `vault_health` both before and after the restart.
 
 ## Test status
 
@@ -45,6 +48,10 @@ created: "2026-09-28"
   56 passed, 1 deselected; the excluded test passed separately above.
 - The broader regression run was interrupted to avoid a long, noisy Windows
   run. Full-suite CI has not yet reported on this branch.
+- Reviewer follow-up: `test_relay_times_out_unresponsive_daemon_after_requested_deadline`
+  and `test_relay_reports_timeout_while_reading_sse` guard finite read waits
+  and explicit errors. In-flight cancellation remains deferred to #454;
+  this is an AC5 gap, not a passed transport assertion.
 - Manual smoke test: automated restart integration test passed; no separate
   interactive smoke was performed.
 - No regressions in the targeted test suite: yes (56 passed); full suite:

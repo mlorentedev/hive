@@ -31,8 +31,8 @@
     "id": "HIVE-437-stable-local-mcp-endpoint-f5",
     "behavior": "The adapter preserves Streamable HTTP JSON, SSE, protocol-version, and legacy session behavior without exposing credentials.",
     "verification": "uv run python -m pytest tests/test_client.py -k \"relay or session or protocol or secret\" -q",
-    "state": "passing",
-    "evidence": "relay/session/protocol/secret selector: 4 passed"
+    "state": "pending",
+    "evidence": "relay/session/protocol/secret selector: 4 passed; in-flight cancellation is not covered (#454)"
   },
   {
     "id": "HIVE-437-stable-local-mcp-endpoint-f6",

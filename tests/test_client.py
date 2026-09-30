@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import queue
@@ -195,6 +196,56 @@ def test_relay_connection_failure_is_explicit_and_redacts_token() -> None:
         relay.forward({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
 
     assert "must-never-leak" not in str(excinfo.value)
+
+
+def test_relay_times_out_unresponsive_daemon_after_requested_deadline(
+    mcp_http_server: tuple[str, int, type[_McpHandler]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hive._client import ClientError, HttpRelay
+
+    host, port, _handler = mcp_http_server
+    timeouts: list[float] = []
+    original_getresponse = http.client.HTTPConnection.getresponse
+
+    def stalled_response(connection: http.client.HTTPConnection) -> None:
+        assert connection.sock is not None
+        read_timeout = connection.sock.gettimeout()
+        assert isinstance(read_timeout, float)
+        timeouts.append(read_timeout)
+        original_getresponse(connection).read()
+        raise TimeoutError("daemon stopped responding")
+
+    monkeypatch.setattr(http.client.HTTPConnection, "getresponse", stalled_response)
+    with pytest.raises(ClientError, match="daemon unavailable"):
+        HttpRelay(host, port, "secret-token").forward(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "delegate_task", "arguments": {"timeout_s": 180}},
+            },
+        )
+    assert 180 < timeouts[0] < 200
+
+
+def test_relay_reports_timeout_while_reading_sse(
+    mcp_http_server: tuple[str, int, type[_McpHandler]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hive._client as client_module
+
+    host, port, _handler = mcp_http_server
+
+    def stalled_stream(response: http.client.HTTPResponse) -> list[dict[str, Any]]:
+        response.read()
+        raise TimeoutError("daemon stopped sending events")
+
+    monkeypatch.setattr(client_module, "_sse_frames", stalled_stream)
+    with pytest.raises(client_module.ClientError, match="daemon unavailable"):
+        client_module.HttpRelay(host, port, "secret-token").forward(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        )
 
 
 def test_client_entrypoint_does_not_import_the_server_stack(tmp_path) -> None:
