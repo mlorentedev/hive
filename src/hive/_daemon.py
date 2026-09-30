@@ -123,6 +123,8 @@ def _port_available(host: str, port: int) -> bool:
     """Return whether the configured rendezvous can be bound right now."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as candidate:
+            if not IS_WINDOWS:
+                candidate.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             candidate.bind((host, port))
     except OSError:
         return False

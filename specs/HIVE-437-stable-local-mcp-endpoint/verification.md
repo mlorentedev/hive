@@ -69,6 +69,10 @@ Brief log of non-obvious trade-offs or course corrections taken during the work.
 - `hive delegate` retains its separate pre-submission fallback behavior; the
   legacy `hive.server client` entrypoint propagates client failures. Neither
   behavior changes the client's fail-closed, single-daemon contract.
+- The POSIX availability probe matches Uvicorn's `SO_REUSEADDR` bind policy,
+  avoiding false occupied-port results on a quick restart. Uvicorn's final
+  bind remains authoritative if another process races the probe; it reports
+  an address-in-use error and does not fall back to another port.
 
 ## Promotion candidates
 

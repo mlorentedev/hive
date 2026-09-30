@@ -170,3 +170,34 @@ def test_run_serve_fails_closed_when_stable_port_is_occupied(
     assert "54282" in message
     assert "HIVE_DAEMON_PORT" in message
     assert not (tmp_path / "daemon.port").exists()
+
+
+@pytest.mark.parametrize("is_windows", [False, True])
+def test_port_probe_only_reuses_address_on_posix(
+    monkeypatch: pytest.MonkeyPatch, is_windows: bool
+) -> None:
+    import hive._daemon as daemon
+
+    calls: list[tuple[object, ...]] = []
+
+    class Probe:
+        def __enter__(self) -> Probe:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def setsockopt(self, *args: object) -> None:
+            calls.append(("reuse", *args))
+
+        def bind(self, address: tuple[str, int]) -> None:
+            calls.append(("bind", address))
+
+    monkeypatch.setattr(daemon, "IS_WINDOWS", is_windows)
+    monkeypatch.setattr(daemon.socket, "socket", lambda *args: Probe())
+
+    assert daemon._port_available("127.0.0.1", 54282)
+    expected = (
+        [] if is_windows else [("reuse", daemon.socket.SOL_SOCKET, daemon.socket.SO_REUSEADDR, 1)]
+    )
+    assert calls == [*expected, ("bind", ("127.0.0.1", 54282))]
