@@ -155,3 +155,137 @@ def test_interrupted_first_tls_start_rotates_the_pre_tls_token_again(
     token, _ = daemon.prepare_daemon_credentials()
     assert token != pre_tls
     assert identity_state_path().exists()
+
+
+# ── Lifecycle after the identity exists (HIVE-456 AC6, PR 2) ─────────────────
+
+
+def _existing_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    issued: dt.datetime | None = None,
+) -> tuple[str, str]:
+    """A state dir past its first TLS start: identity, record and token."""
+    from hive._daemon import _create_token
+    from hive._endpoint import (
+        identity_cert_path,
+        identity_key_path,
+        identity_state_path,
+        token_file_path,
+    )
+    from hive._identity import STATE_RECORD, create_identity
+    from hive._owner_only import write_owner_only_atomic
+
+    _state_dir(monkeypatch, tmp_path)
+    identity = create_identity(identity_key_path(), identity_cert_path(), now=issued)
+    write_owner_only_atomic(identity_state_path(), STATE_RECORD)
+    return _create_token(token_file_path()), identity.fingerprint
+
+
+def _serve_once(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Run ``run_serve`` up to the point it would serve; return what it served with."""
+    import hive._daemon as daemon
+
+    served: list[str] = []
+    monkeypatch.setattr(daemon, "_startup_self_heal", lambda vault: None)
+    monkeypatch.setattr(daemon, "_port_available", lambda host, port: True)
+    monkeypatch.setattr(daemon, "configured_daemon_port", lambda: 54283)
+    monkeypatch.setattr(
+        daemon,
+        "_serve_owned",
+        lambda host, port, token, identity: served.append(identity.fingerprint) or False,
+    )
+    return served
+
+
+def test_expired_certificate_is_regenerated_and_token_kept(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from hive._daemon import prepare_daemon_credentials
+
+    long_ago = dt.datetime.now(dt.UTC) - dt.timedelta(days=500)
+    token, old_fingerprint = _existing_identity(monkeypatch, tmp_path, issued=long_ago)
+
+    kept, identity = prepare_daemon_credentials()
+
+    assert kept == token
+    assert identity.fingerprint != old_fingerprint
+    assert identity.not_after > dt.datetime.now(dt.UTC)
+
+
+def _make_over_permissive(path: Path) -> None:
+    import os
+    import subprocess
+
+    if os.name == "nt":
+        subprocess.run(
+            ["icacls", str(path), "/grant", "*S-1-1-0:(R)"],
+            check=True,
+            capture_output=True,
+        )
+    else:
+        path.chmod(0o644)
+
+
+def _assert_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    key_body: str,
+    token: str,
+) -> str:
+    import hive._daemon as daemon
+
+    served = _serve_once(monkeypatch)
+    assert daemon.run_serve() != 0
+    assert served == [], "the daemon served with untrusted identity material"
+    out = capsys.readouterr()
+    emitted = out.out + out.err
+    assert "hive service rotate-identity" in emitted
+    assert key_body not in emitted
+    assert "PRIVATE KEY" not in emitted
+    assert token not in emitted
+    return emitted
+
+
+def _key_line(tmp_path: Path) -> str:
+    lines = (tmp_path / "daemon.key").read_text(encoding="ascii").splitlines()
+    return max(lines[1:-1], key=len)
+
+
+def test_over_permissive_key_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    token, _ = _existing_identity(monkeypatch, tmp_path)
+    key_body = _key_line(tmp_path)
+    _make_over_permissive(tmp_path / "daemon.key")
+
+    emitted = _assert_fails_closed(monkeypatch, capsys, key_body, token)
+    assert "not owner-only" in emitted
+
+
+@pytest.mark.parametrize("damage", ["key-deleted", "cert-deleted", "key-truncated"])
+def test_missing_or_corrupt_identity_with_record_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    damage: str,
+) -> None:
+    from hive._owner_only import write_owner_only_atomic
+
+    token, _ = _existing_identity(monkeypatch, tmp_path)
+    key_body = _key_line(tmp_path)
+    key, cert = tmp_path / "daemon.key", tmp_path / "daemon.crt"
+    if damage == "key-deleted":
+        key.unlink()
+    elif damage == "cert-deleted":
+        cert.unlink()
+    else:
+        pem = key.read_bytes()
+        write_owner_only_atomic(key, pem[: len(pem) // 2])
+
+    _assert_fails_closed(monkeypatch, capsys, key_body, token)
+    assert (tmp_path / "identity.state").exists(), "a failed start must not erase the record"

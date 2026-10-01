@@ -447,7 +447,17 @@ def run_serve(host: str = DEFAULT_HOST, port: int = 0) -> int:
                 file=sys.stderr,
             )
             return 1
-        token, identity = prepare_daemon_credentials()
+        from hive._identity import IdentityError
+
+        try:
+            token, identity = prepare_daemon_credentials()
+        except IdentityError as exc:
+            print(
+                f"hive: {exc}; run `hive service rotate-identity` to regenerate "
+                "the identity and rotate the token",
+                file=sys.stderr,
+            )
+            return 1
         # Retained temporarily as diagnostic migration metadata. Clients derive
         # the endpoint independently and never discover it through this file.
         write_owner_only(port_file_path(), str(resolved_port))
