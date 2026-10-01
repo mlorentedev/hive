@@ -425,6 +425,101 @@ def test_delegate_remote_client_reaches_the_daemon_over_pinned_tls(
         _kill_tree(proc)
 
 
+def _initialize(relay: object) -> list[dict[str, object]]:
+    from hive._client import HttpRelay
+
+    assert isinstance(relay, HttpRelay)
+    return relay.forward(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "identity-test", "version": "1"},
+            },
+        },
+    )
+
+
+def test_relay_accepts_the_old_token_after_an_impostor_round(
+    daemon_env: tuple[dict[str, str], Path],
+) -> None:
+    """Non-disclosure, not revocation: refusing an impostor leaves the token valid."""
+    from hive._client import ClientError, HttpRelay
+    from hive._identity import create_identity
+    from tests.impostor import Impostor
+
+    env, state_dir = daemon_env
+    port = _free_port()
+    proc = _spawn_daemon(env, port)
+    try:
+        assert _wait_ready(port), "daemon did not bind its loopback port"
+        pem = _owner_cert_pem(state_dir)
+        token = (state_dir / "daemon.token").read_text(encoding="utf-8").strip()
+
+        impostor = Impostor(create_identity(state_dir / "imp.key", state_dir / "imp.crt"))
+        with pytest.raises(ClientError, match="possible impersonation"):
+            _initialize(HttpRelay(HOST, impostor.port, token, pem))
+        impostor.wait()
+        impostor.assert_refused_before_any_request(token)
+
+        frames = _initialize(HttpRelay(HOST, port, token, pem))
+        assert "result" in frames[-1], frames
+        assert (state_dir / "daemon.token").read_text(encoding="utf-8").strip() == token
+    finally:
+        _kill_tree(proc)
+
+
+def test_plaintext_era_token_capture_is_revoked_by_first_tls_start(
+    daemon_env: tuple[dict[str, str], Path],
+) -> None:
+    """A bearer captured while #453 served plaintext is dead after the first TLS start."""
+    import http.client
+
+    import httpx
+
+    from hive._daemon import _create_token
+    from tests.impostor import Impostor
+
+    env, state_dir = daemon_env
+    # 1. A #453-shaped state directory: a token and no identity.
+    captured_token = _create_token(state_dir / "daemon.token")
+    assert not (state_dir / "identity.state").exists()
+
+    # 2. The #453 relay sent the bearer in plaintext; an impostor recorded it.
+    impostor = Impostor(None)
+    legacy = http.client.HTTPConnection(HOST, impostor.port, timeout=5)
+    with contextlib.suppress(OSError, http.client.HTTPException):
+        legacy.request(
+            "POST", "/mcp", body=b"{}", headers={"Authorization": f"Bearer {captured_token}"}
+        )
+        legacy.getresponse().read()
+    legacy.close()
+    impostor.wait()
+    assert captured_token.encode() in bytes(impostor.raw)
+
+    # 3. The first TLS start rotates it: the capture is refused, the new one works.
+    port = _free_port()
+    proc = _spawn_daemon(env, port)
+    try:
+        assert _wait_ready(port), "daemon did not bind its loopback port"
+        verify = _pinned(state_dir)
+        rotated = (state_dir / "daemon.token").read_text(encoding="utf-8").strip()
+        assert rotated != captured_token
+
+        status = f"https://{HOST}:{port}/status"
+        old = httpx.get(
+            status, headers={"Authorization": f"Bearer {captured_token}"}, verify=verify
+        )
+        new = httpx.get(status, headers={"Authorization": f"Bearer {rotated}"}, verify=verify)
+        assert old.status_code == 401
+        assert new.status_code == 200
+    finally:
+        _kill_tree(proc)
+
+
 def test_hive_serve_rejects_bad_token(daemon_env: tuple[dict[str, str], Path]) -> None:
     """A request without the matching token is refused — the bare loopback
     port is not open."""

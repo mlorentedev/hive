@@ -98,7 +98,7 @@ created: "2026-09-30"
   impersonation `ClientError`, and keep the "daemon unavailable" error for
   `OSError`. The token is read once, as it is today. Run the test. Expected:
   PASS.
-- [ ] [AC1] `test_relay_accepts_the_old_token_after_an_impostor_round`
+- [x] [AC1] `test_relay_accepts_the_old_token_after_an_impostor_round`
   (non-disclosure, not revocation): after the impostor test, the relay
   connected to the real daemon succeeds with the unchanged token.
 - [x] [AC5] Extend
@@ -113,7 +113,7 @@ created: "2026-09-30"
   receives a ClientHello and no HTTP bytes, and dispatch fails without
   falling back to local dispatch on an identity failure. Implement
   `https://` plus `verify=_tls.pinned_context(cert)` in `_remote_client`.
-- [ ] [AC4] `tests/test_daemon.py::test_plaintext_era_token_capture_is_revoked_by_first_tls_start`.
+- [x] [AC4] `tests/test_daemon.py::test_plaintext_era_token_capture_is_revoked_by_first_tls_start`.
   1. Build a #453-shaped state directory.
   2. Send the synthetic token through a plaintext stand-in for the #453 relay
      to a capturing impostor, and assert that the capture holds the token.
