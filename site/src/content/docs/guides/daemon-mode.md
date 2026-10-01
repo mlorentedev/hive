@@ -65,10 +65,12 @@ For **GitHub Copilot CLI** on a trusted single-user host, register
 for both the daemon and client if you override the default. Disable an old
 `hive-vault` entry after checking the new one; avoid two registered vault
 owners. The automated
-smoke in `tests/test_daemon.py` initializes, lists tools, and calls
-`vault_health` over the real daemon via stdio and direct HTTP; it does not
-launch Copilot itself. Copilot's MCP `timeout` does not extend its separate
-initialize-handshake deadline (measured at ~4.1 seconds on Windows).
+smoke in `tests/test_daemon.py` initializes in under 4.1 seconds, lists tools,
+and calls `vault_health` over the real daemon via stdio and direct HTTP; it
+does not launch Copilot itself. Copilot documents MCP `timeout` for discovery
+and tool calls, including its connection budget. Cold initialization was
+terminated after ~4.1 seconds on the measured Windows host despite
+`timeout: 30000`; that is an observation, not a documented universal deadline.
 Avoid direct HTTP registrations containing a bearer in a config file or shell
 history; both transports remain subject to [#456](https://github.com/mlorentedev/hive/issues/456).
 

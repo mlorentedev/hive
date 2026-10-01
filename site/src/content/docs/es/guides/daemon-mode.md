@@ -67,10 +67,13 @@ registra `copilot mcp add hive -- hive client` a nivel de usuario. Si cambias
 el puerto, define `HIVE_DAEMON_PORT` tanto para el daemon como para el cliente.
 Deshabilita la entrada antigua `hive-vault` después de comprobar la nueva;
 evita registrar dos dueños del vault.
-El smoke automatizado de `tests/test_daemon.py` inicializa, lista herramientas
-y llama a `vault_health` contra el daemon real por stdio y HTTP directo; no
-ejecuta la CLI de Copilot. Su ajuste MCP `timeout` no amplía el plazo
-independiente de inicialización (~4,1 segundos medidos en Windows). Evita
+El smoke automatizado de `tests/test_daemon.py` inicializa en menos de
+4,1 segundos, lista herramientas y llama a `vault_health` contra el daemon
+real por stdio y HTTP directo; no ejecuta la CLI de Copilot. Copilot documenta
+MCP `timeout` para descubrimiento y llamadas de herramientas, incluido el
+presupuesto de conexión. En el equipo Windows medido, el inicio en frío terminó
+tras ~4,1 segundos pese a `timeout: 30000`; es una observación, no un plazo
+universal documentado. Evita
 poner el bearer de una configuración HTTP directa en archivos de configuración
 o en el historial de shell; ambos transportes están sujetos a
 [#456](https://github.com/mlorentedev/hive/issues/456).

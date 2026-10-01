@@ -127,9 +127,12 @@ does **not** launch the Copilot CLI itself. Copilot also supports a direct HTTP
 registration, but both transports send a bearer to a listener that has not
 proven its identity; do not deploy either on untrusted multi-user hosts before
 #456. Do not place the token in shell history or checked-in MCP configuration.
-Copilot's MCP `timeout` setting is for tool calls; it does **not** extend the
-separate initialize-handshake deadline (~4.1 seconds on the measured Windows
-host). Do not treat an increased `timeout` as proof of a working cold start.
+Copilot documents MCP `timeout` for tool discovery and tool calls, including
+its connection budget. On the measured Windows host, cold stdio initialization
+was terminated after ~4.1 seconds even with `timeout: 30000`. This is an
+observation on that host, **not** a documented universal initialize deadline
+or a guarantee about other versions. Measure a cold start; increasing
+`timeout` alone did not resolve that host's startup failure.
 
 ## Rollback
 

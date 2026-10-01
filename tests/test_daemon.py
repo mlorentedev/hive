@@ -418,13 +418,23 @@ def test_copilot_daemon_mode_initialize_list_and_health(
         )
 
         async def smoke() -> None:
+            started = time.monotonic()
             async with Client(transport) as client:
+                initialize_s = time.monotonic() - started
+                assert initialize_s < 4.1, f"{transport_kind} initialize took {initialize_s:.3f}s"
                 assert "vault_health" in {tool.name for tool in await client.list_tools()}
                 health = await client.call_tool("vault_health", {})
                 assert not health.is_error
                 assert "server" in str(getattr(health, "data", health)).lower()
 
         asyncio.run(smoke())
+        status = httpx.get(
+            f"http://{HOST}:{port}/status",
+            headers={"Authorization": "Bearer " + token},
+            timeout=3.0,
+        )
+        assert status.status_code == 200
+        assert status.json()["tools"]["vault_health"]["calls"] == 1
     finally:
         _kill_tree(daemon)
 
