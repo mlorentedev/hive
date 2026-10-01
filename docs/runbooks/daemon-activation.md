@@ -154,10 +154,12 @@ process:
 - Never disable verification (`NODE_TLS_REJECT_UNAUTHORIZED=0` or an
   "insecure" flag). A host that cannot verify the certificate uses
   `hive client`.
-- `tests/test_daemon.py -k direct_https` checks this contract with a stand-in
-  client and a real Node host on Linux. Until the same check passes on
-  Windows, direct HTTPS is unverified there and `hive client` is the
-  supported path.
+- `tests/test_daemon.py -k direct_https` checks Hive's side of this contract
+  on Linux, with a stand-in client and a Node client. That is not a real MCP
+  host: Hive claims direct HTTPS support on a platform only after a named MCP
+  host passes ADR-022 Amendment 1 check 10 there (Copilot CLI on Windows).
+  Until then direct HTTPS is unverified on that platform and `hive client` is
+  the supported path.
 
 Do not place the token in shell history or checked-in MCP configuration.
 Copilot documents MCP `timeout` for tool discovery and tool calls, including

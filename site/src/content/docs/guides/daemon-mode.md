@@ -79,8 +79,9 @@ daemon certificate: for Node-based hosts such as Copilot CLI, set
 `NODE_EXTRA_CA_CERTS=<state dir>/daemon.crt` in that host's environment. Never
 disable verification (`NODE_TLS_REJECT_UNAUTHORIZED=0` or an "insecure"
 flag); a host that cannot verify uses `hive client`. `http://` registrations
-no longer work, because the daemon is TLS-only. Direct HTTPS is verified on
-Linux; until the same check passes on Windows, use `hive client` there. Keep
+no longer work, because the daemon is TLS-only. Direct HTTPS counts as
+supported on a platform only once a named MCP host has passed the real-host
+check there; until then, use `hive client`. Keep
 the bearer out of config files and shell history.
 
 ## Auto-update: restart-on-upgrade

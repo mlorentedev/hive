@@ -84,8 +84,9 @@ certificado del daemon: en hosts basados en Node, como Copilot CLI, define
 host. Nunca desactives la verificación (`NODE_TLS_REJECT_UNAUTHORIZED=0` o un
 flag "insecure"); un host que no pueda verificar usa `hive client`. Los
 registros `http://` ya no funcionan, porque el daemon solo habla TLS. El HTTPS
-directo está verificado en Linux; hasta que la misma comprobación pase en
-Windows, usa `hive client` allí. No pongas el bearer en archivos de
+directo solo cuenta como soportado en una plataforma cuando un host MCP
+concreto ha pasado allí la comprobación con host real; hasta entonces, usa
+`hive client`. No pongas el bearer en archivos de
 configuración ni en el historial de shell.
 
 ## Auto-actualización: reinicio-al-actualizar
