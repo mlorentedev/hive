@@ -555,8 +555,8 @@ They never use a live vault credential. Every check runs on Linux and on
 Windows unless marked otherwise.
 
 Every absence assertion needs an independent positive control. Checks 1 to 3,
-and the "Amended clients" part of check 4, assert that an impostor received
-nothing secret. Each of them must also assert, separately, that the impostor
+the "Amended clients" part of check 4, and the impostor refusal in check 10
+assert that an impostor received nothing secret. Each of them must also assert, separately, that the impostor
 accepted the client's connection and received a TLS ClientHello from it.
 Without that control, a client that never reached the port would pass for the
 wrong reason. The "Plaintext era" part of check 4 is not an absence
