@@ -375,8 +375,9 @@ byte is written.
 ### Decision
 
 **TLS-only stable endpoint.** The daemon serves its stable endpoint only over
-TLS 1.3 or later. No plaintext listener runs on that port, not even one that
-redirects to TLS. All routes, including `/mcp`, `/status` and `/health`, share
+TLS 1.3 or later. No plaintext listener runs beside it, not even one that
+redirects to TLS. The single-user plaintext mode under *Direct HTTP clients*
+replaces TLS on a host; it never adds a second listener. All routes, including `/mcp`, `/status` and `/health`, share
 the one TLS listener. The bearer is still required on every MCP and `/status`
 request: TLS authenticates the server, and the bearer authenticates the
 client.
@@ -393,8 +394,16 @@ client.
   token. Both use the token's atomic sequence: generate, enforce and verify
   owner-only permissions or ACLs, then publish. The certificate is public but
   must stay owner-writable only, because it is a trust anchor.
-- A missing, corrupt, expired, or wrongly permissioned key or certificate is a
-  startup failure. The key never appears in output, logs, or diagnostics.
+- Startup handles bad identity material in three ways. The key never
+  appears in output, logs, or diagnostics.
+  - **Expired certificate** (for example after the daemon was stopped for
+    longer than the validity period): startup runs a certificate rotation
+    (see *Rotation*). Expiry is not exposure, so the token is kept.
+  - **Over-permissive key**: treated as suspected exposure. Startup fails
+    closed until a key-exposure rotation runs, which also rotates the token.
+  - **Missing or corrupt key or certificate**: startup fails closed. Recovery
+    is an explicit regeneration through the same atomic sequence. The token
+    is also rotated, because tampering cannot be ruled out.
 
 **Relay (`hive client`).**
 
@@ -429,9 +438,18 @@ client.
 - `http://` registrations are no longer part of the supported contract.
   Reconciliation of registrations that Hive owns rewrites them to the
   supported form or reports them as drift. Hive never generates them.
-- Plaintext direct HTTP remains possible only as an explicit owner risk
-  acceptance on a single-user host, recorded where that host's configuration
-  is managed. It is never a default.
+- **Single-user plaintext exception.** The endpoint is TLS-only by default.
+  The only exception is a host-wide plaintext mode: an explicit owner risk
+  acceptance for a single-user host, recorded in that host's managed
+  configuration. Never a default.
+  - It replaces TLS on the stable port; it does not add a second listener.
+    The port serves either TLS or plaintext, never both.
+  - While the mode is active, the relay and Hive-owned registrations use
+    `http://`, reconciliation treats `http://` as conforming, and
+    `hive service status` reports the endpoint as degraded ("plaintext,
+    accepted by owner").
+  - Turning the mode off is a plaintext-era exit: the first TLS start rotates
+    the token (see *Rotation*).
 
 **Supervisor, status, and diagnostics.**
 
@@ -464,9 +482,10 @@ client.
   impersonated the server and collected the bearer. A key-exposure rotation
   therefore also runs the original decision's token rotation.
 - **Exposure through the plaintext era.** Any token ever sent to a plaintext
-  stable endpoint (the #453 implementation) is treated as exposed. The first
-  start of the TLS-enabled daemon rotates the token once, marks the rotation as
-  done in the owner-only state, and does not rotate again on later starts.
+  stable endpoint is treated as exposed. That covers the #453 implementation
+  and the single-user plaintext mode. The first TLS start after plaintext use
+  rotates the token once, marks the rotation as done in the owner-only state,
+  and does not rotate again on later starts.
 
 ### Compatibility
 
@@ -529,8 +548,10 @@ Windows unless marked otherwise.
    the impostor's side.
 2. **Spoofed listener, direct HTTP.** A client configured per the supported
    direct contract refuses both impostors: Node with `NODE_EXTRA_CA_CERTS`, or
-   a stand-in with the same trust configuration. Reconciliation reports an
-   `http://` registration as drift.
+   a stand-in with the same trust configuration. With the single-user
+   plaintext mode off, reconciliation reports an `http://` registration as
+   drift. With it on, `hive service status` reports the degraded plaintext
+   state.
 3. **Cross-user.** The impostor runs as a second local account without
    administrator rights while the daemon is down. Both clients refuse it. The
    daemon's start then fails closed, with a diagnostic that tells "another
@@ -539,15 +560,24 @@ Windows unless marked otherwise.
    On Windows this runs on the owner's baseline host. If CI cannot create a
    second account, record the gap instead of substituting a single-user proxy
    run.
-4. **Post-restart replay.** Whatever the impostor captured in checks 1 to 3 is
-   replayed against the restarted legitimate daemon and gets 401. The capture
-   contains no token bytes.
+4. **Post-restart replay.** Two parts, each with a token the test knows:
+   - **Plaintext era.** A pre-amendment (#453) relay sends a synthetic token
+     to a plaintext impostor, which captures it. The TLS-enabled daemon then
+     starts, and the captured token gets 401, because of the check 7
+     rotation. The rotated token is accepted.
+   - **Amended clients.** The capture from checks 1 to 3 is asserted empty: it
+     holds no token bytes and no body. Replaying the token that was valid
+     before the impostor appeared still succeeds, which shows that the
+     protection is non-disclosure, not revocation.
 5. **Positive restart.** An ordinary restart keeps the key, certificate, pin,
    and token. A cold `hive client` initialize over TLS keeps the original
    sub-second requirement on the Windows baseline.
 6. **Identity material.** Creation is atomic. POSIX modes and Windows ACLs are
-   checked. A missing, corrupt, expired, or over-permissive key or certificate
-   fails closed. After a rotation, the relay re-pins and the old certificate is
+   checked. An expired certificate is regenerated at startup and the token
+   kept. An over-permissive key fails closed until a key-exposure rotation
+   rotates the key, certificate, and token. A missing or corrupt key or
+   certificate fails closed until explicit regeneration, which also rotates
+   the token. After any rotation, the relay re-pins and the old certificate is
    refused.
 7. **Plaintext-era rotation.** The first TLS-enabled start rotates the token
    exactly once. A second start rotates nothing.
