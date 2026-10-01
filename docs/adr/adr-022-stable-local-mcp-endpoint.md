@@ -5,7 +5,7 @@ status: accepted
 owner: manu
 date: "2026-09-28"
 issue: "mlorentedev/hive#437"
-tags: [architecture, mcp, transport, windows, reliability, upgrades]
+tags: [architecture, mcp, transport, windows, reliability, upgrades, security, tls]
 created: "2026-09-28"
 ---
 
@@ -19,6 +19,15 @@ This decision amends ADR-011's daemon endpoint contract, completes the endpoint
 ownership left open by ADR-015, and narrows ADR-020's prohibition on unattended
 updates: compatible updates may auto-apply only through the transactional gates
 defined here.
+
+**Amended 2026-09-30 ([#456](https://github.com/mlorentedev/hive/issues/456)).**
+The stable endpoint serves TLS only, and no client sends the bearer or any tool
+traffic before the server has proven its per-user identity on the same
+connection. See [Amendment 1](#amendment-1-server-identity-before-secrets). It
+replaces "Streamable HTTP" with "Streamable HTTP over TLS" wherever this
+decision describes the stable endpoint. It also changes the direct HTTP client
+contract and adds verification requirements, including a Windows cross-user
+pass. That pass is required before the release hold on #449 is reconsidered.
 
 ## Date
 
@@ -310,6 +319,255 @@ transaction rather than an in-place mutation of a live Python environment.
   corrupt credentials or rotation state.
 - Tests prove no token appears in stdout, stderr, logs, or generated diagnostics.
 
+## Amendment 1: Server identity before secrets
+
+**Date:** 2026-09-30. **Issue:** [#456](https://github.com/mlorentedev/hive/issues/456).
+**Status:** Accepted. The owner chose the direct HTTP policy and the relay
+mechanism on 2026-09-30.
+
+### Why the original decision is insufficient
+
+The original decision applied MCP's "authenticate every connection"
+requirement in one direction only: the server authenticates the client. Two
+of its own choices made the other direction mandatory:
+
+- The port formula is public, so any local account can compute another
+  user's endpoint.
+- The bearer survives restarts, so a captured token stays useful.
+
+While the owner's daemon is down, another local account can bind that port.
+The plaintext relay (`hive client`) and any direct HTTP registration then send
+the reusable bearer to that listener on the first request. A second problem
+does not depend on the bearer: the listener also receives tool arguments (for
+example `vault_write` content) and can return forged tool results to the
+agent. A synthetic reproduction is recorded on #456.
+
+Failing closed on a port conflict (original decision) protects the vault from
+a second owner. It does not protect clients from a listener that is not Hive.
+
+### Threat model
+
+- **In scope:** another non-administrator account on the same host. It can
+  bind any unprivileged loopback port while the owner's daemon is not running.
+  It cannot read the owner's state directory.
+- **Out of scope:** processes running as the owner, which can already read
+  the token; administrators and root; remote hosts, because the endpoint binds
+  loopback only.
+- **Accepted:** denial of service. A squatter can stop the daemon from
+  starting. The original fail-closed rule stands, and the squatter must be
+  made visible (see *Diagnostics* below).
+- **Protected assets:** the bearer token, the confidentiality of tool
+  arguments, and the integrity of tool results.
+
+### Added invariant
+
+8. No client sends a reusable secret or any MCP traffic to the stable endpoint
+   until the server has proven possession of the owner's identity key **on
+   that same connection**.
+
+The words "same connection" rule out any proof that is separate from the
+request. The relay currently opens a new TCP connection per request
+(`HttpRelay._open`). If identity were proven on one connection and the request
+sent on another, an impostor could bind the port in between. Identity is
+therefore established in the handshake of each connection before any HTTP
+byte is written.
+
+### Decision
+
+**TLS-only stable endpoint.** The daemon serves its stable endpoint only over
+TLS 1.3 or later. No plaintext listener runs on that port, not even one that
+redirects to TLS. All routes, including `/mcp`, `/status` and `/health`, share
+the one TLS listener. The bearer is still required on every MCP and `/status`
+request: TLS authenticates the server, and the bearer authenticates the
+client.
+
+**Per-user identity key and certificate.**
+
+- Hive generates an ECDSA P-256 key and a self-signed end-entity certificate
+  for each user.
+- The certificate carries `basicConstraints CA:FALSE`, a single subject
+  alternative name `IP:127.0.0.1`, extended key usage `serverAuth`, and a
+  validity of at most 398 days. If a host trusts it, it can vouch for that one
+  address and cannot sign other certificates.
+- The key and the certificate live in the owner-only state store beside the
+  token. Both use the token's atomic sequence: generate, enforce and verify
+  owner-only permissions or ACLs, then publish. The certificate is public but
+  must stay owner-writable only, because it is a trust anchor.
+- A missing, corrupt, expired, or wrongly permissioned key or certificate is a
+  startup failure. The key never appears in output, logs, or diagnostics.
+
+**Relay (`hive client`).**
+
+- The relay uses the stored certificate as its only trust anchor (stdlib
+  `ssl`), checks the hostname `127.0.0.1`, and compares the peer certificate's
+  SHA-256 fingerprint with the stored one. It ignores the system trust store.
+- Every TCP connection completes this verification before the relay writes
+  the request line, headers, or body. The relay may reuse a verified
+  connection. It never writes to one that is not verified.
+- A handshake failure aborts the request. The error names a possible
+  impersonation, so it is distinct from "daemon unavailable", and contains no
+  credential.
+- The relay reads the pin from the owner-only store at startup and may re-read
+  it once after a verification failure. That covers a rotation that happened
+  while it was running. Re-reading the store does not trust the server: the
+  store is the owner's own file.
+- Before the first request, the relay still does nothing heavier than what is
+  needed for initialize, so the sub-second requirement still applies with the
+  TLS handshake included.
+
+**Direct HTTP clients.**
+
+- The supported direct URL is `https://127.0.0.1:<port>/mcp`.
+- A host may use it only if it is verified to validate the server certificate
+  against the per-user certificate. For Node-based hosts such as Copilot CLI,
+  that means `NODE_EXTRA_CA_CERTS` pointing at the certificate file, so the
+  trust applies only to the process that needs it. Hive does not add the
+  certificate to an operating-system or user root store.
+- Disabling verification is never supported. Examples: setting
+  `NODE_TLS_REJECT_UNAUTHORIZED=0`, or an "insecure" flag.
+- A host that cannot verify the certificate uses `hive client`.
+- `http://` registrations are no longer part of the supported contract.
+  Reconciliation of registrations that Hive owns rewrites them to the
+  supported form or reports them as drift. Hive never generates them.
+- Plaintext direct HTTP remains possible only as an explicit owner risk
+  acceptance on a single-user host, recorded where that host's configuration
+  is managed. It is never a default.
+
+**Supervisor, status, and diagnostics.**
+
+- Readiness probes, restart-on-upgrade's wait-for-ready, and `hive service
+  status` verify the pinned identity before trusting `/health`. `/health`
+  keeps its unauthenticated, liveness-only payload, but over TLS.
+- A listener that fails identity verification is reported as "endpoint held
+  by an unverified process". That state is degraded and distinct from "daemon
+  not running".
+- When startup fails on a port conflict, the diagnostic says whether the
+  holder belongs to the current account. If the OS denies the lookup, it says
+  "another account". It never names the account, and it does not move the
+  endpoint.
+- Candidate validation on ephemeral ports (Transactional self-update) uses the
+  same identity material, so a candidate never runs plaintext with the real
+  token.
+
+**Rotation.**
+
+- **Certificate and key rotation** is explicit, is triggered by expiry (at
+  most 30 days before `notAfter`), or is triggered by suspected key exposure.
+  One listener presents one certificate, so there is no dual-certificate
+  window. Rotation generates a new key and certificate atomically, then
+  restarts the daemon on them.
+- After a certificate rotation, the relay re-pins from the store. Direct hosts
+  that reference the certificate *file* pick up the new certificate on their
+  next start. Hive restarts or reports any registrations it owns that still
+  hold the old certificate.
+- **Key exposure implies token exposure.** Anyone holding the key could have
+  impersonated the server and collected the bearer. A key-exposure rotation
+  therefore also runs the original decision's token rotation.
+- **Exposure through the plaintext era.** Any token ever sent to a plaintext
+  stable endpoint (the #453 implementation) is treated as exposed. The first
+  start of the TLS-enabled daemon rotates the token once, marks the rotation as
+  done in the owner-only state, and does not rotate again on later starts.
+
+### Compatibility
+
+The change is breaking for every `http://` stable-endpoint registration and for
+any client that disables certificate verification. To migrate, re-register the
+host with the HTTPS URL and certificate trust, or switch it to `hive client`.
+The plaintext stable endpoint (#453) is on `master` but in no release, because
+#449 is held. The release that lifts that hold must contain this amendment's
+implementation, and its release notes must state the break. Plaintext stable
+endpoints are never published.
+
+### Alternatives considered
+
+- **Operating-system peer-credential check** (owner of the accepted socket: the
+  Linux `/proc/net/tcp` UID, or Windows owning PID → SID). It only works for
+  the relay, needs code for each platform, and does not protect traffic
+  confidentiality. Rejected as the primary mechanism.
+- **HMAC challenge-response per connection.** Also relay-only, and a custom
+  protocol to maintain, with no confidentiality. Rejected.
+- **Unix socket or Windows named pipe protected by OS ACLs.** This
+  authenticates the server through the filesystem or pipe ACL, but the target
+  MCP hosts do not share support for it. It remains a compatible future adapter
+  under the original decision.
+- **Plaintext with the risk accepted for single-user use.** This is Jupyter
+  Server's model: a token over plaintext loopback. Rejected as a default,
+  because Hive's Windows baseline is a multi-user host. It is kept only as an
+  explicit per-host owner exception.
+- **Trusting the certificate through the OS root store** (for example Windows
+  `CurrentUser\Root`). This changes trust for every TLS client of that user and
+  can prompt the user, so it is broader than one process needs. Rejected in
+  favour of per-process trust.
+
+### Rationale
+
+- RFC 6750 §5.3 requires clients to send bearer tokens only over TLS and to
+  validate the server certificate. A bearer sent in plaintext to an
+  unauthenticated listener is exactly what that section forbids.
+- Docker's daemon takes the same position. Its default is a
+  permission-protected socket, and TCP exposure requires mutual TLS. Hive
+  cannot use the socket with its host matrix, so the endpoint has to use TLS.
+- Only TLS lets static-configuration HTTP hosts authenticate a server, so one
+  mechanism covers both the relay and direct HTTP.
+- `cryptography` and uvicorn's TLS support are already in the dependency
+  graph, so the decision adds no new dependency.
+
+### Additional verification requirements
+
+All checks use **synthetic credentials only**: an isolated state directory, a
+generated key, certificate and token, and an ephemeral or overridden port.
+They never use a live vault credential. Every check runs on Linux and on
+Windows unless marked otherwise.
+
+1. **Spoofed listener, relay.** Put a plaintext impostor, and a TLS impostor
+   with a different self-signed certificate, on the configured port. The relay
+   aborts in the handshake. The impostor socket receives no HTTP request
+   bytes, so it sees no `Authorization` header and no body. Assert this from
+   the impostor's side.
+2. **Spoofed listener, direct HTTP.** A client configured per the supported
+   direct contract refuses both impostors: Node with `NODE_EXTRA_CA_CERTS`, or
+   a stand-in with the same trust configuration. Reconciliation reports an
+   `http://` registration as drift.
+3. **Cross-user.** The impostor runs as a second local account without
+   administrator rights while the daemon is down. Both clients refuse it. The
+   daemon's start then fails closed, with a diagnostic that tells "another
+   account" apart from "this account". Once the impostor exits, the legitimate
+   daemon starts and both clients connect without any configuration change.
+   On Windows this runs on the owner's baseline host. If CI cannot create a
+   second account, record the gap instead of substituting a single-user proxy
+   run.
+4. **Post-restart replay.** Whatever the impostor captured in checks 1 to 3 is
+   replayed against the restarted legitimate daemon and gets 401. The capture
+   contains no token bytes.
+5. **Positive restart.** An ordinary restart keeps the key, certificate, pin,
+   and token. A cold `hive client` initialize over TLS keeps the original
+   sub-second requirement on the Windows baseline.
+6. **Identity material.** Creation is atomic. POSIX modes and Windows ACLs are
+   checked. A missing, corrupt, expired, or over-permissive key or certificate
+   fails closed. After a rotation, the relay re-pins and the old certificate is
+   refused.
+7. **Plaintext-era rotation.** The first TLS-enabled start rotates the token
+   exactly once. A second start rotates nothing.
+8. **Status and readiness.** Probes and `hive service status` reject a listener
+   that fails identity verification and report it apart from "down".
+9. **No secret output.** No token or private key material appears in stdout,
+   stderr, logs, or diagnostics. This extends the original requirement.
+10. **Copilot on Windows (owner's baseline host).** Copilot CLI accepts the
+    per-user certificate through `NODE_EXTRA_CA_CERTS`, or a documented
+    equivalent, and refuses an impostor. If it does not, direct HTTP is
+    unsupported on Windows and Copilot uses `hive client`. That outcome does
+    not block #449.
+
+**Release gate.** The hold on #449 is reconsidered only after both of these:
+
+- Checks 1 to 9 pass on Linux and on Windows. The Windows evidence, including
+  check 3 on the owner's baseline host, is recorded on #456.
+- Any check that the environment cannot run is listed there as missing
+  evidence.
+
+Without that, the hold stays in place unless the owner records an explicit
+acceptance of the risk that names the missing checks.
+
 ## References
 
 - #437 — Hive stdio startup exceeds GitHub Copilot CLI initialize deadline
@@ -321,3 +579,8 @@ transaction rather than an in-place mutation of a live Python environment.
 - [Enterprise pattern research](../research/copilot-20260928-141709-stable-local-mcp-endpoint.md)
 - [MCP Streamable HTTP transport specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
 - [MCP authorization specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
+- #456 — bearer theft via a spoofed stable listener (Amendment 1)
+- [RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3) — bearer tokens require TLS and certificate validation
+- [Docker: protect the daemon socket](https://docs.docker.com/engine/security/protect-access/) — socket by default, TLS for TCP
+- [Jupyter Server security](https://jupyter-server.readthedocs.io/en/latest/operators/security.html) — the plaintext-loopback model not chosen
+- [Node.js `NODE_EXTRA_CA_CERTS`](https://nodejs.org/api/cli.html#node_extra_ca_certsfile) — per-process trust for direct HTTP hosts
