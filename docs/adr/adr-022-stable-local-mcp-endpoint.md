@@ -379,8 +379,8 @@ byte is written.
 **TLS-only stable endpoint.** The daemon serves its stable endpoint only over
 TLS 1.3 or later. No plaintext listener runs beside it, not even one that
 redirects to TLS. The single-user plaintext mode under *Direct HTTP clients*
-replaces TLS on a host; it never adds a second listener. All routes, including `/mcp`, `/status` and `/health`, share
-the one TLS listener. The bearer is still required on every MCP and `/status`
+replaces TLS on a host; it never adds a second listener. All routes, including
+`/mcp`, `/status` and `/health`, share the one TLS listener. The bearer is still required on every MCP and `/status`
 request: TLS authenticates the server, and the bearer authenticates the
 client.
 
