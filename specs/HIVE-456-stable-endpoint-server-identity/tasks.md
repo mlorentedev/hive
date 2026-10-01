@@ -117,7 +117,9 @@ created: "2026-09-30"
   and refuses both impostors.
   `test_direct_https_node_host` runs `node` with `NODE_EXTRA_CA_CERTS` and a
   `fetch` script. It is skipped when `node` is absent, and a skip is reported
-  as missing evidence, not as a pass.
+  as missing evidence, not as a pass. In both tests the impostor must record
+  an accepted connection and a ClientHello (positive control), so a client
+  that never dialled the impostor port fails instead of passing.
 - [ ] [AC9] Extend `tests/test_credential_never_emitted.py`: across daemon
   startup, relay errors, delegate errors, and impostor refusals, no token and
   no PEM `PRIVATE KEY` block appears in stdout, stderr, captured logs, or
