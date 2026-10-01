@@ -48,6 +48,23 @@ def fingerprint_matches(sock: ssl.SSLSocket, expected: str) -> bool:
     return der is not None and hashlib.sha256(der).hexdigest() == expected
 
 
+_X509_V_ERR_CERT_HAS_EXPIRED = 10
+
+
+def presented_expired_pin(exc: BaseException) -> bool:
+    """Whether a failed handshake was the pinned certificate, past its validity.
+
+    A foreign certificate fails chain building first (``self-signed
+    certificate``), so this code means the listener sent the pinned one. It
+    does not prove the listener holds the key: the chain is checked before the
+    signature that would. Callers still refuse; they only word the reason.
+    """
+    return (
+        isinstance(exc, ssl.SSLCertVerificationError)
+        and exc.verify_code == _X509_V_ERR_CERT_HAS_EXPIRED
+    )
+
+
 def load_pinned_certificate(path: Path) -> str:
     """Read the owner's certificate, failing closed like the token read.
 
