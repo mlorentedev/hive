@@ -248,11 +248,13 @@ class TestDegradedIsReportedInBothDirections:
         assert local.await_count == 1, "the in-process path must be the one that ran"
 
     def test_a_daemon_that_accepts_tcp_but_fails_the_call_degrades(self) -> None:
-        """The TCP probe proves a listener, not a working MCP session.
+        """The identity probe proves who listens, not a working MCP session.
 
-        A daemon mid-restart accepts the connection and then fails the
-        handshake. Failing the dispatch there would make a restart look like a
-        worker error; degrading and saying so is the documented contract.
+        A daemon mid-restart can pass the probe and then fail the MCP session.
+        Failing the dispatch there would make a restart look like a worker
+        error; degrading and saying so is the documented contract. A listener
+        that fails the probe is a different case: see
+        ``test_delegate_refuses_impostor_listener``.
         """
         from hive import _delegate
 
@@ -325,7 +327,7 @@ def test_delegate_refuses_impostor_listener(tmp_path: Path, impostor_kind: str) 
     assert token not in json.dumps(record)
 
 
-def test_delegate_probe_verifies_the_owner_and_reports_absence(tmp_path: Path) -> None:
+def test_delegate_probe_verifies_the_owner_unlike_an_impostor(tmp_path: Path) -> None:
     """Positive control for the impostor test: the owner's listener verifies."""
     import socket
 

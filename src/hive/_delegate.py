@@ -287,9 +287,14 @@ async def _dispatch_async(
         # cost, and a second slot out of a pool whose concurrency is the binding
         # constraint. Retrying is only free before the request was submitted.
         #
-        # Failing to open the session (daemon mid-restart, stale token,
-        # handshake stall) is unambiguous: nothing ran, so the documented
-        # ADR-011 §3 fallback applies and `degraded` reports which path answered.
+        # Failing to open the session after the identity probe passed (daemon
+        # mid-restart, stale token, MCP initialize stall, or a listener swapped
+        # in after the probe, which the pinned transport refuses before sending)
+        # is unambiguous: nothing ran, so the documented ADR-011 §3 fallback
+        # applies and `degraded` reports which path answered. A listener that
+        # fails the probe itself never reaches this branch: that is reported as
+        # a possible impersonation above, never degraded, even when it is the
+        # owner's daemon closing mid-shutdown.
         submitted = False
         try:
             client = _remote_client(DEFAULT_HOST, port, token, cert_pem)

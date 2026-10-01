@@ -127,7 +127,7 @@ def test_first_tls_start_rotates_a_pre_tls_token_once(
     assert same.fingerprint == identity.fingerprint
 
 
-def test_interrupted_first_tls_start_rotates_again_rather_than_never(
+def test_interrupted_first_tls_start_rotates_the_pre_tls_token_again(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:

@@ -2,7 +2,7 @@
   {
     "id": "HIVE-456-stable-endpoint-server-identity-ac1",
     "behavior": "AC1: Relay and delegate refuse plaintext and wrong-certificate impostors before sending any HTTP byte; impostor saw a ClientHello",
-    "verification": "uv run pytest tests/test_client.py tests/test_delegate_deadline_and_route.py -k 'impostor' -q",
+    "verification": "uv run pytest tests/test_client.py tests/test_delegate_deadline_and_route.py tests/test_daemon.py -k 'impostor' -q",
     "state": "pending",
     "evidence": ""
   },
@@ -30,7 +30,7 @@
   {
     "id": "HIVE-456-stable-endpoint-server-identity-ac5",
     "behavior": "AC5: Ordinary restart keeps key, certificate, fingerprint and token; relay stays sub-second and imports no cryptography",
-    "verification": "uv run pytest tests/test_identity.py tests/test_client.py -k 'reuses_existing or does_not_import or within_one_second' -q",
+    "verification": "uv run pytest tests/test_identity.py tests/test_client.py tests/test_daemon_state.py -k 'reuses_existing or does_not_import or within_one_second or across_restarts' -q",
     "state": "pending",
     "evidence": ""
   },
