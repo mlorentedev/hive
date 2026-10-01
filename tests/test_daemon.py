@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
+import shutil
 import socket
 import stat
 import subprocess
@@ -20,9 +22,11 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
+from tests.impostor import Impostor
+
 if TYPE_CHECKING:
     import ssl
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
 HOST = "127.0.0.1"
@@ -518,6 +522,134 @@ def test_plaintext_era_token_capture_is_revoked_by_first_tls_start(
         assert new.status_code == 200
     finally:
         _kill_tree(proc)
+
+
+_INITIALIZE = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "direct-host", "version": "1"},
+    },
+}
+
+_NODE_HOST = """
+const response = await fetch(process.argv[2], {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.HIVE_TEST_BEARER}`,
+    Accept: "application/json, text/event-stream",
+    "Content-Type": "application/json",
+  },
+  body: process.env.HIVE_TEST_BODY,
+});
+console.log(response.status);
+"""
+
+
+def _require_evidence(tool: str) -> str:
+    """Resolve *tool*, failing rather than skipping when it is absent (lesson 094)."""
+    found = shutil.which(tool)
+    if found is None:
+        if os.environ.get("HIVE_EVIDENCE_OPTIONAL") == "1":
+            pytest.skip(f"{tool} absent and HIVE_EVIDENCE_OPTIONAL=1")
+        pytest.fail(f"missing evidence: {tool} is not installed")
+    return found
+
+
+@pytest.fixture
+def direct_daemon(
+    daemon_env: tuple[dict[str, str], Path],
+) -> Iterator[tuple[int, Path, str]]:
+    """A running daemon: its port, its certificate path and its bearer."""
+    env, state_dir = daemon_env
+    port = _free_port()
+    proc = _spawn_daemon(env, port)
+    try:
+        assert _wait_ready(port), "daemon did not bind its loopback port"
+        _owner_cert_pem(state_dir)
+        token = (state_dir / "daemon.token").read_text(encoding="utf-8").strip()
+        yield port, state_dir / "daemon.crt", token
+    finally:
+        _kill_tree(proc)
+
+
+def _impostor_for(kind: str, state_dir: Path) -> Impostor:
+    from hive._identity import create_identity
+
+    if kind == "plaintext":
+        return Impostor(None)
+    return Impostor(create_identity(state_dir / "imp.key", state_dir / "imp.crt"))
+
+
+def test_direct_https_standin_trusts_only_owner_certificate(
+    direct_daemon: tuple[int, Path, str],
+) -> None:
+    """The direct-HTTP contract: trust only the per-user certificate (AC3)."""
+    import ssl
+
+    import httpx
+
+    port, cert_path, token = direct_daemon
+    # create_default_context loads no system root when a cafile is given.
+    trust = ssl.create_default_context(cafile=str(cert_path))
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json, text/event-stream",
+    }
+
+    ok = httpx.post(f"https://{HOST}:{port}/mcp", json=_INITIALIZE, headers=headers, verify=trust)
+    assert ok.status_code == 200
+
+    for kind in ("plaintext", "wrong-certificate"):
+        impostor = _impostor_for(kind, cert_path.parent)
+        with pytest.raises(httpx.ConnectError):
+            httpx.post(
+                f"https://{HOST}:{impostor.port}/mcp",
+                json=_INITIALIZE,
+                headers=headers,
+                verify=trust,
+            )
+        impostor.wait()
+        impostor.assert_refused_before_any_request(token)
+
+
+def test_direct_https_node_host(direct_daemon: tuple[int, Path, str], tmp_path: Path) -> None:
+    """A real Node host trusts the daemon through NODE_EXTRA_CA_CERTS only (AC3)."""
+    node = _require_evidence("node")
+    port, cert_path, token = direct_daemon
+    script = tmp_path / "host.mjs"
+    script.write_text(_NODE_HOST, encoding="utf-8")
+    env = {
+        **{k: v for k, v in os.environ.items() if not k.startswith("NODE_")},
+        "NODE_EXTRA_CA_CERTS": str(cert_path),
+        "HIVE_TEST_BEARER": token,
+        "HIVE_TEST_BODY": json.dumps(_INITIALIZE),
+    }
+
+    def run(target_port: int) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [node, str(script), f"https://{HOST}:{target_port}/mcp"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+
+    owner = run(port)
+    assert owner.returncode == 0, owner.stderr
+    assert owner.stdout.strip() == "200"
+
+    for kind in ("plaintext", "wrong-certificate"):
+        impostor = _impostor_for(kind, cert_path.parent)
+        refused = run(impostor.port)
+        impostor.wait()
+        assert refused.returncode != 0, refused.stdout
+        impostor.assert_refused_before_any_request(token)
+        assert token not in refused.stdout + refused.stderr
 
 
 def test_hive_serve_rejects_bad_token(daemon_env: tuple[dict[str, str], Path]) -> None:

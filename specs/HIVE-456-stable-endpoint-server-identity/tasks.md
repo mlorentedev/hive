@@ -119,7 +119,7 @@ created: "2026-09-30"
      to a capturing impostor, and assert that the capture holds the token.
   3. Start the TLS daemon. The captured token gets 401, and the rotated token
      gets 200.
-- [ ] [AC3] `tests/test_daemon.py::test_direct_https_standin_trusts_only_owner_certificate`.
+- [x] [AC3] `tests/test_daemon.py::test_direct_https_standin_trusts_only_owner_certificate`.
   An httpx client with `verify=<cert path>` initializes against the daemon
   and refuses both impostors.
   `test_direct_https_node_host` runs `node` with `NODE_EXTRA_CA_CERTS` and a
