@@ -96,6 +96,11 @@ port. The owner-only bearer token persists across ordinary restarts in the daemo
 directory. `daemon.port` remains diagnostic migration metadata, not client
 discovery state. See [ADR-022](docs/adr/adr-022-stable-local-mcp-endpoint.md).
 
+**Security hold:** Until [#456](https://github.com/mlorentedev/hive/issues/456)
+is resolved, do not deploy daemon mode on untrusted multi-user hosts. A local
+process impersonating the fixed listener during downtime can capture the
+persistent bearer through either the stdio adapter or a direct HTTP client.
+
 ```bash
 uv tool install --upgrade hive-vault   # >= 1.32.0
 hive service install                   # supervise hive serve (systemd --user / Task Scheduler)
