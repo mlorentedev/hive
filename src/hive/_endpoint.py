@@ -191,3 +191,16 @@ def port_file_path() -> Path:
 
 def lock_file_path() -> Path:
     return daemon_state_dir() / "daemon.lock"
+
+
+def identity_key_path() -> Path:
+    return daemon_state_dir() / "daemon.key"
+
+
+def identity_cert_path() -> Path:
+    return daemon_state_dir() / "daemon.crt"
+
+
+def identity_state_path() -> Path:
+    """Marks that an identity was generated, so missing material is not a migration."""
+    return daemon_state_dir() / "identity.state"

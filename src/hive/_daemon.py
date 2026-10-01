@@ -20,30 +20,36 @@ import logging
 import os
 import secrets
 import socket
-import subprocess
+import ssl
 import sys
-import tempfile
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import filelock
 
-from hive._credential import _read_token, _verify_owner_only
+from hive._credential import _read_token
 from hive._endpoint import (
     DEFAULT_HOST,
     MCP_PATH,
     configured_daemon_port,
-    current_user_identity,
     daemon_state_dir,
+    identity_cert_path,
+    identity_key_path,
+    identity_state_path,
     lock_file_path,
     port_file_path,
     token_file_path,
 )
+from hive._owner_only import enforce_owner_only as _enforce_owner_only
+from hive._owner_only import write_owner_only_atomic
 from hive.config import settings
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import uvicorn
     from fastmcp.server.auth import AuthProvider
+
+    from hive._identity import Identity
 
 PACKAGE_NAME = "hive-vault"  # PyPI distribution name (the `hive` name was taken)
 NOT_FOUND = "<not-found>"  # _current_version sentinel for the upgrade swap window
@@ -60,47 +66,9 @@ _log = logging.getLogger(__name__)
 IS_WINDOWS = sys.platform == "win32"
 
 
-def _run_icacls(path: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
-    try:
-        return subprocess.run(  # noqa: S603,S607
-            ["icacls", str(path), *args],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:  # noqa: BLE001 — permission enforcement must fail closed
-        return None
-
-
-def _enforce_owner_only(path: Path) -> None:
-    """Apply owner-only permissions, raising when the OS cannot enforce them."""
-    if os.name == "nt":
-        sid = current_user_identity().split(":", 1)[1]
-        result = _run_icacls(path, "/inheritance:r", "/grant:r", f"*{sid}:(F)")
-        if result is None or result.returncode != 0:
-            detail = "" if result is None else result.stderr.strip()
-            raise RuntimeError(f"could not enforce owner-only daemon credential ACL: {detail}")
-        return
-    path.chmod(0o600)
-
-
 def _create_token(path: Path) -> str:
-    path.parent.mkdir(parents=True, exist_ok=True)
     token = secrets.token_urlsafe(32)
-    fd, raw_temp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temp = Path(raw_temp)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-            handle.write(token)
-            handle.flush()
-            os.fsync(handle.fileno())
-        _enforce_owner_only(temp)
-        if not _verify_owner_only(temp):
-            raise RuntimeError("daemon credential candidate is not owner-only")
-        os.replace(temp, path)
-    finally:
-        with contextlib.suppress(OSError):
-            temp.unlink()
+    write_owner_only_atomic(path, token.encode("ascii"))
     return token
 
 
@@ -110,6 +78,35 @@ def load_or_create_token() -> str:
     if path.exists():
         return _read_token(path)
     return _create_token(path)
+
+
+def prepare_daemon_credentials() -> tuple[str, Identity]:
+    """Load the TLS identity and bearer, creating them on the first TLS start.
+
+    Before the identity existed the daemon served plaintext HTTP (#453), so any
+    token found then is presumed captured and is replaced, never reused. The
+    identity record is written only after that rotation, so an interrupted
+    first start rotates again instead of leaving the old token live
+    (ADR-022 Amendment 1).
+    """
+    from hive._identity import load_or_create_identity
+
+    token_path = token_file_path()
+    rotated: list[str] = []
+
+    def rotate_pre_tls_token() -> None:
+        rotated.append(_create_token(token_path))
+
+    identity = load_or_create_identity(
+        identity_key_path(),
+        identity_cert_path(),
+        identity_state_path(),
+        before_record=rotate_pre_tls_token,
+    )
+    # Record present but token gone: deletion is not exposure, so a fresh
+    # token is created as on a first install.
+    token = rotated[0] if rotated else load_or_create_token()
+    return token, identity
 
 
 def write_owner_only(path: Path, content: str) -> None:
@@ -373,9 +370,11 @@ async def _serve_until_drift_or_signal(uv_server: uvicorn.Server) -> bool:
     return drifted
 
 
-def _serve_owned(host: str, port: int, token: str) -> bool:
+def _serve_owned(host: str, port: int, token: str, identity: Identity) -> bool:
     """Own the ``uvicorn.Server`` so the drift watcher can clean-stop it.
 
+    Served over TLS with the per-user identity, so a client can tell this
+    daemon from anything else bound to the stable port (ADR-022 A1).
     Built from the PUBLIC ``mcp.http_app()`` (the spike-validated seam) rather
     than ``mcp.run(transport="http")``, whose internal signal-only stop cuts
     in-flight calls. uvicorn's default signal handlers stay installed so
@@ -395,7 +394,16 @@ def _serve_owned(host: str, port: int, token: str) -> bool:
         lifespan="on",
         log_level="warning",
         timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_S,
+        ssl_certfile=str(identity.cert_path),
+        ssl_keyfile=str(identity.key_path),
     )
+    # uvicorn has no minimum-version setting. Loading the config builds its SSL
+    # context, which is then tightened before Server.serve() reuses it
+    # (ADR-022 A1: TLS 1.3 only on the stable port).
+    config.load()
+    if config.ssl is None:
+        raise RuntimeError("daemon TLS context was not created")
+    config.ssl.minimum_version = ssl.TLSVersion.TLSv1_3
     return asyncio.run(_serve_until_drift_or_signal(uvicorn.Server(config)))
 
 
@@ -439,12 +447,12 @@ def run_serve(host: str = DEFAULT_HOST, port: int = 0) -> int:
                 file=sys.stderr,
             )
             return 1
-        token = load_or_create_token()
+        token, identity = prepare_daemon_credentials()
         # Retained temporarily as diagnostic migration metadata. Clients derive
         # the endpoint independently and never discover it through this file.
         write_owner_only(port_file_path(), str(resolved_port))
 
-        drifted = _serve_owned(host, resolved_port, token)
+        drifted = _serve_owned(host, resolved_port, token, identity)
         return EXIT_RESTART_ON_UPGRADE if drifted else 0
     finally:
         singleton.release()

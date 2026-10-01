@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
+import shutil
 import socket
 import stat
 import subprocess
@@ -20,8 +22,11 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
+from tests.impostor import Impostor
+
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    import ssl
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
 HOST = "127.0.0.1"
@@ -44,13 +49,44 @@ def _wait_ready(port: int, deadline_s: float = 45.0) -> bool:
     return False
 
 
-async def _list_tools(url: str, token: str) -> list[str]:
+def _owner_cert_pem(state_dir: Path, deadline_s: float = 20.0) -> str:
+    cert = state_dir / "daemon.crt"
+    end = time.monotonic() + deadline_s
+    while not cert.exists() and time.monotonic() < end:
+        time.sleep(0.05)
+    return cert.read_text(encoding="ascii")
+
+
+def _pinned_get(port: int, cert_pem: str, path: str) -> int:
+    import http.client
+
+    from hive._tls import pinned_context
+
+    conn = http.client.HTTPSConnection(HOST, port, timeout=10, context=pinned_context(cert_pem))
+    try:
+        conn.request("GET", path)
+        response = conn.getresponse()
+        response.read()
+        return response.status
+    finally:
+        conn.close()
+
+
+def _pinned(state_dir: Path) -> ssl.SSLContext:
+    """A client context that trusts only this daemon's certificate."""
+    from hive._tls import pinned_context
+
+    return pinned_context(_owner_cert_pem(state_dir))
+
+
+async def _list_tools(url: str, token: str, verify: ssl.SSLContext) -> list[str]:
     from fastmcp import Client
     from fastmcp.client.transports import StreamableHttpTransport
 
     transport = StreamableHttpTransport(
         url,
         headers={"Authorization": f"Bearer {token}"},
+        verify=verify,
     )
     async with Client(transport) as client:
         return [t.name for t in await client.list_tools()]
@@ -253,7 +289,14 @@ async def _query_across_kill(
 # ── observability (slice 4) helpers ───────────────────────────────────────
 
 
-async def _session_calls(url: str, token: str, tool: str, args: dict[str, str], times: int) -> None:
+async def _session_calls(
+    url: str,
+    token: str,
+    tool: str,
+    args: dict[str, str],
+    times: int,
+    verify: ssl.SSLContext,
+) -> None:
     """Open one MCP session, call *tool* *times*, then disconnect."""
     from fastmcp import Client
     from fastmcp.client.transports import StreamableHttpTransport
@@ -261,6 +304,7 @@ async def _session_calls(url: str, token: str, tool: str, args: dict[str, str], 
     transport = StreamableHttpTransport(
         url,
         headers={"Authorization": f"Bearer {token}"},
+        verify=verify,
     )
     async with Client(transport) as client:
         for _ in range(times):
@@ -346,7 +390,7 @@ def test_hive_serve_answers_tools_list(daemon_env: tuple[dict[str, str], Path]) 
         token = (state_dir / "daemon.token").read_text(encoding="utf-8").strip()
         assert token, "daemon did not write a token"
 
-        tools = asyncio.run(_list_tools(f"http://{HOST}:{port}/mcp", token))
+        tools = asyncio.run(_list_tools(f"https://{HOST}:{port}/mcp", token, _pinned(state_dir)))
         assert "vault_query" in tools
         assert "session_briefing" in tools
 
@@ -361,10 +405,257 @@ def test_hive_serve_answers_tools_list(daemon_env: tuple[dict[str, str], Path]) 
             proc.kill()
 
 
+def test_delegate_remote_client_reaches_the_daemon_over_pinned_tls(
+    daemon_env: tuple[dict[str, str], Path],
+) -> None:
+    """``hive delegate``'s transport talks to the real TLS daemon with the pin alone."""
+    from hive import _delegate
+
+    env, state_dir = daemon_env
+    port = _free_port()
+    proc = _spawn_daemon(env, port)
+    try:
+        assert _wait_ready(port), "daemon did not bind its loopback port"
+        pem = _owner_cert_pem(state_dir)
+        token = (state_dir / "daemon.token").read_text(encoding="utf-8").strip()
+        assert _delegate._probe_daemon(HOST, port, pem) == "verified"
+
+        async def tools() -> set[str]:
+            async with _delegate._remote_client(HOST, port, token, pem) as client:
+                return {tool.name for tool in await client.list_tools()}
+
+        assert "delegate_task" in asyncio.run(tools())
+    finally:
+        _kill_tree(proc)
+
+
+def _initialize(relay: object) -> list[dict[str, object]]:
+    from hive._client import HttpRelay
+
+    assert isinstance(relay, HttpRelay)
+    return relay.forward(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "identity-test", "version": "1"},
+            },
+        },
+    )
+
+
+def test_relay_accepts_the_old_token_after_an_impostor_round(
+    daemon_env: tuple[dict[str, str], Path],
+) -> None:
+    """Non-disclosure, not revocation: refusing an impostor leaves the token valid."""
+    from hive._client import ClientError, HttpRelay
+    from hive._identity import create_identity
+    from tests.impostor import Impostor
+
+    env, state_dir = daemon_env
+    port = _free_port()
+    proc = _spawn_daemon(env, port)
+    try:
+        assert _wait_ready(port), "daemon did not bind its loopback port"
+        pem = _owner_cert_pem(state_dir)
+        token = (state_dir / "daemon.token").read_text(encoding="utf-8").strip()
+
+        impostor = Impostor(create_identity(state_dir / "imp.key", state_dir / "imp.crt"))
+        with pytest.raises(ClientError, match="possible impersonation"):
+            _initialize(HttpRelay(HOST, impostor.port, token, pem))
+        impostor.wait()
+        impostor.assert_refused_before_any_request(token)
+
+        frames = _initialize(HttpRelay(HOST, port, token, pem))
+        assert "result" in frames[-1], frames
+        assert (state_dir / "daemon.token").read_text(encoding="utf-8").strip() == token
+    finally:
+        _kill_tree(proc)
+
+
+def test_plaintext_era_token_capture_is_revoked_by_first_tls_start(
+    daemon_env: tuple[dict[str, str], Path],
+) -> None:
+    """A bearer captured while #453 served plaintext is dead after the first TLS start."""
+    import http.client
+
+    import httpx
+
+    from hive._daemon import _create_token
+    from tests.impostor import Impostor
+
+    env, state_dir = daemon_env
+    # 1. A #453-shaped state directory: a token and no identity.
+    captured_token = _create_token(state_dir / "daemon.token")
+    assert not (state_dir / "identity.state").exists()
+
+    # 2. The #453 relay sent the bearer in plaintext; an impostor recorded it.
+    impostor = Impostor(None)
+    legacy = http.client.HTTPConnection(HOST, impostor.port, timeout=5)
+    with contextlib.suppress(OSError, http.client.HTTPException):
+        legacy.request(
+            "POST", "/mcp", body=b"{}", headers={"Authorization": f"Bearer {captured_token}"}
+        )
+        legacy.getresponse().read()
+    legacy.close()
+    impostor.wait()
+    assert captured_token.encode() in bytes(impostor.raw)
+
+    # 3. The first TLS start rotates it: the capture is refused, the new one works.
+    port = _free_port()
+    proc = _spawn_daemon(env, port)
+    try:
+        assert _wait_ready(port), "daemon did not bind its loopback port"
+        verify = _pinned(state_dir)
+        rotated = (state_dir / "daemon.token").read_text(encoding="utf-8").strip()
+        assert rotated != captured_token
+
+        status = f"https://{HOST}:{port}/status"
+        old = httpx.get(
+            status, headers={"Authorization": f"Bearer {captured_token}"}, verify=verify
+        )
+        new = httpx.get(status, headers={"Authorization": f"Bearer {rotated}"}, verify=verify)
+        assert old.status_code == 401
+        assert new.status_code == 200
+    finally:
+        _kill_tree(proc)
+
+
+_INITIALIZE = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "direct-host", "version": "1"},
+    },
+}
+
+_NODE_HOST = """
+const response = await fetch(process.argv[2], {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.HIVE_TEST_BEARER}`,
+    Accept: "application/json, text/event-stream",
+    "Content-Type": "application/json",
+  },
+  body: process.env.HIVE_TEST_BODY,
+});
+console.log(response.status);
+"""
+
+
+def _require_evidence(tool: str) -> str:
+    """Resolve *tool*, failing rather than skipping when it is absent (lesson 094)."""
+    found = shutil.which(tool)
+    if found is None:
+        if os.environ.get("HIVE_EVIDENCE_OPTIONAL") == "1":
+            pytest.skip(f"{tool} absent and HIVE_EVIDENCE_OPTIONAL=1")
+        pytest.fail(f"missing evidence: {tool} is not installed")
+    return found
+
+
+@pytest.fixture
+def direct_daemon(
+    daemon_env: tuple[dict[str, str], Path],
+) -> Iterator[tuple[int, Path, str]]:
+    """A running daemon: its port, its certificate path and its bearer."""
+    env, state_dir = daemon_env
+    port = _free_port()
+    proc = _spawn_daemon(env, port)
+    try:
+        assert _wait_ready(port), "daemon did not bind its loopback port"
+        _owner_cert_pem(state_dir)
+        token = (state_dir / "daemon.token").read_text(encoding="utf-8").strip()
+        yield port, state_dir / "daemon.crt", token
+    finally:
+        _kill_tree(proc)
+
+
+def _impostor_for(kind: str, state_dir: Path) -> Impostor:
+    from hive._identity import create_identity
+
+    if kind == "plaintext":
+        return Impostor(None)
+    return Impostor(create_identity(state_dir / "imp.key", state_dir / "imp.crt"))
+
+
+def test_direct_https_standin_trusts_only_owner_certificate(
+    direct_daemon: tuple[int, Path, str],
+) -> None:
+    """The direct-HTTP contract: trust only the per-user certificate (AC3)."""
+    import ssl
+
+    import httpx
+
+    port, cert_path, token = direct_daemon
+    # create_default_context loads no system root when a cafile is given.
+    trust = ssl.create_default_context(cafile=str(cert_path))
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json, text/event-stream",
+    }
+
+    ok = httpx.post(f"https://{HOST}:{port}/mcp", json=_INITIALIZE, headers=headers, verify=trust)
+    assert ok.status_code == 200
+
+    for kind in ("plaintext", "wrong-certificate"):
+        impostor = _impostor_for(kind, cert_path.parent)
+        with pytest.raises(httpx.ConnectError):
+            httpx.post(
+                f"https://{HOST}:{impostor.port}/mcp",
+                json=_INITIALIZE,
+                headers=headers,
+                verify=trust,
+            )
+        impostor.wait()
+        impostor.assert_refused_before_any_request(token)
+
+
+def test_direct_https_node_host(direct_daemon: tuple[int, Path, str], tmp_path: Path) -> None:
+    """A real Node host trusts the daemon through NODE_EXTRA_CA_CERTS only (AC3)."""
+    node = _require_evidence("node")
+    port, cert_path, token = direct_daemon
+    script = tmp_path / "host.mjs"
+    script.write_text(_NODE_HOST, encoding="utf-8")
+    env = {
+        **{k: v for k, v in os.environ.items() if not k.startswith("NODE_")},
+        "NODE_EXTRA_CA_CERTS": str(cert_path),
+        "HIVE_TEST_BEARER": token,
+        "HIVE_TEST_BODY": json.dumps(_INITIALIZE),
+    }
+
+    def run(target_port: int) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [node, str(script), f"https://{HOST}:{target_port}/mcp"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+
+    owner = run(port)
+    assert owner.returncode == 0, owner.stderr
+    assert owner.stdout.strip() == "200"
+
+    for kind in ("plaintext", "wrong-certificate"):
+        impostor = _impostor_for(kind, cert_path.parent)
+        refused = run(impostor.port)
+        impostor.wait()
+        assert refused.returncode != 0, refused.stdout
+        impostor.assert_refused_before_any_request(token)
+        assert token not in refused.stdout + refused.stderr
+
+
 def test_hive_serve_rejects_bad_token(daemon_env: tuple[dict[str, str], Path]) -> None:
     """A request without the matching token is refused — the bare loopback
     port is not open."""
-    env, _ = daemon_env
+    env, state_dir = daemon_env
     port = _free_port()
     proc = _spawn_daemon(env, port)
     try:
@@ -374,7 +665,8 @@ def test_hive_serve_rejects_bad_token(daemon_env: tuple[dict[str, str], Path]) -
         # MCP client: mcp 2.x wraps it in MCPError, 1.x raised HTTPStatusError,
         # and neither wrapping is the property under test.
         resp = httpx.post(
-            f"http://{HOST}:{port}/mcp",
+            f"https://{HOST}:{port}/mcp",
+            verify=_pinned(state_dir),
             headers={
                 "Authorization": "Bearer not-the-token",
                 "Accept": "application/json, text/event-stream",
@@ -412,8 +704,9 @@ def test_copilot_daemon_mode_initialize_list_and_health(
             StdioTransport(command=launcher, args=["client"], env=env)
             if transport_kind == "stdio"
             else StreamableHttpTransport(
-                f"http://{HOST}:{port}/mcp",
+                f"https://{HOST}:{port}/mcp",
                 headers={"Authorization": "Bearer " + token},
+                verify=_pinned(state_dir),
             )
         )
 
@@ -429,7 +722,8 @@ def test_copilot_daemon_mode_initialize_list_and_health(
 
         asyncio.run(smoke())
         status = httpx.get(
-            f"http://{HOST}:{port}/status",
+            f"https://{HOST}:{port}/status",
+            verify=_pinned(state_dir),
             headers={"Authorization": "Bearer " + token},
             timeout=3.0,
         )
@@ -597,7 +891,7 @@ def test_health_probe_is_unauthenticated_and_reports_ready(
         assert _wait_ready(port), "daemon did not bind its loopback port"
 
         # No Authorization header: a supervisor must probe liveness tokenless.
-        resp = httpx.get(f"http://{HOST}:{port}/health")
+        resp = httpx.get(f"https://{HOST}:{port}/health", verify=_pinned(state_dir))
         assert resp.status_code == 200, f"/health not served unauthenticated: {resp.status_code}"
         payload = resp.json()
         assert payload["status"] == "ok", f"unexpected health status: {payload!r}"
@@ -615,6 +909,50 @@ def test_health_probe_is_unauthenticated_and_reports_ready(
             daemon.wait(timeout=10)
         except subprocess.TimeoutExpired:
             daemon.kill()
+
+
+def test_stable_port_serves_tls13_only(daemon_env: tuple[dict[str, str], Path]) -> None:
+    """ADR-022 A1 invariant 8: the stable port speaks TLS 1.3 and nothing else."""
+    import ssl
+
+    env, state_dir = daemon_env
+    port = _free_port()
+    daemon = _spawn_daemon(env, port)
+    try:
+        assert _wait_ready(port), "daemon did not bind its loopback port"
+        cert_pem = _owner_cert_pem(state_dir)
+
+        # Plaintext HTTP gets no HTTP response, only a closed or TLS-alerted socket.
+        with socket.create_connection((HOST, port), timeout=5) as raw:
+            raw.sendall(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            try:
+                reply = raw.recv(64)
+            except OSError:
+                reply = b""
+        assert not reply.startswith(b"HTTP/"), "the stable port answered plaintext HTTP"
+
+        # Offer every TLS 1.2 cipher, so the only reason left to refuse the
+        # handshake is the protocol version. uvicorn's default cipher string
+        # shares no cipher with Python's default client, which made this pass
+        # even without the TLS 1.3 minimum; with this offer, removing the
+        # minimum lets the handshake complete. The refusal arrives either as
+        # a protocol-version alert or as a bare close, so any SSLError counts.
+        legacy = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        legacy.load_verify_locations(cadata=cert_pem)
+        legacy.maximum_version = ssl.TLSVersion.TLSv1_2
+        legacy.set_ciphers("ALL:@SECLEVEL=0")
+        with (
+            socket.create_connection((HOST, port), timeout=5) as raw,
+            pytest.raises(ssl.SSLError),
+        ):
+            legacy.wrap_socket(raw, server_hostname=HOST)
+
+        # Positive control: the same port serves pinned TLS 1.3, and the
+        # tokenless /status is still refused there.
+        assert _pinned_get(port, cert_pem, "/health") == 200
+        assert _pinned_get(port, cert_pem, "/status") == 401
+    finally:
+        _kill_tree(daemon)
 
 
 def test_daemon_self_heals_stale_index_lock(
@@ -725,16 +1063,17 @@ def test_status_aggregates_across_sessions(
     try:
         assert _wait_ready(port), "daemon did not bind its loopback port"
         token = (state_dir / "daemon.token").read_text(encoding="utf-8").strip()
-        mcp_url = f"http://{HOST}:{port}/mcp"
+        mcp_url = f"https://{HOST}:{port}/mcp"
+        verify = _pinned(state_dir)
 
         # Two sequential sessions: each opens, calls vault_query k times, then
         # fully disconnects before the next starts. If /status still counts both,
         # the metrics survived the disconnects and aggregate across sessions.
-        asyncio.run(_session_calls(mcp_url, token, "vault_query", args, k))
-        asyncio.run(_session_calls(mcp_url, token, "vault_query", args, k))
+        asyncio.run(_session_calls(mcp_url, token, "vault_query", args, k, verify))
+        asyncio.run(_session_calls(mcp_url, token, "vault_query", args, k, verify))
 
-        status_url = f"http://{HOST}:{port}/status"
-        resp = httpx.get(status_url, headers={"Authorization": f"Bearer {token}"})
+        status_url = f"https://{HOST}:{port}/status"
+        resp = httpx.get(status_url, headers={"Authorization": f"Bearer {token}"}, verify=verify)
         assert resp.status_code == 200, f"/status not served: {resp.status_code}"
         payload = resp.json()
 
@@ -749,7 +1088,7 @@ def test_status_aggregates_across_sessions(
         assert payload["uptime_s"] >= 0
 
         # The bare loopback port must stay token-gated (ADR-011 §2).
-        bad = httpx.get(status_url)
+        bad = httpx.get(status_url, verify=verify)
         assert bad.status_code == 401, f"/status not token-gated: {bad.status_code}"
     finally:
         daemon.terminate()

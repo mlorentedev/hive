@@ -15,10 +15,12 @@ single-owner guarantees of [ADR-011](https://github.com/mlorentedev/hive/blob/ma
 or want clients to always pick up the latest published version automatically.
 
 :::caution[Single-user hosts only until #456 is resolved]
-A listener impersonating the stable port during daemon downtime can capture
-a bearer that remains valid after restart. Do not deploy daemon mode on
-untrusted multi-user hosts until [#456](https://github.com/mlorentedev/hive/issues/456)
-is resolved. If the daemon is absent or unhealthy, `hive client` **fails
+The stable endpoint serves TLS with a per-user certificate that every Hive
+client pins, so a listener impersonating the stable port during daemon
+downtime fails the handshake before any bearer is sent. Do not deploy daemon
+mode on untrusted multi-user hosts until [#456](https://github.com/mlorentedev/hive/issues/456)
+is resolved: the Linux and Windows evidence, including the cross-user check,
+is still being recorded. If the daemon is absent or unhealthy, `hive client` **fails
 explicitly**; it never starts a competing in-process server.
 :::
 
@@ -26,7 +28,7 @@ explicitly**; it never starts a competing in-process server.
 
 | Command | Role |
 |---|---|
-| `hive serve` | The daemon. Serves MCP over loopback streamable-HTTP, bearer-token gated. One owner of the vault git + SQLite per machine (enforced by a singleton lock). |
+| `hive serve` | The daemon. Serves MCP over loopback streamable-HTTP on TLS 1.3 with a per-user certificate, bearer-token gated. One owner of the vault git + SQLite per machine (enforced by a singleton lock). |
 | `hive client` | A thin stdio shim your MCP client launches. Proxies to a running `hive serve`; fails explicitly if none is reachable. |
 | `hive service` | Installs/removes the OS supervisor that keeps `hive serve` running. See below. |
 
@@ -66,15 +68,21 @@ for both the daemon and client if you override the default. Disable an old
 `hive-vault` entry after checking the new one; avoid two registered vault
 owners. The automated
 smoke in `tests/test_daemon.py` initializes in under 4.1 seconds, lists tools,
-and calls `vault_health` over the real daemon via stdio and direct HTTP; it
+and calls `vault_health` over the real daemon via stdio and direct HTTPS; it
 does not launch Copilot itself. Copilot documents MCP `timeout` for discovery
 and tool calls, including its connection budget. Cold initialization was
 terminated after ~4.1 seconds on the measured Windows host despite
 `timeout: 30000`; that is an observation, not a documented universal deadline.
-Avoid direct HTTP registrations containing a bearer in a config file or shell
-history; both transports remain subject to [#456](https://github.com/mlorentedev/hive/issues/456).
-ADR-022 Amendment 1 removes plaintext `http://` registrations from the
-supported contract once its TLS endpoint ships; do not create new ones.
+`hive client` is the recommended registration. A direct registration is
+supported only as `https://127.0.0.1:<port>/mcp`, with the host verifying the
+daemon certificate: for Node-based hosts such as Copilot CLI, set
+`NODE_EXTRA_CA_CERTS=<state dir>/daemon.crt` in that host's environment. Never
+disable verification (`NODE_TLS_REJECT_UNAUTHORIZED=0` or an "insecure"
+flag); a host that cannot verify uses `hive client`. `http://` registrations
+no longer work, because the daemon is TLS-only. Direct HTTPS counts as
+supported on a platform only once a named MCP host has passed the real-host
+check there; until then, use `hive client`. Keep
+the bearer out of config files and shell history.
 
 ## Auto-update: restart-on-upgrade
 
@@ -119,17 +127,24 @@ the Scheduled Task inherits).
 
 ## Verifying the daemon
 
-The daemon writes its port and bearer token to the Hive state directory
-(owner-only, `600`):
+The daemon writes its port, bearer token, TLS key and certificate to the Hive
+state directory (owner-only, `600`). It serves TLS 1.3 only; trust its own
+certificate, never the system store and never `-k`:
 
 ```bash
-PORT=$(cat ~/.local/share/hive/daemon.port)
-TOKEN=$(cat ~/.local/share/hive/daemon.token)
+STATE=~/.local/share/hive
+PORT=$(cat "$STATE/daemon.port")
+CERT="$STATE/daemon.crt"
 
-curl -s "http://127.0.0.1:$PORT/health"                                     # {"status":"ok","ready":true,...}
-curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:$PORT/status"    # 401 (token-gated)
-curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/status"   # 200 + metrics
+curl -s --cacert "$CERT" "https://127.0.0.1:$PORT/health"                     # {"status":"ok","ready":true,...}
+curl -s --cacert "$CERT" -o /dev/null -w '%{http_code}\n' "https://127.0.0.1:$PORT/status"  # 401 (token-gated)
+curl -s --cacert "$CERT" -H "Authorization: Bearer $(cat "$STATE/daemon.token")" \
+  "https://127.0.0.1:$PORT/status"                                            # 200 + metrics
 ```
+
+On the first start after upgrading from a plaintext daemon, the token is
+rotated once, because it was sent in plaintext before. `hive client` picks up
+the new token on its next start; direct registrations must be updated.
 
 `/status` exposes `sessions_started`, `total_calls`, and the running version —
 useful to confirm a restart-on-upgrade actually adopted the new code.

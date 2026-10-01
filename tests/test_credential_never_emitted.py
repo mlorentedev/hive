@@ -170,3 +170,113 @@ class TestAProviderThatEchoesTheKeyBackDoesNotGetItRelayed:
             )
         assert _PLANTED not in out
         assert not [r for r in caplog.records if _PLANTED in r.getMessage()]
+
+
+# ── Daemon bearer and TLS identity (HIVE-456 AC9, ADR-022 A1 check 9) ──────
+
+
+def _key_body(key_path: Path) -> str:
+    """A base64 line from inside the PEM key: present only if key bytes leaked."""
+    lines = key_path.read_text(encoding="ascii").splitlines()
+    return max(lines[1:-1], key=len)
+
+
+class TestDaemonSecretsStayOutOfOutput:
+    def test_first_tls_start_logs_neither_token_nor_key(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from hive._daemon import _create_token, prepare_daemon_credentials
+
+        monkeypatch.setenv("HIVE_DB_PATH", str(tmp_path / "worker.db"))
+        pre_tls = _create_token(tmp_path / "daemon.token")
+        with caplog.at_level(logging.DEBUG):
+            token, identity = prepare_daemon_credentials()
+        out = capsys.readouterr()
+        emitted = out.out + out.err + caplog.text
+        assert token and pre_tls != token, "the fixture must actually rotate"
+        for secret in (token, pre_tls, _key_body(identity.key_path), "PRIVATE KEY"):
+            assert secret not in emitted
+
+    def test_corrupt_key_error_carries_no_key_bytes(self, tmp_path: Path) -> None:
+        import traceback
+
+        from hive._identity import IdentityError, create_identity, load_identity
+
+        identity = create_identity(tmp_path / "daemon.key", tmp_path / "daemon.crt")
+        planted = _key_body(identity.key_path)
+        identity.key_path.write_text(
+            f"-----BEGIN PRIVATE KEY-----\n{planted}\n-----END PRIVATE KEY-----\n",
+            encoding="ascii",
+        )
+        with pytest.raises(IdentityError) as excinfo:
+            load_identity(identity.key_path, identity.cert_path)
+        rendered = "".join(traceback.format_exception(excinfo.value))
+        assert planted not in rendered
+        assert "PRIVATE KEY" not in rendered
+
+    def test_relay_impersonation_report_omits_the_token(self, tmp_path: Path) -> None:
+        import os
+        import shutil
+        import subprocess
+        import sys
+
+        from hive._daemon import _create_token, _enforce_owner_only
+        from hive._identity import create_identity
+        from tests.impostor import Impostor
+
+        owner = create_identity(tmp_path / "owner.key", tmp_path / "owner.crt")
+        shutil.copyfile(owner.cert_path, tmp_path / "daemon.crt")
+        _enforce_owner_only(tmp_path / "daemon.crt")
+        token = _create_token(tmp_path / "daemon.token")
+        impostor = Impostor(create_identity(tmp_path / "imp.key", tmp_path / "imp.crt"))
+        env = {
+            **os.environ,
+            "HIVE_DB_PATH": str(tmp_path / "worker.db"),
+            "HIVE_DAEMON_PORT": str(impostor.port),
+        }
+        result = subprocess.run(
+            [sys.executable, "-m", "hive.cli", "client"],
+            input='{"jsonrpc":"2.0","id":1,"method":"initialize"}\n',
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        impostor.wait()
+
+        assert result.returncode != 0
+        assert "possible impersonation" in result.stderr
+        impostor.assert_refused_before_any_request(token)
+        assert token not in result.stdout + result.stderr
+
+    def test_delegate_impersonation_logs_omit_the_token(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        import json
+
+        from hive import _delegate
+        from hive._identity import create_identity
+        from tests.impostor import Impostor
+
+        owner = create_identity(tmp_path / "owner.key", tmp_path / "owner.crt")
+        impostor = Impostor(None)
+        token = "synthetic-bearer-" + "z" * 32
+        state = (impostor.port, token, owner.cert_path.read_text(encoding="ascii"))
+        with (
+            patch("hive._delegate._read_state", return_value=state),
+            caplog.at_level(logging.DEBUG),
+        ):
+            record = _delegate._dispatch_once(
+                prompt="x", model="m", timeout_s=5.0, context="", max_tokens=10
+            )
+        impostor.wait()
+
+        assert "possible impersonation" in record["detail"]
+        assert token not in json.dumps(record) + caplog.text

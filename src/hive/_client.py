@@ -6,6 +6,7 @@ import contextlib
 import http.client
 import json
 import math
+import ssl
 import sys
 from typing import Any
 
@@ -14,8 +15,10 @@ from hive._endpoint import (
     DEFAULT_HOST,
     MCP_PATH,
     configured_daemon_port,
+    identity_cert_path,
     token_file_path,
 )
+from hive._tls import fingerprint_matches, load_pinned_certificate, pem_fingerprint, pinned_context
 
 _CONNECT_TIMEOUT_S = 0.75
 _READ_TIMEOUT_S = 70.0
@@ -87,12 +90,19 @@ def _sse_frames(response: http.client.HTTPResponse) -> list[dict[str, Any]]:
 
 
 class HttpRelay:
-    """Translate stdio JSON-RPC messages into Streamable HTTP requests."""
+    """Translate stdio JSON-RPC messages into Streamable HTTP requests.
 
-    def __init__(self, host: str, port: int, token: str) -> None:
+    Every request opens a new TCP connection, so the daemon's identity is
+    proven on each one, by the pinned TLS handshake and then the certificate
+    fingerprint, before the bearer or any message is written (ADR-022 A1).
+    """
+
+    def __init__(self, host: str, port: int, token: str, cert_pem: str) -> None:
         self._host = host
         self._port = port
         self._token = token
+        self._context = pinned_context(cert_pem)
+        self._fingerprint = pem_fingerprint(cert_pem)
         self._session_id = ""
         self._protocol_version = ""
         self._bootstrap_message: dict[str, Any] | None = None
@@ -116,18 +126,43 @@ class HttpRelay:
             headers["Mcp-Name"] = name
         return headers
 
+    def _endpoint(self) -> str:
+        return f"https://{self._host}:{self._port}{MCP_PATH}"
+
+    def _impersonation(self) -> ClientError:
+        return ClientError(
+            f"could not verify the Hive daemon at {self._endpoint()}: the listener did "
+            "not prove the owner's identity (possible impersonation); nothing was sent",
+        )
+
+    def _connect(self) -> http.client.HTTPSConnection:
+        connection = http.client.HTTPSConnection(
+            self._host,
+            self._port,
+            timeout=_CONNECT_TIMEOUT_S,
+            context=self._context,
+        )
+        try:
+            connection.connect()
+        except ssl.SSLError as exc:
+            connection.close()
+            raise self._impersonation() from exc
+        except OSError as exc:
+            connection.close()
+            raise ClientError(f"Hive daemon unavailable at {self._endpoint()}") from exc
+        sock = connection.sock
+        if not isinstance(sock, ssl.SSLSocket) or not fingerprint_matches(sock, self._fingerprint):
+            connection.close()
+            raise self._impersonation()
+        return connection
+
     def _open(
         self,
         method: str,
         message: dict[str, Any] | None = None,
     ) -> tuple[http.client.HTTPConnection, http.client.HTTPResponse]:
-        connection = http.client.HTTPConnection(
-            self._host,
-            self._port,
-            timeout=_CONNECT_TIMEOUT_S,
-        )
+        connection = self._connect()
         try:
-            connection.connect()
             if connection.sock is not None:
                 connection.sock.settimeout(_read_timeout(message or {}))
             body = None if message is None else json.dumps(message, separators=(",", ":"))
@@ -136,9 +171,7 @@ class HttpRelay:
             return connection, connection.getresponse()
         except (OSError, http.client.HTTPException) as exc:
             connection.close()
-            raise ClientError(
-                f"Hive daemon unavailable at http://{self._host}:{self._port}{MCP_PATH}",
-            ) from exc
+            raise ClientError(f"Hive daemon unavailable at {self._endpoint()}") from exc
 
     def forward(self, message: dict[str, Any]) -> list[dict[str, Any]]:
         """Forward one client request/notification and return response frames."""
@@ -178,9 +211,7 @@ class HttpRelay:
             self._capture_protocol(message, frames)
             return frames
         except (OSError, http.client.HTTPException) as exc:
-            raise ClientError(
-                f"Hive daemon unavailable at http://{self._host}:{self._port}{MCP_PATH}",
-            ) from exc
+            raise ClientError(f"Hive daemon unavailable at {self._endpoint()}") from exc
         finally:
             connection.close()
 
@@ -245,10 +276,11 @@ def run_client(host: str = DEFAULT_HOST) -> int:
     try:
         port = configured_daemon_port()
         token = _read_token(token_file_path())
+        cert_pem = load_pinned_certificate(identity_cert_path())
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"hive client: {exc}", file=sys.stderr)
         return 1
-    relay = HttpRelay(host, port, token)
+    relay = HttpRelay(host, port, token, cert_pem)
     try:
         for raw in sys.stdin.buffer:
             try:

@@ -17,10 +17,12 @@ o quieres que los clientes adopten siempre la última versión publicada de form
 automática.
 
 :::caution[Solo equipos de un usuario hasta resolver #456]
-Un listener que suplante el puerto estable durante una caída puede capturar
-un bearer que seguirá siendo válido después del reinicio. No despliegues el modo
-daemon en equipos multiusuario no confiables hasta resolver
-[#456](https://github.com/mlorentedev/hive/issues/456). Si falta el daemon,
+El endpoint estable sirve TLS con un certificado por usuario que todos los
+clientes de Hive fijan, así que un listener que suplante el puerto estable
+durante una caída falla el handshake antes de recibir ningún bearer. No
+despliegues el modo daemon en equipos multiusuario no confiables hasta resolver
+[#456](https://github.com/mlorentedev/hive/issues/456): aún se está registrando
+la evidencia en Linux y Windows, incluida la comprobación entre usuarios. Si falta el daemon,
 `hive client` **falla explícitamente**; nunca inicia otro servidor in-process.
 :::
 
@@ -28,7 +30,7 @@ daemon en equipos multiusuario no confiables hasta resolver
 
 | Comando | Rol |
 |---|---|
-| `hive serve` | El daemon. Sirve MCP sobre streamable-HTTP en loopback, protegido con bearer token. Único dueño del git + SQLite del vault por máquina (garantizado por un lock singleton). |
+| `hive serve` | El daemon. Sirve MCP sobre streamable-HTTP en loopback con TLS 1.3 y un certificado por usuario, protegido con bearer token. Único dueño del git + SQLite del vault por máquina (garantizado por un lock singleton). |
 | `hive client` | Un shim stdio ligero que lanza tu cliente MCP. Hace de proxy hacia un `hive serve` en marcha; falla explícitamente si no hay ninguno alcanzable. |
 | `hive service` | Instala/elimina el supervisor del SO que mantiene `hive serve` en marcha. Ver abajo. |
 
@@ -69,16 +71,23 @@ Deshabilita la entrada antigua `hive-vault` después de comprobar la nueva;
 evita registrar dos dueños del vault.
 El smoke automatizado de `tests/test_daemon.py` inicializa en menos de
 4,1 segundos, lista herramientas y llama a `vault_health` contra el daemon
-real por stdio y HTTP directo; no ejecuta la CLI de Copilot. Copilot documenta
+real por stdio y HTTPS directo; no ejecuta la CLI de Copilot. Copilot documenta
 MCP `timeout` para descubrimiento y llamadas de herramientas, incluido el
 presupuesto de conexión. En el equipo Windows medido, el inicio en frío terminó
 tras ~4,1 segundos pese a `timeout: 30000`; es una observación, no un plazo
-universal documentado. Evita
-poner el bearer de una configuración HTTP directa en archivos de configuración
-o en el historial de shell; ambos transportes están sujetos a
-[#456](https://github.com/mlorentedev/hive/issues/456).
-La enmienda 1 de ADR-022 saca los registros `http://` en claro del contrato
-soportado en cuanto se publique su endpoint TLS; no crees registros nuevos.
+universal documentado.
+
+El registro recomendado es `hive client`. Un registro directo solo está
+soportado como `https://127.0.0.1:<puerto>/mcp`, con el host verificando el
+certificado del daemon: en hosts basados en Node, como Copilot CLI, define
+`NODE_EXTRA_CA_CERTS=<directorio de estado>/daemon.crt` en el entorno de ese
+host. Nunca desactives la verificación (`NODE_TLS_REJECT_UNAUTHORIZED=0` o un
+flag "insecure"); un host que no pueda verificar usa `hive client`. Los
+registros `http://` ya no funcionan, porque el daemon solo habla TLS. El HTTPS
+directo solo cuenta como soportado en una plataforma cuando un host MCP
+concreto ha pasado allí la comprobación con host real; hasta entonces, usa
+`hive client`. No pongas el bearer en archivos de
+configuración ni en el historial de shell.
 
 ## Auto-actualización: reinicio-al-actualizar
 
@@ -125,17 +134,24 @@ hereda la tarea programada).
 
 ## Verificar el daemon
 
-El daemon escribe su puerto y bearer token en el directorio de estado de Hive
-(solo-dueño, `600`):
+El daemon escribe su puerto, el bearer token, la clave TLS y el certificado en
+el directorio de estado de Hive (solo-dueño, `600`). Solo sirve TLS 1.3;
+confía en su propio certificado, nunca en el almacén del sistema ni en `-k`:
 
 ```bash
-PORT=$(cat ~/.local/share/hive/daemon.port)
-TOKEN=$(cat ~/.local/share/hive/daemon.token)
+STATE=~/.local/share/hive
+PORT=$(cat "$STATE/daemon.port")
+CERT="$STATE/daemon.crt"
 
-curl -s "http://127.0.0.1:$PORT/health"                                     # {"status":"ok","ready":true,...}
-curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:$PORT/status"    # 401 (token-gated)
-curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/status"   # 200 + métricas
+curl -s --cacert "$CERT" "https://127.0.0.1:$PORT/health"                     # {"status":"ok","ready":true,...}
+curl -s --cacert "$CERT" -o /dev/null -w '%{http_code}\n' "https://127.0.0.1:$PORT/status"  # 401 (token-gated)
+curl -s --cacert "$CERT" -H "Authorization: Bearer $(cat "$STATE/daemon.token")" \
+  "https://127.0.0.1:$PORT/status"                                            # 200 + métricas
 ```
+
+En el primer arranque tras actualizar desde un daemon en claro, el token se
+rota una vez, porque antes viajó sin cifrar. `hive client` toma el token nuevo
+en su siguiente arranque; los registros directos hay que actualizarlos.
 
 `/status` expone `sessions_started`, `total_calls` y la versión en marcha —
 útil para confirmar que un reinicio-al-actualizar adoptó de verdad el nuevo
