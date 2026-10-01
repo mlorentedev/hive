@@ -24,11 +24,19 @@ import asyncio
 import json
 import logging
 import socket
+import ssl
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from hive._credential import _read_token
-from hive._endpoint import DEFAULT_HOST, MCP_PATH, configured_daemon_port, token_file_path
+from hive._endpoint import (
+    DEFAULT_HOST,
+    MCP_PATH,
+    configured_daemon_port,
+    identity_cert_path,
+    token_file_path,
+)
+from hive._tls import fingerprint_matches, load_pinned_certificate, pem_fingerprint, pinned_context
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -74,32 +82,75 @@ request (3, try the next entry) from a worker that answered with a failure
 """
 
 
-def _read_state() -> tuple[int, str] | None:
-    """Resolve the stable daemon endpoint and validate its credential."""
+def _read_state() -> tuple[int, str, str] | None:
+    """Resolve the stable endpoint, its credential and the pinned certificate."""
     try:
-        return configured_daemon_port(), _read_token(token_file_path())
+        return (
+            configured_daemon_port(),
+            _read_token(token_file_path()),
+            load_pinned_certificate(identity_cert_path()),
+        )
     except (OSError, RuntimeError, ValueError) as exc:
         _log.warning("daemon state unavailable; dispatching locally: %s", exc)
         return None
 
 
-def _daemon_reachable(host: str, port: int) -> bool:
+Probe = Literal["verified", "absent", "unverified"]
+
+
+def _probe_daemon(host: str, port: int, cert_pem: str) -> Probe:
+    """Prove who holds the stable port before anything is sent to it.
+
+    ``absent`` means nothing answered, which is the documented local fallback.
+    ``unverified`` means something answered without the owner's certificate:
+    that is a possible impersonation and must not be hidden by a fallback.
+    """
     try:
-        with socket.create_connection((host, port), timeout=_PROBE_TIMEOUT_S):
-            return True
+        raw = socket.create_connection((host, port), timeout=_PROBE_TIMEOUT_S)
     except OSError:
-        return False
+        return "absent"
+    try:
+        with pinned_context(cert_pem).wrap_socket(raw, server_hostname=host) as tls:
+            if fingerprint_matches(tls, pem_fingerprint(cert_pem)):
+                return "verified"
+            return "unverified"
+    except ssl.SSLError:
+        return "unverified"
+    except OSError:
+        return "absent"
+    finally:
+        raw.close()
 
 
-def _remote_client(host: str, port: int, token: str) -> Client[Any]:
+def _remote_client(host: str, port: int, token: str, cert_pem: str) -> Client[Any]:
     from fastmcp import Client
     from fastmcp.client.transports import StreamableHttpTransport
 
+    # httpx cannot check the fingerprint between handshake and request, so each
+    # connection relies on the pinned trust anchor alone: the only certificate
+    # that verifies is the owner's CA:FALSE one (ADR-022 A1).
     transport = StreamableHttpTransport(
-        f"http://{host}:{port}{MCP_PATH}",
+        f"https://{host}:{port}{MCP_PATH}",
         headers={"Authorization": "Bearer " + token},
+        verify=pinned_context(cert_pem),
     )
     return Client(transport, init_timeout=_DAEMON_INIT_TIMEOUT_S)
+
+
+def _impersonation_record(model: str, host: str, port: int) -> dict[str, Any]:
+    return {
+        "status": "task_failed",
+        "model": model,
+        "degraded": False,
+        "tokens": 0,
+        "duration_ms": 0,
+        "output": "",
+        "detail": (
+            f"the listener on https://{host}:{port}{MCP_PATH} did not prove the Hive "
+            "daemon's identity (possible impersonation); nothing was sent and the task "
+            "was not run locally. Check `hive service status`."
+        ),
+    }
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -221,8 +272,12 @@ async def _dispatch_async(
     # Reuse the shim's own detection rather than adding a second probe: two
     # answers to "is the daemon up" are two answers that can disagree.
     state = _read_state()
-    if state is not None and _daemon_reachable(DEFAULT_HOST, state[0]):
-        port, token = state
+    probe: Probe = "absent" if state is None else _probe_daemon(DEFAULT_HOST, state[0], state[2])
+    if state is not None and probe == "unverified":
+        _log.warning("daemon listener failed identity verification; not dispatching")
+        return _impersonation_record(model, DEFAULT_HOST, state[0])
+    if state is not None and probe == "verified":
+        port, token, cert_pem = state
         # The fallback is PRE-SUBMISSION ONLY, and the flag is what enforces it.
         #
         # The daemon records usage as soon as the worker answers, before it
@@ -237,7 +292,7 @@ async def _dispatch_async(
         # ADR-011 §3 fallback applies and `degraded` reports which path answered.
         submitted = False
         try:
-            client = _remote_client(DEFAULT_HOST, port, token)
+            client = _remote_client(DEFAULT_HOST, port, token, cert_pem)
             async with client:
                 submitted = True
                 result = await client.call_tool("delegate_task", payload)

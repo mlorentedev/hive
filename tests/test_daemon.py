@@ -401,6 +401,30 @@ def test_hive_serve_answers_tools_list(daemon_env: tuple[dict[str, str], Path]) 
             proc.kill()
 
 
+def test_delegate_remote_client_reaches_the_daemon_over_pinned_tls(
+    daemon_env: tuple[dict[str, str], Path],
+) -> None:
+    """``hive delegate``'s transport talks to the real TLS daemon with the pin alone."""
+    from hive import _delegate
+
+    env, state_dir = daemon_env
+    port = _free_port()
+    proc = _spawn_daemon(env, port)
+    try:
+        assert _wait_ready(port), "daemon did not bind its loopback port"
+        pem = _owner_cert_pem(state_dir)
+        token = (state_dir / "daemon.token").read_text(encoding="utf-8").strip()
+        assert _delegate._probe_daemon(HOST, port, pem) == "verified"
+
+        async def tools() -> set[str]:
+            async with _delegate._remote_client(HOST, port, token, pem) as client:
+                return {tool.name for tool in await client.list_tools()}
+
+        assert "delegate_task" in asyncio.run(tools())
+    finally:
+        _kill_tree(proc)
+
+
 def test_hive_serve_rejects_bad_token(daemon_env: tuple[dict[str, str], Path]) -> None:
     """A request without the matching token is refused — the bare loopback
     port is not open."""

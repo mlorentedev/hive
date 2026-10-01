@@ -108,7 +108,7 @@ created: "2026-09-30"
   and the tests after it) to serve their fixtures over TLS with a test
   certificate. Then run `uv run pytest tests/test_client.py -q`. Expected:
   PASS, including `test_client_initialize_response_arrives_within_one_second`.
-- [ ] [P] [AC1] `tests/test_delegate_deadline_and_route.py::test_delegate_refuses_impostor_listener`.
+- [x] [P] [AC1] `tests/test_delegate_deadline_and_route.py::test_delegate_refuses_impostor_listener`.
   Run the same two impostors against `_remote_client`. The impostor
   receives a ClientHello and no HTTP bytes, and dispatch fails without
   falling back to local dispatch on an identity failure. Implement

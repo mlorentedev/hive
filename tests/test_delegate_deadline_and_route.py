@@ -213,15 +213,17 @@ class TestDegradedIsReportedInBothDirections:
         monkeypatch.setattr(_delegate, "configured_daemon_port", lambda: 54282)
         monkeypatch.setattr(_delegate, "token_file_path", lambda: "credential-path")
         monkeypatch.setattr(_delegate, "_read_token", lambda path: "synthetic-token")
+        monkeypatch.setattr(_delegate, "identity_cert_path", lambda: "certificate-path")
+        monkeypatch.setattr(_delegate, "load_pinned_certificate", lambda path: "synthetic-pem")
 
-        assert _delegate._read_state() == (54282, "synthetic-token")
+        assert _delegate._read_state() == (54282, "synthetic-token", "synthetic-pem")
 
     def test_a_reachable_daemon_reports_not_degraded(self) -> None:
         from hive import _delegate
 
         with (
-            patch("hive._delegate._read_state", return_value=(4242, "a-token")),
-            patch("hive._delegate._daemon_reachable", return_value=True),
+            patch("hive._delegate._read_state", return_value=(4242, "a-token", "pem")),
+            patch("hive._delegate._probe_daemon", return_value="verified"),
             patch("hive._delegate._remote_client", return_value=_RemoteClient()),
         ):
             record = _delegate._dispatch_once(
@@ -256,8 +258,8 @@ class TestDegradedIsReportedInBothDirections:
 
         local = AsyncMock(return_value=_ToolResult())
         with (
-            patch("hive._delegate._read_state", return_value=(4242, "a-token")),
-            patch("hive._delegate._daemon_reachable", return_value=True),
+            patch("hive._delegate._read_state", return_value=(4242, "a-token", "pem")),
+            patch("hive._delegate._probe_daemon", return_value="verified"),
             patch("hive._delegate._remote_client", return_value=_BrokenRemoteClient()),
             patch("hive.server.create_server") as make,
         ):
@@ -274,8 +276,8 @@ class TestDegradedIsReportedInBothDirections:
 
         local = AsyncMock(return_value=_ToolResult())
         with (
-            patch("hive._delegate._read_state", return_value=(4242, "a-token")),
-            patch("hive._delegate._daemon_reachable", return_value=False),
+            patch("hive._delegate._read_state", return_value=(4242, "a-token", "pem")),
+            patch("hive._delegate._probe_daemon", return_value="absent"),
             patch("hive.server.create_server") as make,
         ):
             make.return_value.call_tool = local
@@ -283,3 +285,61 @@ class TestDegradedIsReportedInBothDirections:
                 prompt="x", model="m", timeout_s=5.0, context="", max_tokens=10
             )
         assert record["degraded"] is True
+
+
+@pytest.mark.parametrize("impostor_kind", ["plaintext", "wrong-certificate"])
+def test_delegate_refuses_impostor_listener(tmp_path: Path, impostor_kind: str) -> None:
+    """An unproven listener is an identity failure, not a reason to degrade.
+
+    Falling back to local dispatch here would answer the dispatcher and hide
+    that something else holds the daemon's port (ADR-022 A1).
+    """
+    from hive import _delegate
+    from hive._identity import create_identity
+    from tests.impostor import Impostor
+
+    owner = create_identity(tmp_path / "owner.key", tmp_path / "owner.crt")
+    impostor_identity = None
+    if impostor_kind == "wrong-certificate":
+        impostor_identity = create_identity(tmp_path / "impostor.key", tmp_path / "impostor.crt")
+    impostor = Impostor(impostor_identity)
+    token = "synthetic-bearer-" + "y" * 32
+    state = (impostor.port, token, owner.cert_path.read_text(encoding="ascii"))
+
+    local = AsyncMock(return_value=_ToolResult())
+    with (
+        patch("hive._delegate._read_state", return_value=state),
+        patch("hive.server.create_server") as make,
+    ):
+        make.return_value.call_tool = local
+        record = _delegate._dispatch_once(
+            prompt="x", model="m", timeout_s=5.0, context="", max_tokens=10
+        )
+    impostor.wait()
+
+    impostor.assert_refused_before_any_request(token)
+    assert local.await_count == 0, "an identity failure must not fall back to local dispatch"
+    assert record["status"] == "task_failed"
+    assert record["degraded"] is False
+    assert "possible impersonation" in record["detail"]
+    assert token not in json.dumps(record)
+
+
+def test_delegate_probe_verifies_the_owner_and_reports_absence(tmp_path: Path) -> None:
+    """Positive control for the impostor test: the owner's listener verifies."""
+    import socket
+
+    from hive import _delegate
+    from hive._identity import create_identity
+    from tests.impostor import Impostor
+
+    owner = create_identity(tmp_path / "owner.key", tmp_path / "owner.crt")
+    pem = owner.cert_path.read_text(encoding="ascii")
+    listener = Impostor(owner)
+    assert _delegate._probe_daemon("127.0.0.1", listener.port, pem) == "verified"
+    listener.wait()
+
+    with socket.socket() as closed:
+        closed.bind(("127.0.0.1", 0))
+        free_port = closed.getsockname()[1]
+    assert _delegate._probe_daemon("127.0.0.1", free_port, pem) == "absent"

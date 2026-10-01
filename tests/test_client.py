@@ -7,8 +7,6 @@ import json
 import os
 import queue
 import shutil
-import socket
-import ssl
 import statistics
 import subprocess
 import sys
@@ -19,6 +17,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+
+from tests.impostor import Impostor, server_context
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -112,19 +112,13 @@ def owner_identity(tmp_path_factory: pytest.TempPathFactory) -> Identity:
     return create_identity(state / "daemon.key", state / "daemon.crt")
 
 
-def _server_context(identity: Identity) -> ssl.SSLContext:
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(identity.cert_path, identity.key_path)
-    return context
-
-
 @pytest.fixture
 def mcp_http_server(owner_identity: Identity) -> Iterator[tuple[str, int, type[_McpHandler]]]:
     _McpHandler.requests = []
     _McpHandler.reject_session_once = False
     _McpHandler.cert_pem = owner_identity.cert_path.read_text(encoding="ascii")
     server = ThreadingHTTPServer(("127.0.0.1", 0), _McpHandler)
-    server.socket = _server_context(owner_identity).wrap_socket(server.socket, server_side=True)
+    server.socket = server_context(owner_identity).wrap_socket(server.socket, server_side=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -314,61 +308,6 @@ def test_relay_reports_timeout_while_reading_sse(
         )
 
 
-class _Impostor:
-    """A listener on the stable port that is not the daemon, recording every byte.
-
-    ``identity=None`` is a plaintext HTTP listener. Otherwise it terminates TLS
-    with a certificate the client never pinned and records what it decrypts.
-    """
-
-    def __init__(self, identity: Identity | None) -> None:
-        self._context = None if identity is None else _server_context(identity)
-        self.listener = socket.create_server(("127.0.0.1", 0))
-        self.port = int(self.listener.getsockname()[1])
-        self.accepted = threading.Event()
-        self.raw = bytearray()
-        self.decrypted = bytearray()
-        self._thread = threading.Thread(target=self._serve, daemon=True)
-        self._thread.start()
-
-    def _serve(self) -> None:
-        self.listener.settimeout(10)
-        try:
-            conn, _ = self.listener.accept()
-        except OSError:
-            return
-        self.accepted.set()
-        conn.settimeout(2)
-        with conn:
-            if self._context is None:
-                self._capture_plaintext(conn)
-            else:
-                self._capture_tls(conn)
-
-    def _capture_plaintext(self, conn: socket.socket) -> None:
-        try:
-            self.raw += conn.recv(65536)
-            conn.sendall(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
-            while chunk := conn.recv(65536):
-                self.raw += chunk
-        except OSError:
-            return
-
-    def _capture_tls(self, conn: socket.socket) -> None:
-        assert self._context is not None
-        try:
-            self.raw += conn.recv(5, socket.MSG_PEEK)
-            with self._context.wrap_socket(conn, server_side=True) as tls:
-                while chunk := tls.recv(65536):
-                    self.decrypted += chunk
-        except OSError:
-            return
-
-    def wait(self) -> None:
-        self._thread.join(timeout=10)
-        self.listener.close()
-
-
 @pytest.mark.parametrize("impostor_kind", ["plaintext", "wrong-certificate"])
 def test_relay_refuses_impostors_before_sending_bytes(
     owner_identity: Identity,
@@ -381,7 +320,7 @@ def test_relay_refuses_impostors_before_sending_bytes(
     impostor_identity = None
     if impostor_kind == "wrong-certificate":
         impostor_identity = create_identity(tmp_path / "impostor.key", tmp_path / "impostor.crt")
-    impostor = _Impostor(impostor_identity)
+    impostor = Impostor(impostor_identity)
     token = "synthetic-bearer-" + "x" * 32
     relay = HttpRelay(
         "127.0.0.1",
@@ -394,14 +333,7 @@ def test_relay_refuses_impostors_before_sending_bytes(
         relay.forward({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
     impostor.wait()
 
-    # Positive control: the relay really dialled the impostor and spoke TLS.
-    assert impostor.accepted.is_set()
-    assert impostor.raw[:1] == b"\x16"
-    captured = bytes(impostor.raw + impostor.decrypted)
-    assert b"Authorization" not in captured
-    assert b"POST" not in captured
-    assert token.encode() not in captured
-    assert impostor.decrypted == b""
+    impostor.assert_refused_before_any_request(token)
     assert token not in str(excinfo.value)
 
 
