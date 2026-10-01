@@ -733,3 +733,30 @@ def test_status_reports_a_listener_that_never_proves_itself(
     assert listener.accepted.is_set()
     assert rc != 0
     assert "hive daemon: unverified listener" in capsys.readouterr().out
+
+
+def test_rotate_identity_interrupted_after_the_token_still_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The token rotates first, so a crash mid-rotation never leaves it behind."""
+    import hive._identity as identity_module
+    from hive import server
+    from hive._daemon import prepare_daemon_credentials
+    from hive._endpoint import identity_key_path, token_file_path
+    from hive._identity import IdentityError
+    from tests.impostor import make_over_permissive
+
+    old_token, _ = _initialized_state(monkeypatch, tmp_path)
+    make_over_permissive(identity_key_path())
+
+    def crash(*args: object, **kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(identity_module, "create_identity", crash)
+    with pytest.raises(OSError, match="disk full"):
+        server._run_service(["rotate-identity"])
+
+    assert token_file_path().read_text(encoding="ascii") != old_token
+    with pytest.raises(IdentityError):
+        prepare_daemon_credentials()

@@ -289,3 +289,35 @@ def test_missing_or_corrupt_identity_with_record_fails_closed(
 
     _assert_fails_closed(monkeypatch, capsys, key_body, token)
     assert (tmp_path / "identity.state").exists(), "a failed start must not erase the record"
+
+
+def test_mismatched_key_and_certificate_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from hive._identity import create_identity
+    from hive._owner_only import write_owner_only_atomic
+
+    token, _ = _existing_identity(monkeypatch, tmp_path)
+    key_body = _key_line(tmp_path)
+    other = tmp_path / "other"
+    other.mkdir()
+    stranger = create_identity(other / "daemon.key", other / "daemon.crt")
+    write_owner_only_atomic(tmp_path / "daemon.key", stranger.key_path.read_bytes())
+
+    emitted = _assert_fails_closed(monkeypatch, capsys, key_body, token)
+    assert "does not match" in emitted
+
+
+def test_over_permissive_token_fails_closed_with_a_hint(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    token, _ = _existing_identity(monkeypatch, tmp_path)
+    key_body = _key_line(tmp_path)
+    _make_over_permissive(tmp_path / "daemon.token")
+
+    emitted = _assert_fails_closed(monkeypatch, capsys, key_body, token)
+    assert "not owner-only" in emitted

@@ -485,7 +485,9 @@ def run_serve(host: str = DEFAULT_HOST, port: int = 0) -> int:
 
         try:
             token, identity = prepare_daemon_credentials()
-        except IdentityError as exc:
+        except (IdentityError, RuntimeError) as exc:
+            # IdentityError for the key or certificate, RuntimeError for a
+            # token that is unreadable or not owner-only; both may be exposed.
             print(
                 f"hive: {exc}; run `hive service rotate-identity` to regenerate "
                 "the identity and rotate the token",

@@ -118,3 +118,25 @@ def test_pem_fingerprint_matches_the_identity_fingerprint(tmp_path: Path) -> Non
 
     identity = _identity(tmp_path, "owner")
     assert pem_fingerprint(identity.cert_path.read_text(encoding="ascii")) == identity.fingerprint
+
+
+def test_load_pinned_certificate_refuses_a_certificate_others_can_write(tmp_path: Path) -> None:
+    """The certificate is the trust anchor: whoever can replace it picks who is trusted."""
+    import os
+    import subprocess
+
+    from hive._identity import create_identity
+    from hive._tls import load_pinned_certificate
+
+    identity = create_identity(tmp_path / "daemon.key", tmp_path / "daemon.crt")
+    assert load_pinned_certificate(identity.cert_path)  # positive control
+    if os.name == "nt":
+        subprocess.run(
+            ["icacls", str(identity.cert_path), "/grant", "*S-1-1-0:(W)"],
+            check=True,
+            capture_output=True,
+        )
+    else:
+        identity.cert_path.chmod(0o666)
+    with pytest.raises(RuntimeError, match="not owner-only"):
+        load_pinned_certificate(identity.cert_path)
