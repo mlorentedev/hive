@@ -37,7 +37,8 @@ per-user self-signed `CA:FALSE` certificate:
 - Direct HTTP hosts must verify the same certificate through per-process trust
   (`NODE_EXTRA_CA_CERTS`).
 - `http://` registrations leave the supported contract.
-- Any token that was ever sent in plaintext is rotated once.
+- Any token that was ever sent in plaintext is rotated on the next TLS start.
+  Plaintext use re-arms that rotation every time, not once.
 
 The proof has to be per connection, because the relay opens a new connection
 for each request. A handshake separate from the request would leave a gap for

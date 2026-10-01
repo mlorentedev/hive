@@ -363,7 +363,9 @@ a second owner. It does not protect clients from a listener that is not Hive.
 
 8. No client sends a reusable secret or any MCP traffic to the stable endpoint
    until the server has proven possession of the owner's identity key **on
-   that same connection**.
+   that same connection**. The only exception is the single-user plaintext
+   mode (see *Direct HTTP clients*): while it is active, its recorded owner
+   acceptance waives this invariant on that host.
 
 The words "same connection" rule out any proof that is separate from the
 request. The relay currently opens a new TCP connection per request
@@ -483,9 +485,11 @@ client.
   therefore also runs the original decision's token rotation.
 - **Exposure through the plaintext era.** Any token ever sent to a plaintext
   stable endpoint is treated as exposed. That covers the #453 implementation
-  and the single-user plaintext mode. The first TLS start after plaintext use
-  rotates the token once, marks the rotation as done in the owner-only state,
-  and does not rotate again on later starts.
+  and the single-user plaintext mode. A plaintext start records "token exposed
+  since last rotation" in the owner-only state. Any TLS start that finds that
+  record rotates the token, then clears the record. Further TLS starts rotate
+  nothing until plaintext is used again, so every re-entry into plaintext mode
+  triggers a new rotation.
 
 ### Compatibility
 
@@ -579,8 +583,9 @@ Windows unless marked otherwise.
    certificate fails closed until explicit regeneration, which also rotates
    the token. After any rotation, the relay re-pins and the old certificate is
    refused.
-7. **Plaintext-era rotation.** The first TLS-enabled start rotates the token
-   exactly once. A second start rotates nothing.
+7. **Plaintext-era rotation.** The first TLS start after plaintext use rotates
+   the token, and a second TLS start rotates nothing. Then re-enable
+   plaintext mode, use it, and return to TLS: the token rotates again.
 8. **Status and readiness.** Probes and `hive service status` reject a listener
    that fails identity verification and report it apart from "down".
 9. **No secret output.** No token or private key material appears in stdout,
@@ -597,6 +602,14 @@ Windows unless marked otherwise.
   check 3 on the owner's baseline host, is recorded on #456.
 - Any check that the environment cannot run is listed there as missing
   evidence.
+
+The stand-in client in check 2 proves Hive's side of the direct contract. It
+does not prove that any real host honours it. So the support statement for a
+real direct HTTP host on Windows rests on check 10 alone. Until check 10
+passes on the baseline host with a real Copilot CLI, the release notes must
+say that direct HTTP is unverified on Windows and that `hive client` is the
+only supported Windows transport. Lifting the hold does not depend on check
+10. The direct HTTP support statement does.
 
 Without that, the hold stays in place unless the owner records an explicit
 acceptance of the risk that names the missing checks.
