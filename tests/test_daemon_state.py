@@ -135,13 +135,17 @@ def test_run_serve_uses_stable_port_and_token_across_restarts(
 ) -> None:
     import hive._credential as credential
     import hive._daemon as daemon
+    import hive._identity as identity
     import hive._owner_only as owner_only
 
+    # hive._identity binds _verify_owner_only at import; importing it above,
+    # before the patch, keeps a stub from leaking into later tests.
     _patch_state_paths(monkeypatch, tmp_path)
     monkeypatch.setattr(daemon, "_startup_self_heal", lambda vault: None)
     monkeypatch.setattr(owner_only, "enforce_owner_only", lambda path: None)
     monkeypatch.setattr(owner_only, "_verify_owner_only", lambda path: True)
     monkeypatch.setattr(credential, "_verify_owner_only", lambda path: True)
+    monkeypatch.setattr(identity, "_verify_owner_only", lambda path: True)
     monkeypatch.setattr(daemon, "configured_daemon_port", lambda: 54282)
     monkeypatch.setattr(daemon, "_port_available", lambda host, port: True)
     served: list[tuple[int, str, str]] = []
@@ -209,3 +213,70 @@ def test_port_probe_only_reuses_address_on_posix(
         [] if is_windows else [("reuse", daemon.socket.SOL_SOCKET, daemon.socket.SO_REUSEADDR, 1)]
     )
     assert calls == [*expected, ("bind", ("127.0.0.1", 54282))]
+
+
+@pytest.mark.parametrize(
+    ("holder", "expected"),
+    [
+        ("posix:1000", "this account"),
+        ("posix:1001", "another account"),
+        (PermissionError("access denied"), "owner could not be determined"),
+    ],
+)
+def test_port_conflict_diagnostic_names_three_owners(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    holder: str | Exception,
+    expected: str,
+) -> None:
+    import hive._daemon as daemon
+    import hive._endpoint as endpoint
+
+    def lookup(port: int) -> str:
+        assert port == 54282
+        if isinstance(holder, Exception):
+            raise holder
+        return holder
+
+    _patch_state_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(daemon, "_startup_self_heal", lambda vault: None)
+    monkeypatch.setattr(daemon, "configured_daemon_port", lambda: 54282)
+    monkeypatch.setattr(daemon, "_port_available", lambda host, port: False)
+    monkeypatch.setattr(endpoint, "_listener_identity", lookup)
+    monkeypatch.setattr(endpoint, "current_user_identity", lambda: "posix:1000")
+
+    assert daemon.run_serve() != 0
+    message = capsys.readouterr().err
+    assert expected in message
+    others = {"this account", "another account", "owner could not be determined"} - {expected}
+    assert not any(other in message for other in others)
+    # Only the class is shown, never who: no UID, SID or account name.
+    assert "1000" not in message
+    assert "1001" not in message
+    assert os.environ.get("USER", "\0") not in message
+
+
+def test_proc_lookup_ignores_a_listener_on_another_address(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Only a listener that holds 127.0.0.1:<port> is the port's holder."""
+    import hive._endpoint as endpoint
+
+    header = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid\n"
+    row = "   0: {addr}:D4CA 00000000:0000 0A 00000000:00000000 00:00000000 00000000  {uid}\n"
+    tcp = tmp_path / "tcp"
+    # 10.11.12.13:54474 held by uid 1001 does not hold the loopback port.
+    tcp.write_text(header + row.format(addr="0D0C0B0A", uid=1001), encoding="ascii")
+    monkeypatch.setattr(endpoint, "_PROC_TCP_TABLES", (str(tcp),))
+    assert endpoint._proc_listener_identity(54474) is None
+
+    tcp.write_text(
+        header + row.format(addr="0D0C0B0A", uid=1001) + row.format(addr="0100007F", uid=1000),
+        encoding="ascii",
+    )
+    assert endpoint._proc_listener_identity(54474) == "posix:1000"
+
+    tcp.write_text(header + row.format(addr="00000000", uid=1002), encoding="ascii")
+    assert endpoint._proc_listener_identity(54474) == "posix:1002"

@@ -72,6 +72,33 @@ jobs:
       - name: Test cross-worker lock
         run: uv run pytest tests/test_cross_worker_lock.py -m cross_worker -v
 
+  cross_user_identity:
+    # HIVE-456 AC2: a listener run by another local account must not pass as
+    # the daemon. The Windows run is manual (verify-server-identity-windows.md).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install
+        run: uv sync --locked --extra dev --python 3.12
+
+      - name: Create the second local account
+        run: |
+          sudo useradd --no-create-home --shell /usr/sbin/nologin hiveimpostor
+          sudo -n -u hiveimpostor /usr/bin/python3 -c 'print("second account ready")'
+
+      - name: Test the cross-user impostor
+        env:
+          HIVE_CROSSUSER_ACCOUNT: hiveimpostor
+        run: uv run pytest tests/test_cross_user.py -m crossuser -v
+
   docker:
     runs-on: ubuntu-latest
     needs: check

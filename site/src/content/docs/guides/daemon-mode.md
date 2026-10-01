@@ -45,7 +45,7 @@ and restarts on failure. It is cross-platform: **systemd `--user`** on Linux,
 ```bash
 uv tool install --upgrade hive-vault   # needs hive-vault >= 1.32.0
 hive service install                   # render unit/task, enable, start
-hive service status                    # supervisor's view (active/running)
+hive service status                    # supervisor's view + pinned /health probe
 ```
 
 - **Linux** writes `~/.config/systemd/user/hive.service`
@@ -56,6 +56,13 @@ hive service status                    # supervisor's view (active/running)
 
 Use `hive service install --no-enable` to write the unit/task without starting
 it, and `hive service uninstall` to stop and remove it.
+
+`hive service status` ends with `hive daemon: healthy` (exit 0) only when the
+listener on the stable port proves the daemon's certificate. Otherwise it
+reports `unverified listener` (possible impersonation), `unverified listener,
+owner unknown`, or `down`, and exits 1. If the daemon refuses to start because
+its identity files are damaged or not owner-only, stop it and run `hive service
+rotate-identity`, which replaces the key, certificate and token.
 
 The last step is to point your MCP client at the daemon — flip the `hive` entry
 from `uvx hive-vault` to `hive client`. The full per-machine procedure

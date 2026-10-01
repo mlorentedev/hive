@@ -130,8 +130,9 @@ def load_or_create_identity(
     """Reuse the published identity, or create it on first use.
 
     ``state_path`` records that an identity was ever generated. Without it the
-    material is created; with it, missing material is a failure, never a
-    silent regeneration.
+    material is created; with it, missing, corrupt or over-permissive material
+    is a failure, never a silent regeneration. Only an expired certificate is
+    regenerated.
 
     ``before_record`` runs after the material is published and before the
     record is written, so work that must accompany the first identity (the
@@ -139,7 +140,12 @@ def load_or_create_identity(
     Writing the record first would leave that work skipped forever.
     """
     if state_path.exists():
-        return load_identity(key_path, cert_path)
+        identity = load_identity(key_path, cert_path)
+        if identity.not_after > dt.datetime.now(dt.UTC):
+            return identity
+        # Expiry is not exposure: the material passed every check above, so
+        # a new key and certificate replace it and the token is kept.
+        return create_identity(key_path, cert_path)
     identity = create_identity(key_path, cert_path)
     if before_record is not None:
         before_record()

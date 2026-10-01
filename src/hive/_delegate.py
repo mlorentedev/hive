@@ -23,10 +23,8 @@ import argparse
 import asyncio
 import json
 import logging
-import socket
-import ssl
 import sys
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from hive._credential import _read_token
 from hive._endpoint import (
@@ -36,7 +34,7 @@ from hive._endpoint import (
     identity_cert_path,
     token_file_path,
 )
-from hive._tls import fingerprint_matches, load_pinned_certificate, pem_fingerprint, pinned_context
+from hive._tls import Proof, load_pinned_certificate, pinned_context, prove_listener
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -95,7 +93,7 @@ def _read_state() -> tuple[int, str, str] | None:
         return None
 
 
-Probe = Literal["verified", "absent", "unverified"]
+Probe = Proof
 
 
 def _probe_daemon(host: str, port: int, cert_pem: str) -> Probe:
@@ -105,21 +103,10 @@ def _probe_daemon(host: str, port: int, cert_pem: str) -> Probe:
     ``unverified`` means something answered without the owner's certificate:
     that is a possible impersonation and must not be hidden by a fallback.
     """
-    try:
-        raw = socket.create_connection((host, port), timeout=_PROBE_TIMEOUT_S)
-    except OSError:
-        return "absent"
-    try:
-        with pinned_context(cert_pem).wrap_socket(raw, server_hostname=host) as tls:
-            if fingerprint_matches(tls, pem_fingerprint(cert_pem)):
-                return "verified"
-            return "unverified"
-    except ssl.SSLError:
-        return "unverified"
-    except OSError:
-        return "absent"
-    finally:
-        raw.close()
+    proof, tls = prove_listener(host, port, cert_pem, timeout=_PROBE_TIMEOUT_S)
+    if tls is not None:
+        tls.close()
+    return proof
 
 
 def _remote_client(host: str, port: int, token: str, cert_pem: str) -> Client[Any]:
@@ -137,7 +124,18 @@ def _remote_client(host: str, port: int, token: str, cert_pem: str) -> Client[An
     return Client(transport, init_timeout=_DAEMON_INIT_TIMEOUT_S)
 
 
-def _impersonation_record(model: str, host: str, port: int) -> dict[str, Any]:
+def _impersonation_record(
+    model: str,
+    host: str,
+    port: int,
+    *,
+    expired: bool = False,
+) -> dict[str, Any]:
+    reason = (
+        "presented the Hive daemon's expired certificate; restart the daemon to regenerate it"
+        if expired
+        else "did not prove the Hive daemon's identity (possible impersonation)"
+    )
     return {
         "status": "task_failed",
         "model": model,
@@ -146,9 +144,8 @@ def _impersonation_record(model: str, host: str, port: int) -> dict[str, Any]:
         "duration_ms": 0,
         "output": "",
         "detail": (
-            f"the listener on https://{host}:{port}{MCP_PATH} did not prove the Hive "
-            "daemon's identity (possible impersonation); nothing was sent and the task "
-            "was not run locally. Check `hive service status`."
+            f"the listener on https://{host}:{port}{MCP_PATH} {reason}; nothing was "
+            "sent and the task was not run locally. Check `hive service status`."
         ),
     }
 
@@ -273,9 +270,9 @@ async def _dispatch_async(
     # answers to "is the daemon up" are two answers that can disagree.
     state = _read_state()
     probe: Probe = "absent" if state is None else _probe_daemon(DEFAULT_HOST, state[0], state[2])
-    if state is not None and probe == "unverified":
+    if state is not None and probe in ("unverified", "expired"):
         _log.warning("daemon listener failed identity verification; not dispatching")
-        return _impersonation_record(model, DEFAULT_HOST, state[0])
+        return _impersonation_record(model, DEFAULT_HOST, state[0], expired=probe == "expired")
     if state is not None and probe == "verified":
         port, token, cert_pem = state
         # The fallback is PRE-SUBMISSION ONLY, and the flag is what enforces it.

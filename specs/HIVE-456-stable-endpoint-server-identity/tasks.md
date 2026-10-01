@@ -141,26 +141,26 @@ created: "2026-09-30"
 
 ## Implementation — PR 2: lifecycle, status probe, diagnostics
 
-- [ ] [P] [AC6] `test_expired_certificate_is_regenerated_and_token_kept`. Use
+- [x] [P] [AC6] `test_expired_certificate_is_regenerated_and_token_kept`. Use
   a certificate with `notAfter` in the past and the record present. Startup
   regenerates the key and certificate, the fingerprint changes, and the
   token is unchanged. Implement the check in `prepare_daemon_credentials`.
-- [ ] [AC6] `test_over_permissive_key_fails_closed`. On POSIX use mode `0644`;
+- [x] [AC6] `test_over_permissive_key_fails_closed`. On POSIX use mode `0644`;
   on Windows, add an extra ACE with `icacls`. Startup exits non-zero with a
   message that names `rotate-identity` and contains no key material.
-- [ ] [AC6] `test_missing_or_corrupt_identity_with_record_fails_closed`. Run
+- [x] [AC6] `test_missing_or_corrupt_identity_with_record_fails_closed`. Run
   it with the key deleted, the certificate deleted, and a truncated PEM. With
   the record present, every case fails closed. Without the record it is the
   migration case, already covered by the AC4 test.
-- [ ] [AC6] `tests/test_service.py::test_rotate_identity_rotates_key_cert_and_token`.
+- [x] [AC6] `tests/test_service.py::test_rotate_identity_rotates_key_cert_and_token`.
   Implement `hive service rotate-identity` (a parser in `server.py`, the
   handler in `_identity.py`). It writes a new key, certificate, and token
   atomically, keeps the record, and exits 0. Its output names the new
   fingerprint only.
-- [ ] [AC6] `test_relay_repins_after_rotation_and_refuses_old_certificate`.
+- [x] [AC6] `test_relay_repins_after_rotation_and_refuses_old_certificate`.
   The relay re-reads the pin once after a verification failure and
   succeeds. A server that presents the old certificate is refused.
-- [ ] [P] [AC7] `tests/test_service.py::test_status_reports_four_states`.
+- [x] [P] [AC7] `tests/test_service.py::test_status_reports_four_states`.
   `hive service status` always runs a pinned `GET /health`, whatever the OS
   or supervisor. It prints the supervisor passthrough (`systemctl` or
   `schtasks`) only where one exists. The final exit code comes from the
@@ -174,7 +174,7 @@ created: "2026-09-30"
   | Impostor whose owner lookup is denied (stubbed) | `unverified listener, owner unknown` | non-zero |
 
   Implement it in `_service.service_status`.
-- [ ] [AC2] `tests/test_daemon_state.py::test_port_conflict_diagnostic_names_three_owners`.
+- [x] [AC2] `tests/test_daemon_state.py::test_port_conflict_diagnostic_names_three_owners`.
   Use a stubbed owner lookup for three cases: the same UID or SID, a
   different one, and a denied lookup. The diagnostic reads `this account`,
   `another account`, and `owner could not be determined`, and never shows a
@@ -182,7 +182,7 @@ created: "2026-09-30"
   `/proc/net/tcp` LISTEN entry's UID. On Windows it uses
   `GetExtendedTcpTable` to get the owning PID, then the process token SID; a
   denied lookup is reported as unknown.
-- [ ] [AC2] `tests/test_cross_user.py` (marker `crossuser`). It needs a
+- [x] [AC2] `tests/test_cross_user.py` (marker `crossuser`). It needs a
   second local account, named by `HIVE_CROSSUSER_ACCOUNT`; without it the
   test fails with "missing evidence". On Linux CI,
   add a job step that runs `sudo useradd hiveimpostor` and starts the

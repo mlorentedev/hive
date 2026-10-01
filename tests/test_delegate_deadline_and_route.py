@@ -345,3 +345,43 @@ def test_delegate_probe_verifies_the_owner_unlike_an_impostor(tmp_path: Path) ->
         closed.bind(("127.0.0.1", 0))
         free_port = closed.getsockname()[1]
     assert _delegate._probe_daemon("127.0.0.1", free_port, pem) == "absent"
+
+
+def test_delegate_probe_names_an_expired_owner_certificate(tmp_path: Path) -> None:
+    """An expired pin is still refused, but not reported as an impostor."""
+    import datetime as dt
+
+    from hive import _delegate
+    from hive._identity import create_identity
+    from tests.impostor import Impostor
+
+    long_ago = dt.datetime.now(dt.UTC) - dt.timedelta(days=500)
+    owner = create_identity(tmp_path / "owner.key", tmp_path / "owner.crt", now=long_ago)
+    listener = Impostor(owner)
+    probe = _delegate._probe_daemon("127.0.0.1", listener.port, owner.cert_path.read_text())
+    listener.wait()
+    assert probe == "expired"
+    assert listener.decrypted == bytearray()
+
+    record = _delegate._impersonation_record("m", "127.0.0.1", listener.port, expired=True)
+    assert record["status"] == "task_failed"
+    assert "expired certificate" in record["detail"]
+    assert "impersonation" not in record["detail"]
+
+
+@pytest.mark.parametrize("reset", [True, False], ids=["reset", "stall"])
+def test_delegate_probe_reports_a_listener_that_never_proves_itself(
+    tmp_path: Path,
+    reset: bool,
+) -> None:
+    """Something accepted the connection, so it is not "absent" (no local fallback)."""
+    from hive import _delegate
+    from hive._identity import create_identity
+    from tests.impostor import SilentListener
+
+    owner = create_identity(tmp_path / "owner.key", tmp_path / "owner.crt")
+    listener = SilentListener(reset=reset)
+    probe = _delegate._probe_daemon("127.0.0.1", listener.port, owner.cert_path.read_text())
+    listener.wait()
+    assert listener.accepted.is_set()
+    assert probe == "unverified"
