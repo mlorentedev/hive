@@ -467,9 +467,11 @@ client.
   "plaintext, accepted by owner" state, not "unverified process", and still
   exits non-zero, so the accepted risk stays visible.
 - When startup fails on a port conflict, the diagnostic says whether the
-  holder belongs to the current account. If the OS denies the lookup, it says
-  "another account". It never names the account, and it does not move the
-  endpoint.
+  holder belongs to the current account. The diagnostic has three distinct
+  states: "this account", "another account", and "owner could not be
+  determined", used when the OS denies the lookup. A failed lookup is never
+  reported as another account. It never names the account, and it does not
+  move the endpoint.
 - Candidate validation on ephemeral ports (Transactional self-update) uses the
   same identity material, so a candidate never runs plaintext with the real
   token.
@@ -552,6 +554,12 @@ generated key, certificate and token, and an ephemeral or overridden port.
 They never use a live vault credential. Every check runs on Linux and on
 Windows unless marked otherwise.
 
+Every absence assertion needs an independent positive control. Checks 1 to 4
+assert that an impostor received nothing secret. Each of them must also
+assert, separately, that the impostor accepted the client's connection and
+received a TLS ClientHello from it. Without that control, a client that never
+reached the port would pass for the wrong reason.
+
 1. **Spoofed listener, relay.** Put a plaintext impostor, and a TLS impostor
    with a different self-signed certificate, on the configured port. The relay
    aborts in the handshake. The impostor socket receives no HTTP request
@@ -565,8 +573,9 @@ Windows unless marked otherwise.
    state.
 3. **Cross-user.** The impostor runs as a second local account without
    administrator rights while the daemon is down. Both clients refuse it. The
-   daemon's start then fails closed, with a diagnostic that tells "another
-   account" apart from "this account". Once the impostor exits, the legitimate
+   daemon's start then fails closed, with a diagnostic that reports "another
+   account". A run where the owner lookup is denied reports "owner could not
+   be determined", never "another account". Once the impostor exits, the legitimate
    daemon starts and both clients connect without any configuration change.
    On Windows this runs on the owner's baseline host. If CI cannot create a
    second account, record the gap instead of substituting a single-user proxy
