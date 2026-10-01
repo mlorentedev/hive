@@ -36,30 +36,30 @@ created: "2026-09-30"
 
 ## Setup
 
-- [ ] Branch `feat/stable-endpoint-server-identity` from `master` (at `4eb25dd` or later)
+- [x] Branch `feat/stable-endpoint-server-identity` from `master` (at `4eb25dd` or later)
 - [ ] `proposal.md` complete; open risks are environmental only (they cover where evidence runs, not the design)
 - [ ] `/spec check HIVE-456-stable-endpoint-server-identity` returns PASS
 
 ## Implementation — PR 1: TLS endpoint, pinned clients, plaintext-era rotation
 
-- [ ] [P] [AC6] `tests/test_identity.py::test_create_identity_material_properties`.
+- [x] [P] [AC6] `tests/test_identity.py::test_create_identity_material_properties`.
   `create_identity(state_dir)` writes the key and certificate. The
   certificate has ECDSA P-256, `CA:FALSE`, the single SAN `IP:127.0.0.1`,
   EKU `serverAuth`, and a validity of at most 398 days. Both files pass
   `_verify_owner_only`.
   Run `uv run pytest tests/test_identity.py -q`.
   Expected: FAIL with `ModuleNotFoundError: hive._identity`.
-- [ ] [AC6] Add `cryptography` to `pyproject.toml` `dependencies`. Implement
+- [x] [AC6] Add `cryptography` to `pyproject.toml` `dependencies`. Implement
   `_identity.create_identity`, reusing `_daemon._create_token`'s atomic
   temp, enforce, verify, `os.replace` sequence; extract it into a shared
   `_write_owner_only_atomic(path, data: bytes)`. Add the three path helpers
   to `_endpoint.py`. Run `uv run pytest tests/test_identity.py -q`.
   Expected: PASS.
-- [ ] [AC6] `test_create_identity_is_atomic_and_never_leaves_partial_files`.
+- [x] [AC6] `test_create_identity_is_atomic_and_never_leaves_partial_files`.
   Inject a failure between the key write and the certificate write. Assert
   that no final file exists and no temporary file is left behind. Fix until
   PASS.
-- [ ] [AC5] `test_load_or_create_identity_reuses_existing_material`: two
+- [x] [AC5] `test_load_or_create_identity_reuses_existing_material`: two
   calls return the same SHA-256 fingerprint. Implement
   `load_or_create_identity()` together with the `identity.state` record.
 - [ ] [AC4] `test_first_tls_start_rotates_a_pre_tls_token_once`. Set up a
