@@ -95,3 +95,63 @@ def test_load_or_create_identity_reuses_existing_material(tmp_path: Path) -> Non
     assert first.fingerprint == second.fingerprint
     assert key_path.read_bytes() == key_bytes
     assert state_path.exists()
+
+
+def _state_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    monkeypatch.setenv("HIVE_DB_PATH", str(tmp_path / "worker.db"))
+    return tmp_path
+
+
+def test_first_tls_start_rotates_a_pre_tls_token_once(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from hive._daemon import prepare_daemon_credentials
+    from hive._endpoint import identity_state_path, token_file_path
+
+    _state_dir(monkeypatch, tmp_path)
+    # A #453 state directory: a token served over plaintext, no identity yet.
+    pre_tls = "synthetic-pre-tls-token"
+    token_file_path().write_text(pre_tls, encoding="ascii")
+
+    token, identity = prepare_daemon_credentials()
+
+    assert token != pre_tls
+    assert token_file_path().read_text(encoding="ascii") == token
+    assert identity.key_path.exists()
+    assert identity.cert_path.exists()
+    assert identity_state_path().exists()
+
+    again, same = prepare_daemon_credentials()
+    assert again == token
+    assert same.fingerprint == identity.fingerprint
+
+
+def test_interrupted_first_tls_start_rotates_again_rather_than_never(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A crash between identity creation and token rotation must not leave the
+    pre-TLS token live behind a state record."""
+    import hive._daemon as daemon
+    from hive._endpoint import identity_state_path, token_file_path
+
+    _state_dir(monkeypatch, tmp_path)
+    pre_tls = "synthetic-pre-tls-token"
+    token_file_path().write_text(pre_tls, encoding="ascii")
+
+    real_create = daemon._create_token
+
+    def crash(_path: Path) -> str:
+        raise RuntimeError("simulated crash before the token rotation")
+
+    monkeypatch.setattr(daemon, "_create_token", crash)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        daemon.prepare_daemon_credentials()
+    assert not identity_state_path().exists()
+    assert token_file_path().read_text(encoding="ascii") == pre_tls
+
+    monkeypatch.setattr(daemon, "_create_token", real_create)
+    token, _ = daemon.prepare_daemon_credentials()
+    assert token != pre_tls
+    assert identity_state_path().exists()

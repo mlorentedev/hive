@@ -27,6 +27,7 @@ from hive._credential import _verify_owner_only
 from hive._owner_only import write_owner_only_atomic
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 # Below the 398-day ceiling ADR-022 A1 sets, so a host can trust the
@@ -119,15 +120,28 @@ def load_identity(key_path: Path, cert_path: Path) -> Identity:
     return Identity(key_path, cert_path, fingerprint(cert), cert.not_valid_after_utc)
 
 
-def load_or_create_identity(key_path: Path, cert_path: Path, state_path: Path) -> Identity:
+def load_or_create_identity(
+    key_path: Path,
+    cert_path: Path,
+    state_path: Path,
+    *,
+    before_record: Callable[[], None] | None = None,
+) -> Identity:
     """Reuse the published identity, or create it on first use.
 
     ``state_path`` records that an identity was ever generated. Without it the
     material is created; with it, missing material is a failure, never a
     silent regeneration.
+
+    ``before_record`` runs after the material is published and before the
+    record is written, so work that must accompany the first identity (the
+    pre-TLS token rotation) is retried by the next start if it is interrupted.
+    Writing the record first would leave that work skipped forever.
     """
     if state_path.exists():
         return load_identity(key_path, cert_path)
     identity = create_identity(key_path, cert_path)
+    if before_record is not None:
+        before_record()
     write_owner_only_atomic(state_path, STATE_RECORD)
     return identity

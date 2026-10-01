@@ -62,7 +62,7 @@ created: "2026-09-30"
 - [x] [AC5] `test_load_or_create_identity_reuses_existing_material`: two
   calls return the same SHA-256 fingerprint. Implement
   `load_or_create_identity()` together with the `identity.state` record.
-- [ ] [AC4] `test_first_tls_start_rotates_a_pre_tls_token_once`. Set up a
+- [x] [AC4] `test_first_tls_start_rotates_a_pre_tls_token_once`. Set up a
   state directory with a token and no record. `prepare_daemon_credentials()`
   rotates the token and writes the key, certificate, and record. A second
   call changes nothing (same token, same fingerprint). Implement it in

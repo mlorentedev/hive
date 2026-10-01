@@ -31,6 +31,9 @@ from hive._endpoint import (
     MCP_PATH,
     configured_daemon_port,
     daemon_state_dir,
+    identity_cert_path,
+    identity_key_path,
+    identity_state_path,
     lock_file_path,
     port_file_path,
     token_file_path,
@@ -44,6 +47,8 @@ if TYPE_CHECKING:
 
     import uvicorn
     from fastmcp.server.auth import AuthProvider
+
+    from hive._identity import Identity
 
 PACKAGE_NAME = "hive-vault"  # PyPI distribution name (the `hive` name was taken)
 NOT_FOUND = "<not-found>"  # _current_version sentinel for the upgrade swap window
@@ -72,6 +77,35 @@ def load_or_create_token() -> str:
     if path.exists():
         return _read_token(path)
     return _create_token(path)
+
+
+def prepare_daemon_credentials() -> tuple[str, Identity]:
+    """Load the TLS identity and bearer, creating them on the first TLS start.
+
+    Before the identity existed the daemon served plaintext HTTP (#453), so any
+    token found then is presumed captured and is replaced, never reused. The
+    identity record is written only after that rotation, so an interrupted
+    first start rotates again instead of leaving the old token live
+    (ADR-022 Amendment 1).
+    """
+    from hive._identity import load_or_create_identity
+
+    token_path = token_file_path()
+    rotated: list[str] = []
+
+    def rotate_pre_tls_token() -> None:
+        rotated.append(_create_token(token_path))
+
+    identity = load_or_create_identity(
+        identity_key_path(),
+        identity_cert_path(),
+        identity_state_path(),
+        before_record=rotate_pre_tls_token,
+    )
+    # Record present but token gone: deletion is not exposure, so a fresh
+    # token is created as on a first install.
+    token = rotated[0] if rotated else load_or_create_token()
+    return token, identity
 
 
 def write_owner_only(path: Path, content: str) -> None:
@@ -335,7 +369,7 @@ async def _serve_until_drift_or_signal(uv_server: uvicorn.Server) -> bool:
     return drifted
 
 
-def _serve_owned(host: str, port: int, token: str) -> bool:
+def _serve_owned(host: str, port: int, token: str, identity: Identity) -> bool:
     """Own the ``uvicorn.Server`` so the drift watcher can clean-stop it.
 
     Built from the PUBLIC ``mcp.http_app()`` (the spike-validated seam) rather
@@ -401,12 +435,12 @@ def run_serve(host: str = DEFAULT_HOST, port: int = 0) -> int:
                 file=sys.stderr,
             )
             return 1
-        token = load_or_create_token()
+        token, identity = prepare_daemon_credentials()
         # Retained temporarily as diagnostic migration metadata. Clients derive
         # the endpoint independently and never discover it through this file.
         write_owner_only(port_file_path(), str(resolved_port))
 
-        drifted = _serve_owned(host, resolved_port, token)
+        drifted = _serve_owned(host, resolved_port, token, identity)
         return EXIT_RESTART_ON_UPGRADE if drifted else 0
     finally:
         singleton.release()
