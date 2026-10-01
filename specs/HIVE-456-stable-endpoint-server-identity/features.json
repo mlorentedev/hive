@@ -9,7 +9,7 @@
   {
     "id": "HIVE-456-stable-endpoint-server-identity-ac2",
     "behavior": "AC2: Cross-user impostor refused; port-conflict diagnostic names this account / another account / owner could not be determined",
-    "verification": "HIVE_CROSSUSER_TEST=1 uv run pytest tests/test_cross_user.py tests/test_daemon_state.py -k 'cross_user or port_conflict_diagnostic' -q",
+    "verification": "uv run pytest tests/test_cross_user.py tests/test_daemon_state.py -k 'cross_user or port_conflict_diagnostic' -q",
     "state": "pending",
     "evidence": ""
   },

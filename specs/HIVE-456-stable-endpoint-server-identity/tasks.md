@@ -17,6 +17,13 @@ created: "2026-09-30"
 > `HIVE_DAEMON_PORT`. No test reads the real state directory or prints a
 > token.
 >
+> **Missing preconditions never pass.** A test whose precondition is absent
+> (no second account, no `node`) calls `pytest.fail("missing evidence: …")`;
+> it never `skip`s. The one exception is `HIVE_EVIDENCE_OPTIONAL=1`, which
+> local development may set. CI and the `features.json` commands never set
+> it. This is lesson 094: a verification command that selects zero tests
+> must not read as green.
+>
 > **Module layout:**
 > - `src/hive/_tls.py`: stdlib only (`ssl`, `hashlib`). Builds the pinned
 >   client context and checks the fingerprint. Used by the relay, `hive
@@ -116,8 +123,8 @@ created: "2026-09-30"
   An httpx client with `verify=<cert path>` initializes against the daemon
   and refuses both impostors.
   `test_direct_https_node_host` runs `node` with `NODE_EXTRA_CA_CERTS` and a
-  `fetch` script. It is skipped when `node` is absent, and a skip is reported
-  as missing evidence, not as a pass. In both tests the impostor must record
+  `fetch` script. When `node` is absent it fails with "missing evidence"
+  (see the preconditions rule above); it does not skip. In both tests the impostor must record
   an accepted connection and a ClientHello (positive control), so a client
   that never dialled the impostor port fails instead of passing.
 - [ ] [AC9] Extend `tests/test_credential_never_emitted.py`: across daemon
@@ -154,8 +161,10 @@ created: "2026-09-30"
   The relay re-reads the pin once after a verification failure and
   succeeds. A server that presents the old certificate is refused.
 - [ ] [P] [AC7] `tests/test_service.py::test_status_reports_four_states`.
-  `hive service status` runs the existing supervisor passthrough, then a
-  pinned `GET /health`. The four states are:
+  `hive service status` always runs a pinned `GET /health`, whatever the OS
+  or supervisor. It prints the supervisor passthrough (`systemctl` or
+  `schtasks`) only where one exists. The final exit code comes from the
+  probe. The four states are:
 
   | Scenario | Output | Exit |
   |---|---|---|
@@ -173,8 +182,9 @@ created: "2026-09-30"
   `/proc/net/tcp` LISTEN entry's UID. On Windows it uses
   `GetExtendedTcpTable` to get the owning PID, then the process token SID; a
   denied lookup is reported as unknown.
-- [ ] [AC2] `tests/test_cross_user.py` (marker `crossuser`, skipped unless
-  `HIVE_CROSSUSER_TEST=1`). It needs a second local account. On Linux CI,
+- [ ] [AC2] `tests/test_cross_user.py` (marker `crossuser`). It needs a
+  second local account, named by `HIVE_CROSSUSER_ACCOUNT`; without it the
+  test fails with "missing evidence". On Linux CI,
   add a job step that runs `sudo useradd hiveimpostor` and starts the
   impostor with `sudo -u hiveimpostor`. Assert:
   - both clients refuse the impostor;
@@ -183,7 +193,10 @@ created: "2026-09-30"
 
   Write `docs/runbooks/verify-server-identity-windows.md` for the manual
   Windows run with a second local account, together with check 10 for
-  Copilot CLI.
+  Copilot CLI. The runbook states the expected outputs. A standard user
+  cannot open another user's process token, so on Windows a real
+  cross-user impostor normally yields `owner could not be determined` rather
+  than `another account`. That result is correct, not a failure.
 - [ ] Run `make check`. Expected: green. Open PR 2 as a draft, `Refs #456`.
 
 ## Closing

@@ -86,6 +86,14 @@ decides the fix. Until it ships, release 4.3.0 (#449) stays held.
   certificate as an issuer, and signing anything with it needs the owner-only
   key, so the only certificate that verifies is the anchor itself. The relay
   additionally compares the fingerprint.
+- **Resolved — rotation semantics vs the original ADR-022:** the original
+  decision defines token rotation as a bounded dual-token handoff, and
+  HIVE-437 deferred that. Every rotation in this spec is exposure-triggered:
+  a pre-TLS token, an over-permissive key, or missing or corrupt material.
+  It therefore revokes the old token immediately, because keeping a token
+  presumed stolen alive would defeat the purpose. The dual-token window
+  applies only to explicit rotation that is not about exposure, and that
+  stays out of scope.
 - **Open — Windows second account in CI:** CI may not be able to create a
   second local account. If it cannot, AC2's cross-user half runs on the
   owner's baseline host and is recorded on #456 as manual evidence. A
