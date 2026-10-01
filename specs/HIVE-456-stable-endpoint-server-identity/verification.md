@@ -64,7 +64,7 @@ when they run; nothing here stands in for them.
 
 - Test suite (PR 1): `make check` -> `1015 passed, 4 skipped, 54 deselected`,
   coverage 84%. The 4 skips are pre-existing Windows-only ACL tests.
-- Test suite (PR 2): `make check` -> `1035 passed, 4 skipped, 56 deselected`,
+- Test suite (PR 2): `make check` -> `1046 passed, 4 skipped, 56 deselected`,
   coverage 84%.
 - Manual smoke test: `curl --cacert daemon.crt https://127.0.0.1:<port>/`
   returns 200 against a server holding the identity, and fails (exit 60)
@@ -109,6 +109,32 @@ when they run; nothing here stands in for them.
   anything but 200 is reported as `down`; the daemon always answers 200, so
   that only happens mid-shutdown. A malformed `HIVE_DAEMON_PORT` is a one-line
   error, exit 1.
+- An independent adversarial review (a separate agent, before the PRs were
+  opened) found no path that sends the bearer or a request to an unproven
+  listener. Its findings and their disposition:
+  - A relay started before `rotate-identity` kept trusting the rotated-away
+    key until a proof failed; an attacker holding that key could read
+    requests. Fixed in `170bc48`: the relay re-reads its pin before every
+    connection and fails closed if it cannot.
+  - A listener that accepted TCP and then reset or stalled was `absent`
+    (delegate ran locally) and status said `down`. Fixed in `ba65bdf`: one
+    shared proof, `unverified` after any accepted connection.
+  - Mutants that survived (owner-only pin, key/certificate match, rotation
+    order, token errors without a hint) are now guarded in `aafcd29`. The
+    fingerprint comparison after the pinned handshake stays untested
+    defence in depth: with a single `CA:FALSE` anchor no other certificate
+    can verify, so no test can make it the deciding check.
+  - The `/proc` holder lookup ignored the local address. Fixed in
+    `184e987`, which also stops a test stub leaking through
+    `hive._identity`'s import-time binding.
+  - `NODE_EXTRA_CA_CERTS` adds to Node's roots instead of replacing them;
+    documented in the activation runbook.
+  - Open, to be ticketed: no early renewal (a daemon started near expiry
+    goes dark until restarted) and a one-minute `notBefore` backdate that a
+    clock step can trip. Both fail closed with an explicit message.
+  - Declined: AC9 coverage of `status` output. Status reads only the
+    certificate, and the rotation output is already asserted free of the
+    token and key.
 - The AC2 `features.json` command now passes `-m 'crossuser or not
   crossuser'`. Without it the default `addopts` deselects the cross-user
   tests and the command would report only the diagnostic tests as green.

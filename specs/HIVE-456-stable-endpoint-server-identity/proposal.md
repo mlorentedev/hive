@@ -33,7 +33,9 @@ decides the fix. Until it ships, release 4.3.0 (#449) stays held.
    sequence.
 2. `hive client` and `hive delegate` verify that certificate on every TCP
    connection before they write a byte. Verification uses the certificate as
-   the only trust anchor and also matches its SHA-256 fingerprint. A failure is
+   the only trust anchor; the relay and the delegate's probe also match its
+   SHA-256 fingerprint (the delegate's httpx session relies on the anchor
+   alone, see Risks). A failure is
    reported as a possible impersonation, distinct from "daemon unavailable",
    and the report contains no credential.
 3. A token that predates the identity key is rotated on the first TLS start
