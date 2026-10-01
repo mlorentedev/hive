@@ -16,10 +16,12 @@ quieres las garantías de único dueño de
 o quieres que los clientes adopten siempre la última versión publicada de forma
 automática.
 
-:::note[Siempre degrada, nunca rompe]
-Si el daemon está ausente o no responde, `hive client` recurre a un **servidor
-in-process** — el mismo código que ejecuta el modo stdio. Un daemon caído te
-cuesta las ventajas de único dueño, no tu sesión.
+:::caution[Solo equipos de un usuario hasta resolver #456]
+Un listener que suplante el puerto estable durante una caída puede capturar
+un bearer que seguirá siendo válido después del reinicio. No despliegues el modo
+daemon en equipos multiusuario no confiables hasta resolver
+[#456](https://github.com/mlorentedev/hive/issues/456). Si falta el daemon,
+`hive client` **falla explícitamente**; nunca inicia otro servidor in-process.
 :::
 
 ## Los dos procesos
@@ -27,7 +29,7 @@ cuesta las ventajas de único dueño, no tu sesión.
 | Comando | Rol |
 |---|---|
 | `hive serve` | El daemon. Sirve MCP sobre streamable-HTTP en loopback, protegido con bearer token. Único dueño del git + SQLite del vault por máquina (garantizado por un lock singleton). |
-| `hive client` | Un shim stdio ligero que lanza tu cliente MCP. Hace de proxy hacia un `hive serve` en marcha; si no hay ninguno alcanzable, recurre a un servidor in-process. |
+| `hive client` | Un shim stdio ligero que lanza tu cliente MCP. Hace de proxy hacia un `hive serve` en marcha; falla explícitamente si no hay ninguno alcanzable. |
 | `hive service` | Instala/elimina el supervisor del SO que mantiene `hive serve` en marcha. Ver abajo. |
 
 En modo daemon tu cliente MCP se registra con `hive client` en lugar de
@@ -59,6 +61,19 @@ El último paso es apuntar tu cliente MCP al daemon — cambia la entrada `hive`
 `uvx hive-vault` a `hive client`. El procedimiento completo por máquina
 (verificar que el daemon sirve, la edición quirúrgica de `~/.claude.json`, y el
 rollback) está en el [runbook de Activación del Daemon](https://github.com/mlorentedev/hive/blob/master/docs/runbooks/daemon-activation.md).
+
+Para **GitHub Copilot CLI** en un equipo confiable de un solo usuario,
+registra `copilot mcp add hive -- hive client` a nivel de usuario. Si cambias
+el puerto, define `HIVE_DAEMON_PORT` tanto para el daemon como para el cliente.
+Deshabilita la entrada antigua `hive-vault` después de comprobar la nueva;
+evita registrar dos dueños del vault.
+El smoke automatizado de `tests/test_daemon.py` inicializa, lista herramientas
+y llama a `vault_health` contra el daemon real por stdio y HTTP directo; no
+ejecuta la CLI de Copilot. Su ajuste MCP `timeout` no amplía el plazo
+independiente de inicialización (~4,1 segundos medidos en Windows). Evita
+poner el bearer de una configuración HTTP directa en archivos de configuración
+o en el historial de shell; ambos transportes están sujetos a
+[#456](https://github.com/mlorentedev/hive/issues/456).
 
 ## Auto-actualización: reinicio-al-actualizar
 
@@ -127,5 +142,5 @@ El modo daemon es opt-in. Quédate en `uvx hive-vault` si ejecutas una sola
 sesión a la vez, no quieres procesos de fondo, o estás en una plataforma sin
 supervisor soportado — el servidor por sesión es completo y usa el mismo código
 de vault y workers. Puedes cambiar más tarde en cualquier momento sin migración
-de datos: el daemon y el fallback in-process comparten las mismas rutas de git y
-store SQLite del vault.
+de datos: `hive client` falla explícitamente sin el daemon en vez de iniciar
+silenciosamente otro dueño del vault.
