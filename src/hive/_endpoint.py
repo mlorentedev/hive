@@ -22,6 +22,18 @@ _SID_RE = re.compile(r"^S-\d+(?:-\d+)+$")
 _TOKEN_QUERY = 0x0008
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _TCP_LISTEN = "0A"
+_PROC_TCP_TABLES = ("/proc/net/tcp", "/proc/net/tcp6")
+# Local addresses that hold 127.0.0.1:<port>: loopback itself and the
+# wildcards (IPv4 0.0.0.0, IPv6 ::, ::1 and ::ffff:127.0.0.1 as /proc prints them).
+_LOOPBACK_HOLDERS = frozenset(
+    {
+        "0100007F",
+        "00000000",
+        "00000000000000000000000000000000",
+        "00000000000000000000000001000000",
+        "0000000000000000FFFF00000100007F",
+    }
+)
 _TOKEN_USER_CLASS = 1
 
 
@@ -203,14 +215,17 @@ def _windows_listener_identity(port: int) -> str | None:
 
 def _proc_listener_identity(port: int) -> str | None:
     wanted = f"{port:04X}"
-    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+    for table in _PROC_TCP_TABLES:
         try:
             lines = Path(table).read_text(encoding="ascii").splitlines()[1:]
         except OSError:
             continue
         for line in lines:
             fields = line.split()
-            if len(fields) > 7 and fields[3] == _TCP_LISTEN and fields[1].endswith(":" + wanted):
+            if len(fields) <= 7 or fields[3] != _TCP_LISTEN:
+                continue
+            address, _, local_port = fields[1].partition(":")
+            if local_port == wanted and address in _LOOPBACK_HOLDERS:
                 return canonical_identity(platform="linux", uid=int(fields[7]))
     return None
 
