@@ -73,6 +73,8 @@ terminated after ~4.1 seconds on the measured Windows host despite
 `timeout: 30000`; that is an observation, not a documented universal deadline.
 Avoid direct HTTP registrations containing a bearer in a config file or shell
 history; both transports remain subject to [#456](https://github.com/mlorentedev/hive/issues/456).
+ADR-022 Amendment 1 removes plaintext `http://` registrations from the
+supported contract once its TLS endpoint ships; do not create new ones.
 
 ## Auto-update: restart-on-upgrade
 

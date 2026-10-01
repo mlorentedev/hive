@@ -77,6 +77,8 @@ universal documentado. Evita
 poner el bearer de una configuración HTTP directa en archivos de configuración
 o en el historial de shell; ambos transportes están sujetos a
 [#456](https://github.com/mlorentedev/hive/issues/456).
+La enmienda 1 de ADR-022 saca los registros `http://` en claro del contrato
+soportado en cuanto se publique su endpoint TLS; no crees registros nuevos.
 
 ## Auto-actualización: reinicio-al-actualizar
 
