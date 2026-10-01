@@ -485,11 +485,13 @@ client.
   therefore also runs the original decision's token rotation.
 - **Exposure through the plaintext era.** Any token ever sent to a plaintext
   stable endpoint is treated as exposed. That covers the #453 implementation
-  and the single-user plaintext mode. A plaintext start records "token exposed
-  since last rotation" in the owner-only state. Any TLS start that finds that
-  record rotates the token, then clears the record. Further TLS starts rotate
-  nothing until plaintext is used again, so every re-entry into plaintext mode
-  triggers a new rotation.
+  and the single-user plaintext mode. Two signals arm the rotation. First, a
+  token that already exists when the TLS identity key is first generated
+  predates TLS; that covers #453, which wrote no record. Second, a plaintext
+  start records "token exposed since last rotation" in the owner-only state.
+  Any TLS start that finds either signal rotates the token, then clears the
+  record. Further TLS starts rotate nothing until plaintext is used again, so
+  every re-entry into plaintext mode triggers a new rotation.
 
 ### Compatibility
 
@@ -567,8 +569,9 @@ Windows unless marked otherwise.
 4. **Post-restart replay.** Two parts, each with a token the test knows:
    - **Plaintext era.** A pre-amendment (#453) relay sends a synthetic token
      to a plaintext impostor, which captures it. The TLS-enabled daemon then
-     starts, and the captured token gets 401, because of the check 7
-     rotation. The rotated token is accepted.
+     starts on that state directory for the first time: the token exists and
+     no identity key does. The captured token gets 401, and the rotated token
+     is accepted.
    - **Amended clients.** The capture from checks 1 to 3 is asserted empty: it
      holds no token bytes and no body. Replaying the token that was valid
      before the impostor appeared still succeeds, which shows that the
@@ -583,8 +586,10 @@ Windows unless marked otherwise.
    certificate fails closed until explicit regeneration, which also rotates
    the token. After any rotation, the relay re-pins and the old certificate is
    refused.
-7. **Plaintext-era rotation.** The first TLS start after plaintext use rotates
-   the token, and a second TLS start rotates nothing. Then re-enable
+7. **Plaintext-era rotation.** Both signals are tested. First, a pre-existing
+   token with no identity key. Second, a recorded plaintext start. In each
+   case the next TLS start rotates the token, and a second TLS start rotates
+   nothing. Then re-enable
    plaintext mode, use it, and return to TLS: the token rotates again.
 8. **Status and readiness.** Probes and `hive service status` reject a listener
    that fails identity verification and report it apart from "down".
