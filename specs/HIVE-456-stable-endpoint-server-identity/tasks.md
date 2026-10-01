@@ -136,7 +136,7 @@ created: "2026-09-30"
   `NODE_EXTRA_CA_CERTS` for direct hosts, the removal of `http://`
   registrations, and the security-hold wording, which stays until the
   evidence is complete.
-- [ ] Run `make check`. Expected: lint, mypy, and the full test suite green.
+- [x] Run `make check`. Expected: lint, mypy, and the full test suite green.
   Open PR 1 as a draft, `Refs #456`.
 
 ## Implementation — PR 2: lifecycle, status probe, diagnostics
