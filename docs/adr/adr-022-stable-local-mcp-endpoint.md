@@ -461,6 +461,11 @@ client.
 - A listener that fails identity verification is reported as "endpoint held
   by an unverified process". That state is degraded and distinct from "daemon
   not running".
+- While the single-user plaintext mode is active, there is no identity to
+  verify. Probes and wait-for-ready check `/health` over plaintext and accept
+  a healthy answer as ready. `hive service status` reports the degraded
+  "plaintext, accepted by owner" state, not "unverified process", and still
+  exits non-zero, so the accepted risk stays visible.
 - When startup fails on a port conflict, the diagnostic says whether the
   holder belongs to the current account. If the OS denies the lookup, it says
   "another account". It never names the account, and it does not move the
@@ -616,8 +621,9 @@ say that direct HTTP is unverified on Windows and that `hive client` is the
 only supported Windows transport. Lifting the hold does not depend on check
 10. The direct HTTP support statement does.
 
-Without that, the hold stays in place unless the owner records an explicit
-acceptance of the risk that names the missing checks.
+If checks 1 to 9 lack evidence on either platform, the hold stays in place
+unless the owner records an explicit acceptance of the risk that names the
+missing checks. Check 10 never holds it.
 
 ## References
 
