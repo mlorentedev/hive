@@ -23,10 +23,8 @@ import argparse
 import asyncio
 import json
 import logging
-import socket
-import ssl
 import sys
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from hive._credential import _read_token
 from hive._endpoint import (
@@ -36,13 +34,7 @@ from hive._endpoint import (
     identity_cert_path,
     token_file_path,
 )
-from hive._tls import (
-    fingerprint_matches,
-    load_pinned_certificate,
-    pem_fingerprint,
-    pinned_context,
-    presented_expired_pin,
-)
+from hive._tls import Proof, load_pinned_certificate, pinned_context, prove_listener
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -101,7 +93,7 @@ def _read_state() -> tuple[int, str, str] | None:
         return None
 
 
-Probe = Literal["verified", "absent", "unverified", "expired"]
+Probe = Proof
 
 
 def _probe_daemon(host: str, port: int, cert_pem: str) -> Probe:
@@ -111,21 +103,10 @@ def _probe_daemon(host: str, port: int, cert_pem: str) -> Probe:
     ``unverified`` means something answered without the owner's certificate:
     that is a possible impersonation and must not be hidden by a fallback.
     """
-    try:
-        raw = socket.create_connection((host, port), timeout=_PROBE_TIMEOUT_S)
-    except OSError:
-        return "absent"
-    try:
-        with pinned_context(cert_pem).wrap_socket(raw, server_hostname=host) as tls:
-            if fingerprint_matches(tls, pem_fingerprint(cert_pem)):
-                return "verified"
-            return "unverified"
-    except ssl.SSLError as exc:
-        return "expired" if presented_expired_pin(exc) else "unverified"
-    except OSError:
-        return "absent"
-    finally:
-        raw.close()
+    proof, tls = prove_listener(host, port, cert_pem, timeout=_PROBE_TIMEOUT_S)
+    if tls is not None:
+        tls.close()
+    return proof
 
 
 def _remote_client(host: str, port: int, token: str, cert_pem: str) -> Client[Any]:

@@ -710,3 +710,26 @@ def test_status_reports_a_malformed_port_override_without_a_traceback(
 
     assert _service.service_status() != 0
     assert "HIVE_DAEMON_PORT" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("reset", [True, False], ids=["reset", "stall"])
+def test_status_reports_a_listener_that_never_proves_itself(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    reset: bool,
+) -> None:
+    from hive import _service
+    from tests.impostor import SilentListener
+
+    _initialized_state(monkeypatch, tmp_path)
+    listener = SilentListener(reset=reset)
+    monkeypatch.setenv("HIVE_DAEMON_PORT", str(listener.port))
+    monkeypatch.setattr(_service, "_run_passthrough", lambda cmd: 0)
+
+    rc = _service.service_status()
+    listener.wait()
+
+    assert listener.accepted.is_set()
+    assert rc != 0
+    assert "hive daemon: unverified listener" in capsys.readouterr().out

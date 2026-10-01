@@ -462,52 +462,42 @@ _HEALTH_TIMEOUT_S = 2.0
 def _probe_health(host: str, port: int) -> str:
     """Ask the stable port for ``/health``, trusting only the owner's certificate.
 
-    Returns one of ``healthy``, ``unverified``, ``expired``, ``down``. A listener that
-    fails the pinned handshake or the fingerprint check is ``unverified``: it
-    is not the owner's daemon and is sent nothing beyond the handshake.
+    Returns one of ``healthy``, ``unverified``, ``expired``, ``down``. A listener
+    that accepts the connection but does not prove the owner's certificate is
+    ``unverified``: it is not the owner's daemon and is sent nothing beyond
+    the handshake.
     """
     import http.client
-    import ssl
 
     from hive._endpoint import identity_cert_path
-    from hive._tls import (
-        fingerprint_matches,
-        load_pinned_certificate,
-        pem_fingerprint,
-        pinned_context,
-        presented_expired_pin,
-    )
+    from hive._tls import load_pinned_certificate, prove_listener
 
     try:
         cert_pem = load_pinned_certificate(identity_cert_path())
     except RuntimeError:
         # Without the pin nothing can be proven; something listening is
         # therefore unverified, never assumed to be the daemon.
-        cert_pem = ""
-    try:
-        if not cert_pem:
+        try:
             with socket.create_connection((host, port), timeout=_HEALTH_TIMEOUT_S):
                 return "unverified"
-        connection = http.client.HTTPSConnection(
-            host, port, timeout=_HEALTH_TIMEOUT_S, context=pinned_context(cert_pem)
-        )
-        try:
-            connection.connect()
-            sock = connection.sock
-            if not isinstance(sock, ssl.SSLSocket) or not fingerprint_matches(
-                sock, pem_fingerprint(cert_pem)
-            ):
-                return "unverified"
-            connection.request("GET", "/health")
-            # The owner's daemon always answers 200; anything else means it is
-            # not serving (a shutdown in progress, for instance).
-            return "healthy" if connection.getresponse().status == 200 else "down"
-        finally:
-            connection.close()
-    except ssl.SSLError as exc:
-        return "expired" if presented_expired_pin(exc) else "unverified"
+        except OSError:
+            return "down"
+    proof, tls = prove_listener(host, port, cert_pem, timeout=_HEALTH_TIMEOUT_S)
+    if proof == "absent":
+        return "down"
+    if tls is None:
+        return proof
+    connection = http.client.HTTPSConnection(host, port, timeout=_HEALTH_TIMEOUT_S)
+    connection.sock = tls
+    try:
+        connection.request("GET", "/health")
+        # The owner's daemon always answers 200; anything else means it is
+        # not serving (a shutdown in progress, for instance).
+        return "healthy" if connection.getresponse().status == 200 else "down"
     except (OSError, http.client.HTTPException):
         return "down"
+    finally:
+        connection.close()
 
 
 def daemon_state() -> str:

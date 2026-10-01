@@ -13,8 +13,9 @@ HIVE-437 import budget, so ``cryptography`` is never imported here.
 from __future__ import annotations
 
 import hashlib
+import socket
 import ssl
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from hive._credential import _verify_owner_only
 
@@ -83,3 +84,39 @@ def load_pinned_certificate(path: Path) -> str:
     if not _verify_owner_only(path):
         raise RuntimeError(f"daemon identity certificate at {path} is not owner-only")
     return pem
+
+
+Proof = Literal["verified", "absent", "unverified", "expired"]
+
+
+def prove_listener(
+    host: str,
+    port: int,
+    cert_pem: str,
+    *,
+    timeout: float,
+) -> tuple[Proof, ssl.SSLSocket | None]:
+    """Handshake with whoever holds *port* and classify it, sending nothing else.
+
+    ``absent`` only when no TCP connection could be made. Once something has
+    accepted the connection, any failure to prove the pinned certificate
+    (a reset, a stall, a wrong certificate) is ``unverified``: that listener
+    is not the daemon and must not be mistaken for an empty port. A
+    ``verified`` result returns the open TLS socket; the caller closes it.
+    """
+    try:
+        raw = socket.create_connection((host, port), timeout=timeout)
+    except OSError:
+        return "absent", None
+    try:
+        tls = pinned_context(cert_pem).wrap_socket(raw, server_hostname=host)
+    except ssl.SSLError as exc:
+        raw.close()
+        return ("expired" if presented_expired_pin(exc) else "unverified"), None
+    except OSError:
+        raw.close()
+        return "unverified", None
+    if not fingerprint_matches(tls, pem_fingerprint(cert_pem)):
+        tls.close()
+        return "unverified", None
+    return "verified", tls

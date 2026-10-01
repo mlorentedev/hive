@@ -367,3 +367,21 @@ def test_delegate_probe_names_an_expired_owner_certificate(tmp_path: Path) -> No
     assert record["status"] == "task_failed"
     assert "expired certificate" in record["detail"]
     assert "impersonation" not in record["detail"]
+
+
+@pytest.mark.parametrize("reset", [True, False], ids=["reset", "stall"])
+def test_delegate_probe_reports_a_listener_that_never_proves_itself(
+    tmp_path: Path,
+    reset: bool,
+) -> None:
+    """Something accepted the connection, so it is not "absent" (no local fallback)."""
+    from hive import _delegate
+    from hive._identity import create_identity
+    from tests.impostor import SilentListener
+
+    owner = create_identity(tmp_path / "owner.key", tmp_path / "owner.crt")
+    listener = SilentListener(reset=reset)
+    probe = _delegate._probe_daemon("127.0.0.1", listener.port, owner.cert_path.read_text())
+    listener.wait()
+    assert listener.accepted.is_set()
+    assert probe == "unverified"
