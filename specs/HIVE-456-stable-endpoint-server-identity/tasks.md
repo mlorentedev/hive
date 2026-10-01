@@ -127,7 +127,7 @@ created: "2026-09-30"
   (see the preconditions rule above); it does not skip. In both tests the impostor must record
   an accepted connection and a ClientHello (positive control), so a client
   that never dialled the impostor port fails instead of passing.
-- [ ] [AC9] Extend `tests/test_credential_never_emitted.py`: across daemon
+- [x] [AC9] Extend `tests/test_credential_never_emitted.py`: across daemon
   startup, relay errors, delegate errors, and impostor refusals, no token and
   no PEM `PRIVATE KEY` block appears in stdout, stderr, captured logs, or
   exception strings.
