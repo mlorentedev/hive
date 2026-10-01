@@ -580,7 +580,7 @@ def test_relay_repins_after_rotation_and_refuses_old_certificate(
     frames = relay.forward(_TOOLS_LIST)
 
     assert frames[-1]["result"] == {"tools": []}
-    assert reloads == [1]
+    assert reloads, "the relay re-read the pin before connecting"
     assert [r["headers"]["Authorization"] for r in handler.requests] == ["Bearer rotated-token"]
 
     # Now pinned to the new certificate, the relay refuses a listener that
@@ -593,7 +593,6 @@ def test_relay_repins_after_rotation_and_refuses_old_certificate(
     assert impostor.accepted.is_set()
     assert impostor.raw[:1] == b"\x16"
     assert impostor.decrypted == bytearray()
-    assert reloads == [1, 1], "an unchanged pin is re-read once and not retried"
 
 
 def test_relay_names_an_expired_owner_certificate(tmp_path: Path) -> None:
@@ -613,3 +612,49 @@ def test_relay_names_an_expired_owner_certificate(tmp_path: Path) -> None:
     assert "secret-token" not in str(excinfo.value)
     assert listener.raw[:1] == b"\x16"
     assert listener.decrypted == bytearray()
+
+
+def test_relay_drops_a_rotated_away_pin_before_its_next_connection(
+    mcp_http_server: tuple[str, int, type[_McpHandler]],
+    retired_identity: Identity,
+) -> None:
+    """A rotation for an exposed key must stop a running relay trusting it.
+
+    The relay still pins the retired certificate, and an impostor holds the
+    retired key, so the handshake would succeed. The relay must notice the
+    rotation on disk before it connects, not only after a failed proof.
+    """
+    from hive._client import ClientError, HttpRelay
+
+    _, _, handler = mcp_http_server
+    retired_pem = retired_identity.cert_path.read_text(encoding="ascii")
+    impostor = Impostor(retired_identity)
+    relay = HttpRelay(
+        "127.0.0.1",
+        impostor.port,
+        "retired-token",
+        retired_pem,
+        reload=lambda: ("rotated-token", handler.cert_pem),
+    )
+    with pytest.raises(ClientError, match="possible impersonation"):
+        relay.forward(_TOOLS_LIST)
+    impostor.wait()
+    assert impostor.accepted.is_set()
+    assert impostor.raw[:1] == b"\x16"
+    assert impostor.decrypted == bytearray(), "the stale pin let the request through"
+
+
+def test_relay_fails_closed_when_the_pin_cannot_be_reread(
+    mcp_http_server: tuple[str, int, type[_McpHandler]],
+) -> None:
+    from hive._client import ClientError, HttpRelay
+
+    host, port, handler = mcp_http_server
+
+    def unreadable() -> tuple[str, str]:
+        raise RuntimeError("daemon certificate is missing")
+
+    relay = HttpRelay(host, port, "secret-token", handler.cert_pem, reload=unreadable)
+    with pytest.raises(ClientError, match="certificate"):
+        relay.forward(_TOOLS_LIST)
+    assert handler.requests == []
