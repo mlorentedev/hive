@@ -472,9 +472,12 @@ def run_serve(host: str = DEFAULT_HOST, port: int = 0) -> int:
 
         resolved_port = port or configured_daemon_port()
         if not _port_available(host, resolved_port):
+            from hive._endpoint import port_holder
+
             print(
-                f"hive: stable daemon port {resolved_port} is already in use; "
-                "stop the conflicting process or set HIVE_DAEMON_PORT",
+                f"hive: stable daemon port {resolved_port} is already in use by "
+                f"{port_holder(resolved_port)}; stop the conflicting process or set "
+                "HIVE_DAEMON_PORT",
                 file=sys.stderr,
             )
             return 1
