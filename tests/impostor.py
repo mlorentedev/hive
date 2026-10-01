@@ -13,6 +13,8 @@ import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from hive._identity import Identity
 
 TLS_HANDSHAKE_RECORD = b"\x16"
@@ -125,3 +127,18 @@ class SilentListener:
     def wait(self) -> None:
         self._thread.join(timeout=10)
         self.listener.close()
+
+
+def make_over_permissive(path: Path) -> None:
+    """Let every local account read *path* (POSIX mode or a Windows ACE)."""
+    import os
+    import subprocess
+
+    if os.name == "nt":
+        subprocess.run(
+            ["icacls", str(path), "/grant", "*S-1-1-0:(R)"],
+            check=True,
+            capture_output=True,
+        )
+    else:
+        path.chmod(0o644)
