@@ -184,6 +184,11 @@ process:
   the daemon is TLS-only.
 - For Node-based hosts such as Copilot CLI, set
   `NODE_EXTRA_CA_CERTS=<state dir>/daemon.crt` in that host's environment.
+  Node adds this certificate to its built-in roots rather than replacing
+  them, so the host is less strict than `hive client`, which trusts the
+  per-user certificate alone. No public CA may issue a certificate for
+  `127.0.0.1`, which bounds the difference; prefer `hive client` where it
+  matters.
   Do not add the certificate to an operating-system or user root store.
 - Never disable verification (`NODE_TLS_REJECT_UNAUTHORIZED=0` or an
   "insecure" flag). A host that cannot verify the certificate uses
