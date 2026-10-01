@@ -509,8 +509,11 @@ endpoints are never published.
   cannot use the socket with its host matrix, so the endpoint has to use TLS.
 - Only TLS lets static-configuration HTTP hosts authenticate a server, so one
   mechanism covers both the relay and direct HTTP.
-- `cryptography` and uvicorn's TLS support are already in the dependency
-  graph, so the decision adds no new dependency.
+- `cryptography` is already resolved transitively, and uvicorn already
+  supports TLS. The daemon imports `cryptography` directly to generate the key
+  and certificate, so the implementation declares it as a direct dependency.
+  The relay stays stdlib-only (`ssl`) and never imports `cryptography`, which
+  protects its sub-second initialize.
 
 ### Additional verification requirements
 

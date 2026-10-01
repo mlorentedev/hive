@@ -126,7 +126,9 @@ daemon through both stdio and direct HTTP using synthetic credentials; it
 does **not** launch the Copilot CLI itself. Copilot also supports a direct HTTP
 registration, but both transports send a bearer to a listener that has not
 proven its identity; do not deploy either on untrusted multi-user hosts before
-#456. Do not place the token in shell history or checked-in MCP configuration.
+#456. ADR-022 Amendment 1 removes plaintext `http://` registrations from the
+supported contract once its TLS endpoint ships; do not create new ones. Do not
+place the token in shell history or checked-in MCP configuration.
 Copilot documents MCP `timeout` for tool discovery and tool calls, including
 its connection budget. On the measured Windows host, cold stdio initialization
 was terminated after ~4.1 seconds even with `timeout: 30000`. This is an
