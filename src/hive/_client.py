@@ -18,7 +18,13 @@ from hive._endpoint import (
     identity_cert_path,
     token_file_path,
 )
-from hive._tls import fingerprint_matches, load_pinned_certificate, pem_fingerprint, pinned_context
+from hive._tls import (
+    fingerprint_matches,
+    load_pinned_certificate,
+    pem_fingerprint,
+    pinned_context,
+    presented_expired_pin,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -194,6 +200,12 @@ class HttpRelay:
             connection.connect()
         except ssl.SSLError as exc:
             connection.close()
+            if presented_expired_pin(exc):
+                raise ClientError(
+                    f"the Hive daemon at {self._endpoint()} presented an expired "
+                    "certificate; restart the daemon to regenerate it, then check "
+                    "`hive service status`; nothing was sent",
+                ) from exc
             raise _UnverifiedListenerError from exc
         except OSError as exc:
             connection.close()

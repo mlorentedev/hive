@@ -594,3 +594,22 @@ def test_relay_repins_after_rotation_and_refuses_old_certificate(
     assert impostor.raw[:1] == b"\x16"
     assert impostor.decrypted == bytearray()
     assert reloads == [1, 1], "an unchanged pin is re-read once and not retried"
+
+
+def test_relay_names_an_expired_owner_certificate(tmp_path: Path) -> None:
+    import datetime as dt
+
+    from hive._client import ClientError, HttpRelay
+    from hive._identity import create_identity
+
+    long_ago = dt.datetime.now(dt.UTC) - dt.timedelta(days=500)
+    expired = create_identity(tmp_path / "daemon.key", tmp_path / "daemon.crt", now=long_ago)
+    pem = expired.cert_path.read_text(encoding="ascii")
+    listener = Impostor(expired)
+    relay = HttpRelay("127.0.0.1", listener.port, "secret-token", pem)
+    with pytest.raises(ClientError, match="expired certificate") as excinfo:
+        relay.forward(_TOOLS_LIST)
+    listener.wait()
+    assert "secret-token" not in str(excinfo.value)
+    assert listener.raw[:1] == b"\x16"
+    assert listener.decrypted == bytearray()

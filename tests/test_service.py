@@ -671,3 +671,42 @@ def test_status_reports_four_states(
         assert impostor.decrypted == bytearray()
     if sys.platform.startswith("linux") or sys.platform == "win32":
         assert supervisor, "the supervisor view is still shown where one exists"
+
+
+def test_status_names_an_expired_daemon_certificate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import datetime as dt
+
+    from hive import _service
+    from hive._endpoint import identity_cert_path, identity_key_path
+    from hive._identity import create_identity
+    from tests.impostor import Impostor
+
+    _initialized_state(monkeypatch, tmp_path)
+    long_ago = dt.datetime.now(dt.UTC) - dt.timedelta(days=500)
+    expired = create_identity(identity_key_path(), identity_cert_path(), now=long_ago)
+    listener = Impostor(expired)
+    monkeypatch.setenv("HIVE_DAEMON_PORT", str(listener.port))
+    monkeypatch.setattr(_service, "_run_passthrough", lambda cmd: 0)
+
+    rc = _service.service_status()
+    listener.wait()
+
+    assert rc != 0
+    assert "hive daemon: down (the daemon's certificate expired" in capsys.readouterr().out
+
+
+def test_status_reports_a_malformed_port_override_without_a_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from hive import _service
+
+    monkeypatch.setenv("HIVE_DAEMON_PORT", "not-a-port")
+    monkeypatch.setattr(_service, "_run_passthrough", lambda cmd: 0)
+
+    assert _service.service_status() != 0
+    assert "HIVE_DAEMON_PORT" in capsys.readouterr().err

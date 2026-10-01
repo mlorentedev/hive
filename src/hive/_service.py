@@ -462,7 +462,7 @@ _HEALTH_TIMEOUT_S = 2.0
 def _probe_health(host: str, port: int) -> str:
     """Ask the stable port for ``/health``, trusting only the owner's certificate.
 
-    Returns one of ``healthy``, ``unverified``, ``down``. A listener that
+    Returns one of ``healthy``, ``unverified``, ``expired``, ``down``. A listener that
     fails the pinned handshake or the fingerprint check is ``unverified``: it
     is not the owner's daemon and is sent nothing beyond the handshake.
     """
@@ -475,6 +475,7 @@ def _probe_health(host: str, port: int) -> str:
         load_pinned_certificate,
         pem_fingerprint,
         pinned_context,
+        presented_expired_pin,
     )
 
     try:
@@ -503,8 +504,8 @@ def _probe_health(host: str, port: int) -> str:
             return "healthy" if connection.getresponse().status == 200 else "down"
         finally:
             connection.close()
-    except ssl.SSLError:
-        return "unverified"
+    except ssl.SSLError as exc:
+        return "expired" if presented_expired_pin(exc) else "unverified"
     except (OSError, http.client.HTTPException):
         return "down"
 
@@ -515,6 +516,9 @@ def daemon_state() -> str:
 
     port = configured_daemon_port()
     probe = _probe_health(DEFAULT_HOST, port)
+    if probe == "expired":
+        # Clients refuse an expired certificate, so the daemon serves no one.
+        return "down (the daemon's certificate expired; restart the daemon to regenerate it)"
     if probe != "unverified":
         return probe
     holder = port_holder(port)
@@ -534,6 +538,10 @@ def service_status() -> int:
         _run_passthrough(["systemctl", "--user", "status", "hive.service"])
     elif plat == "windows":
         _run_passthrough(["schtasks", "/Query", "/TN", WINDOWS_TASK_NAME, "/V"])
-    state = daemon_state()
+    try:
+        state = daemon_state()
+    except (RuntimeError, ValueError) as exc:
+        print(f"hive: cannot probe the daemon: {exc}", file=sys.stderr)
+        return 1
     print(f"hive daemon: {state}", flush=True)
     return 0 if state == "healthy" else 1
