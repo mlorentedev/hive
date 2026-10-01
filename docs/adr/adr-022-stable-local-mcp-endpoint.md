@@ -554,11 +554,13 @@ generated key, certificate and token, and an ephemeral or overridden port.
 They never use a live vault credential. Every check runs on Linux and on
 Windows unless marked otherwise.
 
-Every absence assertion needs an independent positive control. Checks 1 to 4
-assert that an impostor received nothing secret. Each of them must also
-assert, separately, that the impostor accepted the client's connection and
-received a TLS ClientHello from it. Without that control, a client that never
-reached the port would pass for the wrong reason.
+Every absence assertion needs an independent positive control. Checks 1 to 3,
+and the "Amended clients" part of check 4, assert that an impostor received
+nothing secret. Each of them must also assert, separately, that the impostor
+accepted the client's connection and received a TLS ClientHello from it.
+Without that control, a client that never reached the port would pass for the
+wrong reason. The "Plaintext era" part of check 4 is not an absence
+assertion. Its captured token is its own positive control.
 
 1. **Spoofed listener, relay.** Put a plaintext impostor, and a TLS impostor
    with a different self-signed certificate, on the configured port. The relay
@@ -609,11 +611,13 @@ reached the port would pass for the wrong reason.
    that fails identity verification and report it apart from "down".
 9. **No secret output.** No token or private key material appears in stdout,
    stderr, logs, or diagnostics. This extends the original requirement.
-10. **Copilot on Windows (owner's baseline host).** Copilot CLI accepts the
-    per-user certificate through `NODE_EXTRA_CA_CERTS`, or a documented
-    equivalent, and refuses an impostor. If it does not, direct HTTP is
-    unsupported on Windows and Copilot uses `hive client`. That outcome does
-    not block #449.
+10. **Real direct HTTP host, per platform.** A real host, not a stand-in,
+    accepts the per-user certificate through `NODE_EXTRA_CA_CERTS`, or a
+    documented equivalent, and refuses an impostor. On Windows this is Copilot
+    CLI on the owner's baseline host. Hive claims direct HTTP support on a
+    platform only after this check passes there. Otherwise direct HTTP is
+    unsupported on that platform and its hosts use `hive client`. That outcome
+    does not block #449.
 
 **Release gate.** The hold on #449 is reconsidered only after both of these:
 
@@ -623,12 +627,12 @@ reached the port would pass for the wrong reason.
   evidence.
 
 The stand-in client in check 2 proves Hive's side of the direct contract. It
-does not prove that any real host honours it. So the support statement for a
-real direct HTTP host on Windows rests on check 10 alone. Until check 10
-passes on the baseline host with a real Copilot CLI, the release notes must
-say that direct HTTP is unverified on Windows and that `hive client` is the
-only supported Windows transport. Lifting the hold does not depend on check
-10. The direct HTTP support statement does.
+does not prove that any real host honours it. So the direct HTTP support
+statement on each platform rests on check 10 alone. For every platform where
+check 10 has not passed with a real host, the release notes must say that
+direct HTTP is unverified there and that `hive client` is the only supported
+transport. Lifting the hold does not depend on check 10. The direct HTTP
+support statement does.
 
 If checks 1 to 9 lack evidence on either platform, the hold stays in place
 unless the owner records an explicit acceptance of the risk that names the
