@@ -129,7 +129,7 @@ when they run; nothing here stands in for them.
     `hive._identity`'s import-time binding.
   - `NODE_EXTRA_CA_CERTS` adds to Node's roots instead of replacing them;
     documented in the activation runbook.
-  - Open, to be ticketed: no early renewal (a daemon started near expiry
+  - Open, ticketed as #465: no early renewal (a daemon started near expiry
     goes dark until restarted) and a one-minute `notBefore` backdate that a
     clock step can trip. Both fail closed with an explicit message.
   - Declined: AC9 coverage of `status` output. Status reads only the
