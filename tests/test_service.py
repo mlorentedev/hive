@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 # ── pure renderers (host-OS independent) ─────────────────────────────────
@@ -569,3 +569,105 @@ def test_rotate_identity_refuses_while_the_daemon_runs(
     assert identity_cert_path().read_bytes() == cert
     assert token_file_path().read_bytes() == token
     assert "stop the daemon" in capsys.readouterr().err
+
+
+# ── status probes the stable port over pinned TLS (HIVE-456 AC7) ──────────
+
+
+def _healthy_daemon(identity_dir: Path) -> tuple[object, int]:
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from hive._identity import load_identity
+    from tests.impostor import server_context
+
+    class Health(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            body = b'{"status":"ok"}' if self.path == "/health" else b""
+            self.send_response(200 if self.path == "/health" else 404)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format_string: str, *args: object) -> None:
+            return
+
+    identity = load_identity(identity_dir / "daemon.key", identity_dir / "daemon.crt")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Health)
+    server.socket = server_context(identity).wrap_socket(server.socket, server_side=True)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, int(server.server_address[1])
+
+
+def _free_port() -> int:
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+@pytest.mark.parametrize("scenario", ["healthy", "impostor", "down", "owner_unknown"])
+def test_status_reports_four_states(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    scenario: str,
+) -> None:
+    import sys
+
+    from hive import _endpoint, _service
+    from hive._identity import create_identity
+    from tests.impostor import Impostor
+
+    _initialized_state(monkeypatch, tmp_path)
+    supervisor: list[list[str]] = []
+    monkeypatch.setattr(_service, "_run_passthrough", lambda cmd: supervisor.append(cmd) or 3)
+
+    server = impostor = None
+    if scenario == "healthy":
+        server, port = _healthy_daemon(tmp_path)
+    elif scenario == "down":
+        port = _free_port()
+    else:
+        other = tmp_path / "other"
+        other.mkdir()
+        impostor = Impostor(create_identity(other / "daemon.key", other / "daemon.crt"))
+        port = impostor.port
+        if scenario == "owner_unknown":
+
+            def denied(port: int) -> str:
+                raise PermissionError("access denied")
+
+            monkeypatch.setattr(_endpoint, "_listener_identity", denied)
+    monkeypatch.setenv("HIVE_DAEMON_PORT", str(port))
+
+    try:
+        rc = _service.service_status()
+    finally:
+        if server is not None:
+            server.shutdown()  # type: ignore[attr-defined]
+            server.server_close()  # type: ignore[attr-defined]
+        if impostor is not None:
+            impostor.wait()
+
+    out = capsys.readouterr().out
+    state = out.strip().splitlines()[-1]
+    expected = {
+        "healthy": "healthy",
+        "impostor": "unverified listener",
+        "down": "down",
+        "owner_unknown": "unverified listener, owner unknown",
+    }[scenario]
+    assert state.startswith(f"hive daemon: {expected}"), out
+    assert (rc == 0) == (scenario == "healthy"), "the exit code comes from the probe"
+    if scenario == "impostor":
+        assert "owner unknown" not in state
+        if sys.platform.startswith("linux"):
+            assert "this account" in state, "the /proc lookup names the holder's account class"
+    if impostor is not None:
+        assert impostor.accepted.is_set()
+        assert impostor.raw[:1] == b"\x16"
+        assert impostor.decrypted == bytearray()
+    if sys.platform.startswith("linux") or sys.platform == "win32":
+        assert supervisor, "the supervisor view is still shown where one exists"

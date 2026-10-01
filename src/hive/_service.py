@@ -22,6 +22,7 @@ import contextlib
 import logging
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -455,11 +456,84 @@ def _remove_startup_fallback() -> bool:
     return True
 
 
+_HEALTH_TIMEOUT_S = 2.0
+
+
+def _probe_health(host: str, port: int) -> str:
+    """Ask the stable port for ``/health``, trusting only the owner's certificate.
+
+    Returns one of ``healthy``, ``unverified``, ``down``. A listener that
+    fails the pinned handshake or the fingerprint check is ``unverified``: it
+    is not the owner's daemon and is sent nothing beyond the handshake.
+    """
+    import http.client
+    import ssl
+
+    from hive._endpoint import identity_cert_path
+    from hive._tls import (
+        fingerprint_matches,
+        load_pinned_certificate,
+        pem_fingerprint,
+        pinned_context,
+    )
+
+    try:
+        cert_pem = load_pinned_certificate(identity_cert_path())
+    except RuntimeError:
+        # Without the pin nothing can be proven; something listening is
+        # therefore unverified, never assumed to be the daemon.
+        cert_pem = ""
+    try:
+        if not cert_pem:
+            with socket.create_connection((host, port), timeout=_HEALTH_TIMEOUT_S):
+                return "unverified"
+        connection = http.client.HTTPSConnection(
+            host, port, timeout=_HEALTH_TIMEOUT_S, context=pinned_context(cert_pem)
+        )
+        try:
+            connection.connect()
+            sock = connection.sock
+            if not isinstance(sock, ssl.SSLSocket) or not fingerprint_matches(
+                sock, pem_fingerprint(cert_pem)
+            ):
+                return "unverified"
+            connection.request("GET", "/health")
+            # The owner's daemon always answers 200; anything else means it is
+            # not serving (a shutdown in progress, for instance).
+            return "healthy" if connection.getresponse().status == 200 else "down"
+        finally:
+            connection.close()
+    except ssl.SSLError:
+        return "unverified"
+    except (OSError, http.client.HTTPException):
+        return "down"
+
+
+def daemon_state() -> str:
+    """One of the four ``hive service status`` states (ADR-022 Amendment 1)."""
+    from hive._endpoint import DEFAULT_HOST, configured_daemon_port, port_holder
+
+    port = configured_daemon_port()
+    probe = _probe_health(DEFAULT_HOST, port)
+    if probe != "unverified":
+        return probe
+    holder = port_holder(port)
+    if holder == "owner could not be determined":
+        return "unverified listener, owner unknown"
+    return f"unverified listener (held by {holder}); possible impersonation"
+
+
 def service_status() -> int:
-    """Show the supervisor's view of the daemon for the current OS."""
+    """Show the supervisor's view, then prove who answers on the stable port.
+
+    The supervisor only says whether its own process runs; the exit code comes
+    from the pinned ``/health`` probe, which runs on every OS.
+    """
     plat = _platform()
     if plat == "linux":
-        return _run_passthrough(["systemctl", "--user", "status", "hive.service"])
-    if plat == "windows":
-        return _run_passthrough(["schtasks", "/Query", "/TN", WINDOWS_TASK_NAME, "/V"])
-    return _unsupported("status")
+        _run_passthrough(["systemctl", "--user", "status", "hive.service"])
+    elif plat == "windows":
+        _run_passthrough(["schtasks", "/Query", "/TN", WINDOWS_TASK_NAME, "/V"])
+    state = daemon_state()
+    print(f"hive daemon: {state}", flush=True)
+    return 0 if state == "healthy" else 1
