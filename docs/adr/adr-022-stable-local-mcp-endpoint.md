@@ -614,8 +614,10 @@ assertion. Its captured token is its own positive control.
 10. **Real direct HTTP host, per platform.** A real host, not a stand-in,
     accepts the per-user certificate through `NODE_EXTRA_CA_CERTS`, or a
     documented equivalent, and refuses an impostor. On Windows this is Copilot
-    CLI on the owner's baseline host. Hive claims direct HTTPS support on a
-    platform only after this check passes there. Otherwise direct HTTPS is
+    CLI on the owner's baseline host. On any other platform it is a named MCP
+    host product, not a script or test harness, and the evidence on #456 and
+    the release notes name the host and version that passed. Hive claims
+    direct HTTPS support on a platform only after this check passes there. Otherwise direct HTTPS is
     unsupported on that platform and its hosts use `hive client`. That outcome
     does not block #449. This check governs TLS direct HTTP only. The
     single-user plaintext exception is not gated by it: that mode verifies no
