@@ -546,3 +546,51 @@ def test_client_unreachable_daemon_exits_with_a_json_rpc_error(
     assert json.loads(result.stdout)["error"]["code"] == -32000
     assert "daemon unavailable" in result.stderr
     assert token not in result.stderr + result.stdout
+
+
+@pytest.fixture(scope="session")
+def retired_identity(tmp_path_factory: pytest.TempPathFactory) -> Identity:
+    """An identity the owner rotated away from (HIVE-456 AC6)."""
+    from hive._identity import create_identity
+
+    state = tmp_path_factory.mktemp("retired-identity")
+    return create_identity(state / "daemon.key", state / "daemon.crt")
+
+
+_TOOLS_LIST = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+
+
+def test_relay_repins_after_rotation_and_refuses_old_certificate(
+    mcp_http_server: tuple[str, int, type[_McpHandler]],
+    retired_identity: Identity,
+) -> None:
+    from hive._client import ClientError, HttpRelay
+
+    host, port, handler = mcp_http_server
+    retired_pem = retired_identity.cert_path.read_text(encoding="ascii")
+    reloads: list[int] = []
+
+    def rotated() -> tuple[str, str]:
+        reloads.append(1)
+        return "rotated-token", handler.cert_pem
+
+    # A relay started before `rotate-identity` still pins the retired
+    # certificate; the restarted daemon presents the new one.
+    relay = HttpRelay(host, port, "retired-token", retired_pem, reload=rotated)
+    frames = relay.forward(_TOOLS_LIST)
+
+    assert frames[-1]["result"] == {"tools": []}
+    assert reloads == [1]
+    assert [r["headers"]["Authorization"] for r in handler.requests] == ["Bearer rotated-token"]
+
+    # Now pinned to the new certificate, the relay refuses a listener that
+    # still presents the retired one, and sends it nothing.
+    impostor = Impostor(retired_identity)
+    stale = HttpRelay(host, impostor.port, "rotated-token", handler.cert_pem, reload=rotated)
+    with pytest.raises(ClientError, match="possible impersonation"):
+        stale.forward(_TOOLS_LIST)
+    impostor.wait()
+    assert impostor.accepted.is_set()
+    assert impostor.raw[:1] == b"\x16"
+    assert impostor.decrypted == bytearray()
+    assert reloads == [1, 1], "an unchanged pin is re-read once and not retried"
