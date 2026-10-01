@@ -68,7 +68,7 @@ created: "2026-09-30"
   call changes nothing (same token, same fingerprint). Implement it in
   `_daemon.py` and call it from `run_serve` in place of
   `load_or_create_token()`.
-- [ ] [P] [AC1] `tests/test_tls.py::test_pinned_context_trusts_only_the_owner_certificate`.
+- [x] [P] [AC1] `tests/test_tls.py::test_pinned_context_trusts_only_the_owner_certificate`.
   The context built by `_tls.pinned_context(cert_pem)` completes a
   handshake against an in-test TLS server that presents the pinned
   certificate. Against a second self-signed certificate, it fails with
