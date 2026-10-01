@@ -20,7 +20,7 @@ when they run; nothing here stands in for them.
   `test_delegate_probe_verifies_the_owner_unlike_an_impostor`,
   `test_relay_accepts_the_old_token_after_an_impostor_round` — Linux:
   `6 passed, 47 deselected`; Windows: pending
-- [ ] AC2 -> commits `eec4e0f` (diagnostic), `5e9f66c` (cross-user test + CI
+- [ ] AC2 -> commits `32c3e18` (diagnostic), `312b790` (cross-user test + CI
   job `cross_user_identity`) / tests
   `test_port_conflict_diagnostic_names_three_owners`,
   `test_cross_user_impostor_is_refused_and_named`,
@@ -45,13 +45,13 @@ when they run; nothing here stands in for them.
   `test_client_entrypoint_does_not_import_the_server_stack`,
   `test_client_initialize_response_arrives_within_one_second` — Linux:
   `5 passed, 26 deselected`; Windows: pending
-- [ ] AC6 -> items 1-2 in commit `4a8ec1c`; items 3-5 in `5a4a097`
-  (expiry, over-permissive, missing or corrupt) and `659c30b`
-  (`rotate-identity`); item 6 in `17c93e2` (re-pin) / tests in
+- [ ] AC6 -> items 1-2 in commit `4a8ec1c`; items 3-5 in `0328ddc`
+  (expiry, over-permissive, missing or corrupt) and `c08f4aa`
+  (`rotate-identity`); item 6 in `811d77d` (re-pin) / tests in
   `tests/test_identity.py`, `tests/test_service.py -k rotate`,
   `test_relay_repins_after_rotation_and_refuses_old_certificate` — Linux:
   `14 passed, 45 deselected`; Windows: pending
-- [ ] AC7 -> commit `f4b22ba` / `test_status_reports_four_states` (healthy,
+- [ ] AC7 -> commit `d141038` / `test_status_reports_four_states` (healthy,
   wrong-certificate impostor, nothing listening, impostor with a denied owner
   lookup) — Linux: `4 passed, 27 deselected`; Windows: pending
 - [ ] AC8 -> commit `40cca9f` / test `test_stable_port_serves_tls13_only`,
@@ -92,7 +92,7 @@ when they run; nothing here stands in for them.
   early-renewal margin, as AC6 states. A daemon left running past expiry
   serves a certificate every client refuses; the relay, the delegate and
   `status` word that case as "expired certificate; restart the daemon"
-  instead of "possible impersonation" (`d9ae7c8`). The wording comes from
+  instead of "possible impersonation" (`0bd70c4`). The wording comes from
   OpenSSL's verify code 10, which shows the pinned certificate was presented,
   not that the listener holds its key, so the clients still refuse and send
   nothing.
@@ -114,18 +114,18 @@ when they run; nothing here stands in for them.
   listener. Its findings and their disposition:
   - A relay started before `rotate-identity` kept trusting the rotated-away
     key until a proof failed; an attacker holding that key could read
-    requests. Fixed in `170bc48`: the relay re-reads its pin before every
+    requests. Fixed in `d1b0b7f`: the relay re-reads its pin before every
     connection and fails closed if it cannot.
   - A listener that accepted TCP and then reset or stalled was `absent`
-    (delegate ran locally) and status said `down`. Fixed in `ba65bdf`: one
+    (delegate ran locally) and status said `down`. Fixed in `3842aa4`: one
     shared proof, `unverified` after any accepted connection.
   - Mutants that survived (owner-only pin, key/certificate match, rotation
-    order, token errors without a hint) are now guarded in `aafcd29`. The
+    order, token errors without a hint) are now guarded in `0328ddc`. The
     fingerprint comparison after the pinned handshake stays untested
     defence in depth: with a single `CA:FALSE` anchor no other certificate
     can verify, so no test can make it the deciding check.
   - The `/proc` holder lookup ignored the local address. Fixed in
-    `184e987`, which also stops a test stub leaking through
+    `f9e1eaf`, which also stops a test stub leaking through
     `hive._identity`'s import-time binding.
   - `NODE_EXTRA_CA_CERTS` adds to Node's roots instead of replacing them;
     documented in the activation runbook.
