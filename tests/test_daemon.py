@@ -390,6 +390,55 @@ def test_hive_serve_rejects_bad_token(daemon_env: tuple[dict[str, str], Path]) -
             proc.kill()
 
 
+@pytest.mark.parametrize("transport_kind", ["stdio", "http"])
+def test_copilot_daemon_mode_initialize_list_and_health(
+    daemon_env: tuple[dict[str, str], Path],
+    transport_kind: str,
+) -> None:
+    """Both Copilot-supported transports reach the same real daemon and tools."""
+    from fastmcp import Client
+    from fastmcp.client.transports import StdioTransport, StreamableHttpTransport
+
+    env, state_dir = daemon_env
+    port = _free_port()
+    daemon = _spawn_daemon(env, port)
+    try:
+        assert _wait_ready(port), "daemon did not bind its loopback port"
+        token = (state_dir / "daemon.token").read_text(encoding="utf-8").strip()
+        launcher = os.path.join(
+            os.path.dirname(sys.executable), "hive.exe" if os.name == "nt" else "hive"
+        )
+        transport = (
+            StdioTransport(command=launcher, args=["client"], env=env)
+            if transport_kind == "stdio"
+            else StreamableHttpTransport(
+                f"http://{HOST}:{port}/mcp",
+                headers={"Authorization": "Bearer " + token},
+            )
+        )
+
+        async def smoke() -> None:
+            started = time.monotonic()
+            async with Client(transport) as client:
+                initialize_s = time.monotonic() - started
+                assert initialize_s < 4.1, f"{transport_kind} initialize took {initialize_s:.3f}s"
+                assert "vault_health" in {tool.name for tool in await client.list_tools()}
+                health = await client.call_tool("vault_health", {})
+                assert not health.is_error
+                assert "server" in str(getattr(health, "data", health)).lower()
+
+        asyncio.run(smoke())
+        status = httpx.get(
+            f"http://{HOST}:{port}/status",
+            headers={"Authorization": "Bearer " + token},
+            timeout=3.0,
+        )
+        assert status.status_code == 200
+        assert status.json()["tools"]["vault_health"]["calls"] == 1
+    finally:
+        _kill_tree(daemon)
+
+
 def test_client_forwards_to_daemon(daemon_env: tuple[dict[str, str], Path]) -> None:
     """With a daemon running, the thin stdio shim connects over the token-gated
     transport and forwards the full MCP surface without leaking the token."""

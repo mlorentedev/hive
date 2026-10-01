@@ -14,10 +14,12 @@ enabling when you run several concurrent sessions on one machine, want the
 single-owner guarantees of [ADR-011](https://github.com/mlorentedev/hive/blob/master/docs/adr/adr-011-phase-c-daemon-model.md),
 or want clients to always pick up the latest published version automatically.
 
-:::note[It always degrades, never breaks]
-If the daemon is absent or unhealthy, `hive client` falls back to an
-**in-process server** — the same code the stdio mode runs. A failed daemon
-costs you the single-owner benefits, not your session.
+:::caution[Single-user hosts only until #456 is resolved]
+A listener impersonating the stable port during daemon downtime can capture
+a bearer that remains valid after restart. Do not deploy daemon mode on
+untrusted multi-user hosts until [#456](https://github.com/mlorentedev/hive/issues/456)
+is resolved. If the daemon is absent or unhealthy, `hive client` **fails
+explicitly**; it never starts a competing in-process server.
 :::
 
 ## The two processes
@@ -25,7 +27,7 @@ costs you the single-owner benefits, not your session.
 | Command | Role |
 |---|---|
 | `hive serve` | The daemon. Serves MCP over loopback streamable-HTTP, bearer-token gated. One owner of the vault git + SQLite per machine (enforced by a singleton lock). |
-| `hive client` | A thin stdio shim your MCP client launches. Proxies to a running `hive serve`; falls back to an in-process server if none is reachable. |
+| `hive client` | A thin stdio shim your MCP client launches. Proxies to a running `hive serve`; fails explicitly if none is reachable. |
 | `hive service` | Installs/removes the OS supervisor that keeps `hive serve` running. See below. |
 
 In daemon mode your MCP client is registered with `hive client` instead of
@@ -57,6 +59,20 @@ The last step is to point your MCP client at the daemon — flip the `hive` entr
 from `uvx hive-vault` to `hive client`. The full per-machine procedure
 (verifying the daemon serves, the surgical `~/.claude.json` edit, and rollback)
 lives in the [Daemon Activation runbook](https://github.com/mlorentedev/hive/blob/master/docs/runbooks/daemon-activation.md).
+
+For **GitHub Copilot CLI** on a trusted single-user host, register
+`copilot mcp add hive -- hive client` in user scope. Set `HIVE_DAEMON_PORT`
+for both the daemon and client if you override the default. Disable an old
+`hive-vault` entry after checking the new one; avoid two registered vault
+owners. The automated
+smoke in `tests/test_daemon.py` initializes in under 4.1 seconds, lists tools,
+and calls `vault_health` over the real daemon via stdio and direct HTTP; it
+does not launch Copilot itself. Copilot documents MCP `timeout` for discovery
+and tool calls, including its connection budget. Cold initialization was
+terminated after ~4.1 seconds on the measured Windows host despite
+`timeout: 30000`; that is an observation, not a documented universal deadline.
+Avoid direct HTTP registrations containing a bearer in a config file or shell
+history; both transports remain subject to [#456](https://github.com/mlorentedev/hive/issues/456).
 
 ## Auto-update: restart-on-upgrade
 
@@ -122,5 +138,5 @@ Daemon mode is opt-in. Stay on `uvx hive-vault` if you run a single session at
 a time, want zero background processes, or are on a platform without a
 supported supervisor — the per-session server is fully featured and uses the
 same vault and worker code. You can switch later at any time with no data
-migration: the daemon and the in-process fallback share the same vault git and
-SQLite store paths.
+migration: `hive client` fails explicitly without a daemon rather than silently
+starting another vault owner.

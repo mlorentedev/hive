@@ -13,9 +13,13 @@ owner: manu
 > `hive client` stdio shim that proxies to it.
 >
 > This is the **manual** procedure validated on one machine before the dotfiles
-> rollout automates it (`setup-*.sh`). The in-process fallback (a daemon-less
-> `hive client` degrades to the in-process server) is the safety net — a failed
-> or absent daemon degrades, it never breaks a session.
+> rollout automates it (`setup-*.sh`). `hive client` fails explicitly when the
+> daemon is unavailable; it never starts a second, unmanaged vault owner.
+>
+> **Security hold:** Do not deploy daemon mode on an untrusted multi-user host
+> until [#456](https://github.com/mlorentedev/hive/issues/456) is resolved.
+> A process impersonating the fixed port during downtime can capture a bearer
+> which remains valid across ordinary daemon restarts.
 
 ## Prerequisites
 
@@ -100,6 +104,35 @@ fi
 The flip affects the **next** Claude Code session, not the running one. The
 new session connects through `hive client` → daemon; `/status`
 `sessions_started` / `total_calls` climb as you use hive.
+
+### 5. GitHub Copilot CLI registration
+
+On a trusted single-user host, register the installed stdio adapter in
+Copilot's user-scoped MCP configuration instead of launching `uvx`:
+
+```bash
+copilot mcp add hive -- hive client
+```
+
+If a `hive-vault` MCP entry already runs `uvx`, disable that entry after
+confirming the new one works; do not leave two vault owners registered.
+Ensure the installed `hive` command resolves to the same runtime as the
+supervised daemon. With a custom daemon port, set `HIVE_DAEMON_PORT` to the
+same value for Copilot's environment and the daemon. Start a new Copilot
+session, then list Hive's tools and call `vault_health`. The integration smoke
+`uv run python -m pytest tests/test_daemon.py -k copilot_daemon_mode -q`
+initializes, lists tools, and calls `vault_health` against a real isolated
+daemon through both stdio and direct HTTP using synthetic credentials; it
+does **not** launch the Copilot CLI itself. Copilot also supports a direct HTTP
+registration, but both transports send a bearer to a listener that has not
+proven its identity; do not deploy either on untrusted multi-user hosts before
+#456. Do not place the token in shell history or checked-in MCP configuration.
+Copilot documents MCP `timeout` for tool discovery and tool calls, including
+its connection budget. On the measured Windows host, cold stdio initialization
+was terminated after ~4.1 seconds even with `timeout: 30000`. This is an
+observation on that host, **not** a documented universal initialize deadline
+or a guarantee about other versions. Measure a cold start; increasing
+`timeout` alone did not resolve that host's startup failure.
 
 ## Rollback
 
