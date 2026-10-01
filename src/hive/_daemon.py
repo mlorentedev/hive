@@ -20,28 +20,28 @@ import logging
 import os
 import secrets
 import socket
-import subprocess
 import sys
-import tempfile
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import filelock
 
-from hive._credential import _read_token, _verify_owner_only
+from hive._credential import _read_token
 from hive._endpoint import (
     DEFAULT_HOST,
     MCP_PATH,
     configured_daemon_port,
-    current_user_identity,
     daemon_state_dir,
     lock_file_path,
     port_file_path,
     token_file_path,
 )
+from hive._owner_only import enforce_owner_only as _enforce_owner_only
+from hive._owner_only import write_owner_only_atomic
 from hive.config import settings
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import uvicorn
     from fastmcp.server.auth import AuthProvider
 
@@ -60,47 +60,9 @@ _log = logging.getLogger(__name__)
 IS_WINDOWS = sys.platform == "win32"
 
 
-def _run_icacls(path: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
-    try:
-        return subprocess.run(  # noqa: S603,S607
-            ["icacls", str(path), *args],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:  # noqa: BLE001 — permission enforcement must fail closed
-        return None
-
-
-def _enforce_owner_only(path: Path) -> None:
-    """Apply owner-only permissions, raising when the OS cannot enforce them."""
-    if os.name == "nt":
-        sid = current_user_identity().split(":", 1)[1]
-        result = _run_icacls(path, "/inheritance:r", "/grant:r", f"*{sid}:(F)")
-        if result is None or result.returncode != 0:
-            detail = "" if result is None else result.stderr.strip()
-            raise RuntimeError(f"could not enforce owner-only daemon credential ACL: {detail}")
-        return
-    path.chmod(0o600)
-
-
 def _create_token(path: Path) -> str:
-    path.parent.mkdir(parents=True, exist_ok=True)
     token = secrets.token_urlsafe(32)
-    fd, raw_temp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temp = Path(raw_temp)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-            handle.write(token)
-            handle.flush()
-            os.fsync(handle.fileno())
-        _enforce_owner_only(temp)
-        if not _verify_owner_only(temp):
-            raise RuntimeError("daemon credential candidate is not owner-only")
-        os.replace(temp, path)
-    finally:
-        with contextlib.suppress(OSError):
-            temp.unlink()
+    write_owner_only_atomic(path, token.encode("ascii"))
     return token
 
 

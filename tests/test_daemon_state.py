@@ -27,10 +27,11 @@ def test_load_or_create_token_reuses_existing_token(
 ) -> None:
     import hive._credential as credential
     import hive._daemon as daemon
+    import hive._owner_only as owner_only
 
     _patch_state_paths(monkeypatch, tmp_path)
-    monkeypatch.setattr(daemon, "_enforce_owner_only", lambda path: None)
-    monkeypatch.setattr(daemon, "_verify_owner_only", lambda path: True)
+    monkeypatch.setattr(owner_only, "enforce_owner_only", lambda path: None)
+    monkeypatch.setattr(owner_only, "_verify_owner_only", lambda path: True)
     monkeypatch.setattr(credential, "_verify_owner_only", lambda path: True)
 
     first = daemon.load_or_create_token()
@@ -45,10 +46,11 @@ def test_token_publication_is_atomic_and_cleans_failed_candidate(
     tmp_path: Path,
 ) -> None:
     import hive._daemon as daemon
+    import hive._owner_only as owner_only
 
     _patch_state_paths(monkeypatch, tmp_path)
-    monkeypatch.setattr(daemon, "_enforce_owner_only", lambda path: None)
-    monkeypatch.setattr(daemon, "_verify_owner_only", lambda path: False)
+    monkeypatch.setattr(owner_only, "enforce_owner_only", lambda path: None)
+    monkeypatch.setattr(owner_only, "_verify_owner_only", lambda path: False)
 
     with pytest.raises(RuntimeError, match="owner-only"):
         daemon.load_or_create_token()
@@ -130,11 +132,12 @@ def test_run_serve_uses_stable_port_and_token_across_restarts(
 ) -> None:
     import hive._credential as credential
     import hive._daemon as daemon
+    import hive._owner_only as owner_only
 
     _patch_state_paths(monkeypatch, tmp_path)
     monkeypatch.setattr(daemon, "_startup_self_heal", lambda vault: None)
-    monkeypatch.setattr(daemon, "_enforce_owner_only", lambda path: None)
-    monkeypatch.setattr(daemon, "_verify_owner_only", lambda path: True)
+    monkeypatch.setattr(owner_only, "enforce_owner_only", lambda path: None)
+    monkeypatch.setattr(owner_only, "_verify_owner_only", lambda path: True)
     monkeypatch.setattr(credential, "_verify_owner_only", lambda path: True)
     monkeypatch.setattr(daemon, "configured_daemon_port", lambda: 54282)
     monkeypatch.setattr(daemon, "_port_available", lambda host, port: True)
