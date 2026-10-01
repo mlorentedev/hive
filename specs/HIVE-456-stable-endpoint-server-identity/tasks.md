@@ -101,7 +101,7 @@ created: "2026-09-30"
 - [ ] [AC1] `test_relay_accepts_the_old_token_after_an_impostor_round`
   (non-disclosure, not revocation): after the impostor test, the relay
   connected to the real daemon succeeds with the unchanged token.
-- [ ] [AC5] Extend
+- [x] [AC5] Extend
   `tests/test_client.py::test_client_entrypoint_does_not_import_the_server_stack`
   to also assert that `cryptography` is not in `sys.modules`. Update the
   existing relay tests (`test_relay_preserves_json_session_protocol_and_sse`

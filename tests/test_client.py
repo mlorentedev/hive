@@ -424,6 +424,7 @@ def test_client_entrypoint_does_not_import_the_server_stack(tmp_path) -> None:
                 "             or n == 'hive._daemon'",
                 "             or n == 'hive.config'",
                 "             or n == 'subprocess'",
+                "             or n.startswith('cryptography')",
                 "             or n.startswith('fastmcp')",
                 "             or n.startswith('mcp')]",
                 "assert forbidden == [], forbidden",
