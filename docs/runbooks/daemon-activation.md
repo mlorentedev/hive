@@ -18,8 +18,11 @@ owner: manu
 >
 > **Security hold:** Do not deploy daemon mode on an untrusted multi-user host
 > until [#456](https://github.com/mlorentedev/hive/issues/456) is resolved.
-> A process impersonating the fixed port during downtime can capture a bearer
-> which remains valid across ordinary daemon restarts.
+> The stable endpoint now serves TLS with a per-user certificate that every
+> Hive client pins (ADR-022 Amendment 1), so a process impersonating the fixed
+> port during downtime fails the handshake before any bearer is sent. The hold
+> stays until the Linux and Windows evidence for #456, including the
+> cross-user check, is recorded.
 
 ## Prerequisites
 
@@ -68,17 +71,31 @@ it (staged setup).
 
 ### 3. Verify the daemon serves
 
+The daemon serves TLS 1.3 only. Trust its own certificate, never the system
+store and never `-k`:
+
 ```bash
 # Linux state dir is ~/.local/share/hive (HIVE state dir = the SQLite DB parent)
-PORT=$(cat ~/.local/share/hive/daemon.port)
-TOKEN=$(cat ~/.local/share/hive/daemon.token)
+STATE=~/.local/share/hive
+PORT=$(cat "$STATE/daemon.port")
+CERT="$STATE/daemon.crt"
 
-curl -s "http://127.0.0.1:$PORT/health"                      # {"status":"ok","ready":true,...}
-curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:$PORT/status"   # 401 (token-gated)
-curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/status"  # 200 + metrics
+curl -s --cacert "$CERT" "https://127.0.0.1:$PORT/health"                      # {"status":"ok","ready":true,...}
+curl -s --cacert "$CERT" -o /dev/null -w '%{http_code}\n' "https://127.0.0.1:$PORT/status"   # 401 (token-gated)
+curl -s --cacert "$CERT" -H "Authorization: Bearer $(cat "$STATE/daemon.token")" \
+  "https://127.0.0.1:$PORT/status"                                             # 200 + metrics
 ```
 
-`daemon.token` and `daemon.port` must be owner-only (`600`).
+`daemon.token`, `daemon.key`, `daemon.crt`, `identity.state` and `daemon.port`
+must be owner-only (`600`). The certificate is public, but it is the trust
+anchor every client pins, so nobody else may be able to replace it.
+
+**Upgrading from a plaintext daemon.** A daemon from before ADR-022
+Amendment 1 served plaintext HTTP, so its token is presumed captured. The
+first TLS start generates the identity and rotates the token once. `hive
+client` and `hive delegate` read the new token and certificate on their next
+start. Any direct HTTP registration holding a copy of the old token, or an
+`http://` URL, stops working and must be re-registered as described in step 5.
 
 ### 4. Point the client at the daemon (`~/.claude.json`)
 
@@ -122,13 +139,27 @@ same value for Copilot's environment and the daemon. Start a new Copilot
 session, then list Hive's tools and call `vault_health`. The integration smoke
 `uv run python -m pytest tests/test_daemon.py -k copilot_daemon_mode -q`
 initializes, lists tools, and calls `vault_health` against a real isolated
-daemon through both stdio and direct HTTP using synthetic credentials; it
-does **not** launch the Copilot CLI itself. Copilot also supports a direct HTTP
-registration, but both transports send a bearer to a listener that has not
-proven its identity; do not deploy either on untrusted multi-user hosts before
-#456. ADR-022 Amendment 1 removes plaintext `http://` registrations from the
-supported contract once its TLS endpoint ships; do not create new ones. Do not
-place the token in shell history or checked-in MCP configuration.
+daemon through both stdio and direct HTTPS using synthetic credentials; it
+does **not** launch the Copilot CLI itself.
+
+`hive client` is the recommended registration. A direct registration is
+supported only over HTTPS, with certificate verification scoped to the host
+process:
+
+- URL `https://127.0.0.1:<port>/mcp`; `http://` URLs no longer work, because
+  the daemon is TLS-only.
+- For Node-based hosts such as Copilot CLI, set
+  `NODE_EXTRA_CA_CERTS=<state dir>/daemon.crt` in that host's environment.
+  Do not add the certificate to an operating-system or user root store.
+- Never disable verification (`NODE_TLS_REJECT_UNAUTHORIZED=0` or an
+  "insecure" flag). A host that cannot verify the certificate uses
+  `hive client`.
+- `tests/test_daemon.py -k direct_https` checks this contract with a stand-in
+  client and a real Node host on Linux. Until the same check passes on
+  Windows, direct HTTPS is unverified there and `hive client` is the
+  supported path.
+
+Do not place the token in shell history or checked-in MCP configuration.
 Copilot documents MCP `timeout` for tool discovery and tool calls, including
 its connection budget. On the measured Windows host, cold stdio initialization
 was terminated after ~4.1 seconds even with `timeout: 30000`. This is an

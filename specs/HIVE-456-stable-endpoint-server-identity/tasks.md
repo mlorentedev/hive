@@ -131,7 +131,7 @@ created: "2026-09-30"
   startup, relay errors, delegate errors, and impostor refusals, no token and
   no PEM `PRIVATE KEY` block appears in stdout, stderr, captured logs, or
   exception strings.
-- [ ] Documentation: `docs/runbooks/daemon-activation.md` and the EN/ES
+- [x] Documentation: `docs/runbooks/daemon-activation.md` and the EN/ES
   `site/src/content/docs/{,es/}guides/daemon-mode.md`. Cover the HTTPS URL,
   `NODE_EXTRA_CA_CERTS` for direct hosts, the removal of `http://`
   registrations, and the security-hold wording, which stays until the
