@@ -47,7 +47,7 @@ al iniciar sesión y se reinicie ante fallos. Es multiplataforma: **systemd
 ```bash
 uv tool install --upgrade hive-vault   # requiere hive-vault >= 1.32.0
 hive service install                   # renderiza unit/task, habilita, arranca
-hive service status                    # vista del supervisor (active/running)
+hive service status                    # vista del supervisor + sondeo /health anclado
 ```
 
 - **Linux** escribe `~/.config/systemd/user/hive.service`
@@ -58,6 +58,14 @@ hive service status                    # vista del supervisor (active/running)
 
 Usa `hive service install --no-enable` para escribir el unit/task sin
 arrancarlo, y `hive service uninstall` para detenerlo y eliminarlo.
+
+`hive service status` termina con `hive daemon: healthy` (código 0) solo cuando
+quien escucha en el puerto estable demuestra el certificado del daemon. Si no,
+informa `unverified listener` (posible suplantación), `unverified listener,
+owner unknown` o `down`, y sale con 1. Si el daemon se niega a arrancar porque
+sus ficheros de identidad están dañados o no son solo del propietario, detenlo
+y ejecuta `hive service rotate-identity`, que sustituye la clave, el
+certificado y el token.
 
 El último paso es apuntar tu cliente MCP al daemon — cambia la entrada `hive` de
 `uvx hive-vault` a `hive client`. El procedimiento completo por máquina

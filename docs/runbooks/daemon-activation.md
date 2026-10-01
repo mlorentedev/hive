@@ -22,7 +22,8 @@ owner: manu
 > Hive client pins (ADR-022 Amendment 1), so a process impersonating the fixed
 > port during downtime fails the handshake before any bearer is sent. The hold
 > stays until the Linux and Windows evidence for #456, including the
-> cross-user check, is recorded.
+> cross-user check, is recorded. The manual Windows run is
+> [verify-server-identity-windows.md](verify-server-identity-windows.md).
 
 ## Prerequisites
 
@@ -57,8 +58,23 @@ On Linux and macOS, later upgrades use `uv tool upgrade hive-vault`.
 
 ```bash
 hive service install         # render unit/task, enable, start
-hive service status          # supervisor's view (active/running)
+hive service status          # supervisor's view, then the pinned /health probe
 ```
+
+`hive service status` prints the supervisor's view where one exists, then a
+final `hive daemon: <state>` line from a `GET /health` that trusts only the
+daemon's certificate. Its exit code comes from that probe:
+
+| Final line | Meaning | Exit |
+|---|---|---|
+| `healthy` | The owner's daemon answered | 0 |
+| `unverified listener (held by …)` | Something holds the port without the daemon's certificate: possible impersonation | 1 |
+| `unverified listener, owner unknown` | The same, and the holder's account could not be read | 1 |
+| `down` | Nothing proved itself on the port | 1 |
+
+`down (the daemon's certificate expired …)` means a daemon ran past its
+certificate's validity; restarting it regenerates the certificate and keeps
+the token.
 
 - **Linux** writes `~/.config/systemd/user/hive.service`
   (`Restart=on-failure`, `WantedBy=default.target`), then
@@ -89,6 +105,24 @@ curl -s --cacert "$CERT" -H "Authorization: Bearer $(cat "$STATE/daemon.token")"
 `daemon.token`, `daemon.key`, `daemon.crt`, `identity.state` and `daemon.port`
 must be owner-only (`600`). The certificate is public, but it is the trust
 anchor every client pins, so nobody else may be able to replace it.
+
+**Rotating the identity.** If the daemon refuses to start because
+`daemon.key` is not owner-only, or because the identity files are missing or
+corrupt, stop the daemon and run:
+
+```bash
+hive service rotate-identity   # new key, certificate and token; prints the new fingerprint
+```
+
+It refuses while the daemon is running. A running `hive client` re-reads the
+new certificate and token on its next connection; direct HTTP registrations
+must re-read `daemon.crt` and the token.
+
+**Port held by someone else.** If `hive serve` reports that the stable port
+is in use, the message says whether the holder is `this account`, `another
+account`, or that the `owner could not be determined`. Another account holding
+your port is the impersonation case this design refuses; the clients will not
+talk to it.
 
 **Upgrading from a plaintext daemon.** A daemon from before ADR-022
 Amendment 1 served plaintext HTTP, so its token is presumed captured. The

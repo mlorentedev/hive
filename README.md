@@ -106,6 +106,7 @@ check, is recorded.
 ```bash
 uv tool install --upgrade hive-vault   # >= 1.32.0
 hive service install                   # supervise hive serve (systemd --user / Task Scheduler)
+hive service status                    # exit 0 only if the listener proves the daemon's certificate
 ```
 
 Run `hive client` from your MCP host. A host that can verify the daemon's
