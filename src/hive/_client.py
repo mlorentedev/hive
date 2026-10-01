@@ -160,30 +160,28 @@ class HttpRelay:
         self._context = pinned_context(cert_pem)
         self._fingerprint = pem_fingerprint(cert_pem)
 
-    def _repinned(self) -> bool:
-        """Re-read the owner's token and certificate after a failed proof.
+    def _refresh_pin(self) -> None:
+        """Re-read the owner's token and certificate before every connection.
 
         ``hive service rotate-identity`` replaces both while a relay may still
-        be running. Only a certificate that changed on disk earns a retry, so
-        an impostor in front of an unchanged pin is refused at once.
+        be running. Checking only after a failed proof would keep trusting a
+        rotated-away key, which is exactly the key an attacker may hold. A pin
+        that can no longer be read fails closed rather than falling back to
+        the one in memory.
         """
         if self._reload is None:
-            return False
+            return
         try:
             token, cert_pem = self._reload()
         except (OSError, RuntimeError, ValueError):
-            return False
-        if pem_fingerprint(cert_pem) == self._fingerprint:
-            return False
-        self._pin(token, cert_pem)
-        return True
+            raise ClientError(
+                "could not re-read the Hive daemon certificate or token; nothing was sent",
+            ) from None
+        if pem_fingerprint(cert_pem) != self._fingerprint or token != self._token:
+            self._pin(token, cert_pem)
 
     def _connect(self) -> http.client.HTTPSConnection:
-        try:
-            return self._handshake()
-        except _UnverifiedListenerError:
-            if not self._repinned():
-                raise self._impersonation() from None
+        self._refresh_pin()
         try:
             return self._handshake()
         except _UnverifiedListenerError:
