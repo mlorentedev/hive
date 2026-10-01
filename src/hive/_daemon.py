@@ -20,6 +20,7 @@ import logging
 import os
 import secrets
 import socket
+import ssl
 import sys
 from typing import TYPE_CHECKING
 
@@ -372,6 +373,8 @@ async def _serve_until_drift_or_signal(uv_server: uvicorn.Server) -> bool:
 def _serve_owned(host: str, port: int, token: str, identity: Identity) -> bool:
     """Own the ``uvicorn.Server`` so the drift watcher can clean-stop it.
 
+    Served over TLS with the per-user identity, so a client can tell this
+    daemon from anything else bound to the stable port (ADR-022 A1).
     Built from the PUBLIC ``mcp.http_app()`` (the spike-validated seam) rather
     than ``mcp.run(transport="http")``, whose internal signal-only stop cuts
     in-flight calls. uvicorn's default signal handlers stay installed so
@@ -391,7 +394,16 @@ def _serve_owned(host: str, port: int, token: str, identity: Identity) -> bool:
         lifespan="on",
         log_level="warning",
         timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_S,
+        ssl_certfile=str(identity.cert_path),
+        ssl_keyfile=str(identity.key_path),
     )
+    # uvicorn has no minimum-version setting. Loading the config builds its SSL
+    # context, which is then tightened before Server.serve() reuses it
+    # (ADR-022 A1: TLS 1.3 only on the stable port).
+    config.load()
+    if config.ssl is None:
+        raise RuntimeError("daemon TLS context was not created")
+    config.ssl.minimum_version = ssl.TLSVersion.TLSv1_3
     return asyncio.run(_serve_until_drift_or_signal(uvicorn.Server(config)))
 
 

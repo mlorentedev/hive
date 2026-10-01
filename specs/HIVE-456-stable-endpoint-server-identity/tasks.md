@@ -74,7 +74,7 @@ created: "2026-09-30"
   certificate. Against a second self-signed certificate, it fails with
   `ssl.SSLCertVerificationError`. `_tls.fingerprint_matches(sock,
   expected)` compares the peer's DER SHA-256. Implement `_tls.py`.
-- [ ] [AC8] `tests/test_daemon.py::test_stable_port_serves_tls13_only`.
+- [x] [AC8] `tests/test_daemon.py::test_stable_port_serves_tls13_only`.
   Start a real isolated daemon. Then:
   - a plaintext `GET /health` gets no HTTP response;
   - a client capped at `TLSVersion.TLSv1_2` fails the handshake;
@@ -83,7 +83,7 @@ created: "2026-09-30"
 
   Implement it in `_serve_owned`: `ssl_certfile`/`ssl_keyfile`, then
   `config.load()` and `config.ssl.minimum_version = TLSVersion.TLSv1_3`.
-- [ ] [AC1] `tests/test_client.py::test_relay_refuses_impostors_before_sending_bytes`.
+- [x] [AC1] `tests/test_client.py::test_relay_refuses_impostors_before_sending_bytes`.
   An in-test impostor, either a plaintext listener or a TLS listener with a
   different certificate, records every byte it receives. Assert that:
   - the relay raises `ClientError` naming a possible impersonation;
@@ -92,7 +92,7 @@ created: "2026-09-30"
   - the capture contains no `Authorization` header, no `POST`, and no body.
 
   Expected: FAIL (the relay currently sends plaintext HTTP).
-- [ ] [AC1] Switch `HttpRelay._open` to `http.client.HTTPSConnection` with
+- [x] [AC1] Switch `HttpRelay._open` to `http.client.HTTPSConnection` with
   `_tls.pinned_context`. After `connect()`, check the fingerprint before
   `request()`. Map `ssl.SSLError` and a fingerprint mismatch to the
   impersonation `ClientError`, and keep the "daemon unavailable" error for

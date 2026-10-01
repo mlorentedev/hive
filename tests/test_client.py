@@ -6,6 +6,9 @@ import http.client
 import json
 import os
 import queue
+import shutil
+import socket
+import ssl
 import statistics
 import subprocess
 import sys
@@ -20,10 +23,13 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from hive._identity import Identity
+
 
 class _McpHandler(BaseHTTPRequestHandler):
     requests: list[dict[str, Any]] = []
     reject_session_once = False
+    cert_pem = ""
 
     def do_POST(self) -> None:  # noqa: N802
         size = int(self.headers.get("Content-Length", "0"))
@@ -97,11 +103,28 @@ class _McpHandler(BaseHTTPRequestHandler):
         return
 
 
+@pytest.fixture(scope="session")
+def owner_identity(tmp_path_factory: pytest.TempPathFactory) -> Identity:
+    """The fixture daemon's TLS identity, which every relay under test pins."""
+    from hive._identity import create_identity
+
+    state = tmp_path_factory.mktemp("owner-identity")
+    return create_identity(state / "daemon.key", state / "daemon.crt")
+
+
+def _server_context(identity: Identity) -> ssl.SSLContext:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(identity.cert_path, identity.key_path)
+    return context
+
+
 @pytest.fixture
-def mcp_http_server() -> Iterator[tuple[str, int, type[_McpHandler]]]:
+def mcp_http_server(owner_identity: Identity) -> Iterator[tuple[str, int, type[_McpHandler]]]:
     _McpHandler.requests = []
     _McpHandler.reject_session_once = False
+    _McpHandler.cert_pem = owner_identity.cert_path.read_text(encoding="ascii")
     server = ThreadingHTTPServer(("127.0.0.1", 0), _McpHandler)
+    server.socket = _server_context(owner_identity).wrap_socket(server.socket, server_side=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -113,13 +136,21 @@ def mcp_http_server() -> Iterator[tuple[str, int, type[_McpHandler]]]:
         thread.join(timeout=5)
 
 
+def _install_owner_certificate(identity: Identity, state_dir: Path) -> None:
+    from hive._daemon import _enforce_owner_only
+
+    target = state_dir / "daemon.crt"
+    shutil.copyfile(identity.cert_path, target)
+    _enforce_owner_only(target)
+
+
 def test_relay_preserves_json_session_protocol_and_sse(
     mcp_http_server: tuple[str, int, type[_McpHandler]],
 ) -> None:
     from hive._client import HttpRelay
 
     host, port, handler = mcp_http_server
-    relay = HttpRelay(host, port, "secret-token")
+    relay = HttpRelay(host, port, "secret-token", handler.cert_pem)
     initialize = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -151,7 +182,7 @@ def test_relay_adds_current_protocol_metadata_header(
     from hive._client import HttpRelay
 
     host, port, handler = mcp_http_server
-    relay = HttpRelay(host, port, "secret-token")
+    relay = HttpRelay(host, port, "secret-token", handler.cert_pem)
     message = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -174,7 +205,7 @@ def test_relay_reinitializes_after_daemon_restart_loses_session(
     from hive._client import HttpRelay
 
     host, port, handler = mcp_http_server
-    relay = HttpRelay(host, port, "secret-token")
+    relay = HttpRelay(host, port, "secret-token", handler.cert_pem)
     initialize = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -203,7 +234,7 @@ def test_relay_rediscovers_after_daemon_restart_for_2026_protocol(
     from hive._client import HttpRelay
 
     host, port, handler = mcp_http_server
-    relay = HttpRelay(host, port, "secret-token")
+    relay = HttpRelay(host, port, "secret-token", handler.cert_pem)
     discover = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -221,10 +252,11 @@ def test_relay_rediscovers_after_daemon_restart_for_2026_protocol(
     assert handler.requests[-1]["headers"]["MCP-Protocol-Version"] == "2026-07-28"
 
 
-def test_relay_connection_failure_is_explicit_and_redacts_token() -> None:
+def test_relay_connection_failure_is_explicit_and_redacts_token(owner_identity: Identity) -> None:
     from hive._client import ClientError, HttpRelay
 
-    relay = HttpRelay("127.0.0.1", 1, "must-never-leak")
+    pem = owner_identity.cert_path.read_text(encoding="ascii")
+    relay = HttpRelay("127.0.0.1", 1, "must-never-leak", pem)
 
     with pytest.raises(ClientError, match="daemon unavailable") as excinfo:
         relay.forward({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
@@ -238,7 +270,7 @@ def test_relay_times_out_unresponsive_daemon_after_requested_deadline(
 ) -> None:
     from hive._client import ClientError, HttpRelay
 
-    host, port, _handler = mcp_http_server
+    host, port, handler = mcp_http_server
     timeouts: list[float] = []
     original_getresponse = http.client.HTTPConnection.getresponse
 
@@ -252,7 +284,7 @@ def test_relay_times_out_unresponsive_daemon_after_requested_deadline(
 
     monkeypatch.setattr(http.client.HTTPConnection, "getresponse", stalled_response)
     with pytest.raises(ClientError, match="daemon unavailable"):
-        HttpRelay(host, port, "secret-token").forward(
+        HttpRelay(host, port, "secret-token", handler.cert_pem).forward(
             {
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -277,9 +309,100 @@ def test_relay_reports_timeout_while_reading_sse(
 
     monkeypatch.setattr(client_module, "_sse_frames", stalled_stream)
     with pytest.raises(client_module.ClientError, match="daemon unavailable"):
-        client_module.HttpRelay(host, port, "secret-token").forward(
+        client_module.HttpRelay(host, port, "secret-token", _McpHandler.cert_pem).forward(
             {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
         )
+
+
+class _Impostor:
+    """A listener on the stable port that is not the daemon, recording every byte.
+
+    ``identity=None`` is a plaintext HTTP listener. Otherwise it terminates TLS
+    with a certificate the client never pinned and records what it decrypts.
+    """
+
+    def __init__(self, identity: Identity | None) -> None:
+        self._context = None if identity is None else _server_context(identity)
+        self.listener = socket.create_server(("127.0.0.1", 0))
+        self.port = int(self.listener.getsockname()[1])
+        self.accepted = threading.Event()
+        self.raw = bytearray()
+        self.decrypted = bytearray()
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        self.listener.settimeout(10)
+        try:
+            conn, _ = self.listener.accept()
+        except OSError:
+            return
+        self.accepted.set()
+        conn.settimeout(2)
+        with conn:
+            if self._context is None:
+                self._capture_plaintext(conn)
+            else:
+                self._capture_tls(conn)
+
+    def _capture_plaintext(self, conn: socket.socket) -> None:
+        try:
+            self.raw += conn.recv(65536)
+            conn.sendall(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
+            while chunk := conn.recv(65536):
+                self.raw += chunk
+        except OSError:
+            return
+
+    def _capture_tls(self, conn: socket.socket) -> None:
+        assert self._context is not None
+        try:
+            self.raw += conn.recv(5, socket.MSG_PEEK)
+            with self._context.wrap_socket(conn, server_side=True) as tls:
+                while chunk := tls.recv(65536):
+                    self.decrypted += chunk
+        except OSError:
+            return
+
+    def wait(self) -> None:
+        self._thread.join(timeout=10)
+        self.listener.close()
+
+
+@pytest.mark.parametrize("impostor_kind", ["plaintext", "wrong-certificate"])
+def test_relay_refuses_impostors_before_sending_bytes(
+    owner_identity: Identity,
+    tmp_path: Path,
+    impostor_kind: str,
+) -> None:
+    from hive._client import ClientError, HttpRelay
+    from hive._identity import create_identity
+
+    impostor_identity = None
+    if impostor_kind == "wrong-certificate":
+        impostor_identity = create_identity(tmp_path / "impostor.key", tmp_path / "impostor.crt")
+    impostor = _Impostor(impostor_identity)
+    token = "synthetic-bearer-" + "x" * 32
+    relay = HttpRelay(
+        "127.0.0.1",
+        impostor.port,
+        token,
+        owner_identity.cert_path.read_text(encoding="ascii"),
+    )
+
+    with pytest.raises(ClientError, match="possible impersonation") as excinfo:
+        relay.forward({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+    impostor.wait()
+
+    # Positive control: the relay really dialled the impostor and spoke TLS.
+    assert impostor.accepted.is_set()
+    assert impostor.raw[:1] == b"\x16"
+    captured = bytes(impostor.raw + impostor.decrypted)
+    assert b"Authorization" not in captured
+    assert b"POST" not in captured
+    assert token.encode() not in captured
+    assert impostor.decrypted == b""
+    assert token not in str(excinfo.value)
 
 
 def test_client_entrypoint_does_not_import_the_server_stack(tmp_path) -> None:
@@ -369,11 +492,13 @@ def _measure_first_initialize(
 
 def test_client_initialize_response_arrives_within_one_second(
     mcp_http_server: tuple[str, int, type[_McpHandler]],
+    owner_identity: Identity,
     tmp_path: Path,
 ) -> None:
     from hive._daemon import _enforce_owner_only
 
     host, port, _handler = mcp_http_server
+    _install_owner_certificate(owner_identity, tmp_path)
     token_path = tmp_path / "daemon.token"
     token_path.write_text("a" * 43, encoding="utf-8")
     _enforce_owner_only(token_path)
@@ -457,9 +582,13 @@ def test_client_rejects_corrupt_or_permission_invalid_credential(
         assert token_text not in result.stderr
 
 
-def test_client_unreachable_daemon_exits_with_a_json_rpc_error(tmp_path: Path) -> None:
+def test_client_unreachable_daemon_exits_with_a_json_rpc_error(
+    owner_identity: Identity,
+    tmp_path: Path,
+) -> None:
     from hive._daemon import _enforce_owner_only
 
+    _install_owner_certificate(owner_identity, tmp_path)
     token_path = tmp_path / "daemon.token"
     token = "a" * 43
     token_path.write_text(token, encoding="utf-8")

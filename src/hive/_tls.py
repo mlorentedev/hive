@@ -14,8 +14,15 @@ from __future__ import annotations
 
 import hashlib
 import ssl
+from typing import TYPE_CHECKING
+
+from hive._credential import _verify_owner_only
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 LOOPBACK_HOST = "127.0.0.1"
+_PEM_HEADER = "-----BEGIN CERTIFICATE-----"
 
 
 def pinned_context(cert_pem: str) -> ssl.SSLContext:
@@ -39,3 +46,23 @@ def fingerprint_matches(sock: ssl.SSLSocket, expected: str) -> bool:
     """Whether the peer on *sock* presented exactly the pinned certificate."""
     der = sock.getpeercert(binary_form=True)
     return der is not None and hashlib.sha256(der).hexdigest() == expected
+
+
+def load_pinned_certificate(path: Path) -> str:
+    """Read the owner's certificate, failing closed like the token read.
+
+    The file is the trust anchor, so a copy anyone else could write would let
+    them choose who the client trusts. It must be owner-only.
+    """
+    try:
+        pem = path.read_text(encoding="ascii")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise RuntimeError(
+            f"could not read the daemon identity certificate at {path}; "
+            "start the daemon once or run `hive service rotate-identity`",
+        ) from exc
+    if pem.count(_PEM_HEADER) != 1 or "PRIVATE KEY" in pem:
+        raise RuntimeError(f"invalid daemon identity certificate at {path}")
+    if not _verify_owner_only(path):
+        raise RuntimeError(f"daemon identity certificate at {path} is not owner-only")
+    return pem
