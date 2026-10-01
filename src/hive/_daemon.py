@@ -109,6 +109,37 @@ def prepare_daemon_credentials() -> tuple[str, Identity]:
     return token, identity
 
 
+def rotate_identity() -> int:
+    """Replace the daemon's key, certificate and token (``hive service rotate-identity``).
+
+    The way out of a fail-closed start: material that is over-permissive,
+    missing or corrupt may have been exposed, so the token goes with it. The
+    token is rotated first, so an interrupted run leaves the damaged identity
+    behind, which fails closed again, never a new identity beside a token
+    that should have been replaced. Holding the singleton lock refuses a
+    running daemon, which would keep serving the old identity from memory.
+    """
+    singleton = _acquire_singleton_lock()
+    if singleton is None:
+        print(
+            "hive: the daemon is running; stop the daemon, then run "
+            "`hive service rotate-identity` again",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        from hive._identity import STATE_RECORD, create_identity
+
+        _create_token(token_file_path())
+        identity = create_identity(identity_key_path(), identity_cert_path())
+        write_owner_only_atomic(identity_state_path(), STATE_RECORD)
+    finally:
+        singleton.release()
+    print(f"hive: daemon identity rotated; new certificate fingerprint {identity.fingerprint}")
+    print("hive: start the daemon; clients that pin daemon.crt must re-read it")
+    return 0
+
+
 def write_owner_only(path: Path, content: str) -> None:
     """Write non-secret daemon metadata with owner-only permissions."""
     path.parent.mkdir(parents=True, exist_ok=True)
