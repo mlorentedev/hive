@@ -470,3 +470,102 @@ def test_resolve_exec_ignores_a_layout_whose_launcher_is_missing(
     monkeypatch.setattr(svc.shutil, "which", lambda _: None)
 
     assert "-m hive.server" in svc._resolve_exec()
+
+
+# ── rotate-identity (HIVE-456 AC6) ────────────────────────────────────────
+
+
+def _initialized_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[str, str]:
+    """A state dir after a first TLS start; returns (token, fingerprint)."""
+    from hive._daemon import prepare_daemon_credentials
+
+    monkeypatch.setenv("HIVE_DB_PATH", str(tmp_path / "hive.db"))
+    token, identity = prepare_daemon_credentials()
+    return token, identity.fingerprint
+
+
+def test_rotate_identity_rotates_key_cert_and_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from hive import server
+    from hive._endpoint import identity_key_path, identity_state_path, token_file_path
+
+    old_token, old_fingerprint = _initialized_state(monkeypatch, tmp_path)
+    old_key = identity_key_path().read_bytes()
+
+    assert server._run_service(["rotate-identity"]) == 0
+
+    from hive._daemon import prepare_daemon_credentials
+
+    new_token, identity = prepare_daemon_credentials()
+    assert new_token != old_token
+    assert token_file_path().read_text(encoding="ascii") == new_token
+    assert identity.fingerprint != old_fingerprint
+    assert identity_key_path().read_bytes() != old_key
+    assert identity_state_path().exists()
+    out = capsys.readouterr()
+    emitted = out.out + out.err
+    assert identity.fingerprint in emitted
+    assert new_token not in emitted
+    assert old_token not in emitted
+    assert "PRIVATE KEY" not in emitted
+
+
+def test_rotate_identity_repairs_an_over_permissive_key(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import os
+
+    from hive import server
+    from hive._daemon import prepare_daemon_credentials
+    from hive._endpoint import identity_key_path
+    from hive._identity import IdentityError
+
+    _initialized_state(monkeypatch, tmp_path)
+    if os.name == "nt":
+        import subprocess
+
+        subprocess.run(
+            ["icacls", str(identity_key_path()), "/grant", "*S-1-1-0:(R)"],
+            check=True,
+            capture_output=True,
+        )
+    else:
+        identity_key_path().chmod(0o644)
+    try:
+        prepare_daemon_credentials()
+    except IdentityError:
+        pass
+    else:
+        raise AssertionError("positive control: the damaged key must be refused first")
+
+    assert server._run_service(["rotate-identity"]) == 0
+    prepare_daemon_credentials()
+
+
+def test_rotate_identity_refuses_while_the_daemon_runs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import filelock
+
+    from hive import server
+    from hive._endpoint import identity_cert_path, lock_file_path, token_file_path
+
+    _initialized_state(monkeypatch, tmp_path)
+    cert, token = identity_cert_path().read_bytes(), token_file_path().read_bytes()
+
+    running = filelock.FileLock(str(lock_file_path()))
+    running.acquire(timeout=0)
+    try:
+        assert server._run_service(["rotate-identity"]) != 0
+    finally:
+        running.release()
+
+    assert identity_cert_path().read_bytes() == cert
+    assert token_file_path().read_bytes() == token
+    assert "stop the daemon" in capsys.readouterr().err
