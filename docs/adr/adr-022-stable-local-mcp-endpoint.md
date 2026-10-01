@@ -614,10 +614,13 @@ assertion. Its captured token is its own positive control.
 10. **Real direct HTTP host, per platform.** A real host, not a stand-in,
     accepts the per-user certificate through `NODE_EXTRA_CA_CERTS`, or a
     documented equivalent, and refuses an impostor. On Windows this is Copilot
-    CLI on the owner's baseline host. Hive claims direct HTTP support on a
-    platform only after this check passes there. Otherwise direct HTTP is
+    CLI on the owner's baseline host. Hive claims direct HTTPS support on a
+    platform only after this check passes there. Otherwise direct HTTPS is
     unsupported on that platform and its hosts use `hive client`. That outcome
-    does not block #449.
+    does not block #449. This check governs TLS direct HTTP only. The
+    single-user plaintext exception is not gated by it: that mode verifies no
+    identity, so there is nothing for a real host to prove, and it stays
+    governed by its own owner risk acceptance and degraded status.
 
 **Release gate.** The hold on #449 is reconsidered only after both of these:
 
@@ -627,12 +630,13 @@ assertion. Its captured token is its own positive control.
   evidence.
 
 The stand-in client in check 2 proves Hive's side of the direct contract. It
-does not prove that any real host honours it. So the direct HTTP support
+does not prove that any real host honours it. So the direct HTTPS support
 statement on each platform rests on check 10 alone. For every platform where
 check 10 has not passed with a real host, the release notes must say that
-direct HTTP is unverified there and that `hive client` is the only supported
-transport. Lifting the hold does not depend on check 10. The direct HTTP
-support statement does.
+direct HTTPS is unverified there and that `hive client` is the only supported
+TLS transport. Lifting the hold does not depend on check 10. The direct HTTPS
+support statement does. Neither statement covers the single-user plaintext
+exception, which is never a supported transport, only an accepted risk.
 
 If checks 1 to 9 lack evidence on either platform, the hold stays in place
 unless the owner records an explicit acceptance of the risk that names the
