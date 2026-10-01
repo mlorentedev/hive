@@ -9,6 +9,7 @@ import re
 import sys
 from ctypes import wintypes
 from pathlib import Path
+from typing import Literal
 
 DEFAULT_HOST = "127.0.0.1"
 MCP_PATH = "/mcp"
@@ -19,6 +20,8 @@ _PRIVATE_PORT_COUNT = PRIVATE_PORT_MAX - PRIVATE_PORT_MIN + 1
 _PORT_NAMESPACE = b"hive-daemon-port-v1\0"
 _SID_RE = re.compile(r"^S-\d+(?:-\d+)+$")
 _TOKEN_QUERY = 0x0008
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_TCP_LISTEN = "0A"
 _TOKEN_USER_CLASS = 1
 
 
@@ -148,6 +151,93 @@ def current_user_identity() -> str:
     if not hasattr(os, "getuid"):
         raise RuntimeError(f"unsupported platform for daemon identity: {sys.platform}")
     return canonical_identity(platform=sys.platform, uid=os.getuid())
+
+
+PortHolder = Literal["this account", "another account", "owner could not be determined"]
+
+
+def _windows_process_sid(pid: int) -> str:
+    """The numeric SID of *pid*'s token; raises ``OSError`` when access is denied."""
+    win_dll = getattr(ctypes, "WinDLL")  # noqa: B009
+    advapi32: ctypes.CDLL = win_dll("advapi32", use_last_error=True)
+    kernel32: ctypes.CDLL = win_dll("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    advapi32.OpenProcessToken.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.HANDLE),
+    ]
+    advapi32.OpenProcessToken.restype = wintypes.BOOL
+    process = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not process:
+        raise _last_windows_error()
+    try:
+        token = wintypes.HANDLE()
+        if not advapi32.OpenProcessToken(process, _TOKEN_QUERY, ctypes.byref(token)):
+            raise _last_windows_error()
+        try:
+            return _sid_from_token(advapi32, kernel32, token)
+        finally:
+            kernel32.CloseHandle(token)
+    finally:
+        kernel32.CloseHandle(process)
+
+
+def _windows_listener_identity(port: int) -> str | None:
+    import psutil
+
+    try:
+        connections = psutil.net_connections(kind="tcp")
+    except psutil.Error as exc:
+        raise OSError("could not list TCP listeners") from exc
+    for conn in connections:
+        if conn.status == psutil.CONN_LISTEN and conn.laddr and conn.laddr.port == port:
+            if not conn.pid:
+                return None
+            return canonical_identity(platform="win32", sid=_windows_process_sid(conn.pid))
+    return None
+
+
+def _proc_listener_identity(port: int) -> str | None:
+    wanted = f"{port:04X}"
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            lines = Path(table).read_text(encoding="ascii").splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            fields = line.split()
+            if len(fields) > 7 and fields[3] == _TCP_LISTEN and fields[1].endswith(":" + wanted):
+                return canonical_identity(platform="linux", uid=int(fields[7]))
+    return None
+
+
+def _listener_identity(port: int) -> str | None:
+    """Canonical identity of the account listening on *port*, or ``None``."""
+    if sys.platform == "win32":
+        return _windows_listener_identity(port)
+    if sys.platform.startswith("linux"):
+        return _proc_listener_identity(port)
+    return None
+
+
+def port_holder(port: int) -> PortHolder:
+    """Classify who holds *port* without ever naming the account (ADR-022 A1).
+
+    A standard Windows user cannot open another user's process token, so a
+    real cross-user holder is usually reported as undetermined there.
+    """
+    try:
+        holder = _listener_identity(port)
+        current = current_user_identity()
+    except (OSError, RuntimeError, ValueError):
+        return "owner could not be determined"
+    if holder is None:
+        return "owner could not be determined"
+    return "this account" if holder == current else "another account"
 
 
 def port_for_identity(identity: str) -> int:
