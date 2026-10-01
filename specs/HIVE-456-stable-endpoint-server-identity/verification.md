@@ -20,9 +20,16 @@ when they run; nothing here stands in for them.
   `test_delegate_probe_verifies_the_owner_unlike_an_impostor`,
   `test_relay_accepts_the_old_token_after_an_impostor_round` — Linux:
   `6 passed, 47 deselected`; Windows: pending
-- [ ] AC2 -> PR 2 (`tests/test_cross_user.py` does not exist yet; the command
-  currently runs no tests and must not be read as green) — Linux: pending;
-  Windows: pending (manual, baseline host)
+- [ ] AC2 -> commits `eec4e0f` (diagnostic), `5e9f66c` (cross-user test + CI
+  job `cross_user_identity`) / tests
+  `test_port_conflict_diagnostic_names_three_owners`,
+  `test_cross_user_impostor_is_refused_and_named`,
+  `test_owner_daemon_serves_once_the_impostor_is_gone` — Linux: diagnostic
+  `3 passed`; the cross-user tests fail locally with "missing evidence" (no
+  second account on the owner's host) and run only in the CI job, whose
+  result is still pending. Their mechanics were dry-run as the same account
+  (2 passed, holder reported as `this account`). Windows: pending (manual,
+  `docs/runbooks/verify-server-identity-windows.md`)
 - [ ] AC3 -> commit `6dcafb7` / tests
   `test_direct_https_standin_trusts_only_owner_certificate`,
   `test_direct_https_node_host` (Node v24.16.0, `NODE_EXTRA_CA_CERTS`) — Linux:
@@ -38,12 +45,15 @@ when they run; nothing here stands in for them.
   `test_client_entrypoint_does_not_import_the_server_stack`,
   `test_client_initialize_response_arrives_within_one_second` — Linux:
   `5 passed, 26 deselected`; Windows: pending
-- [ ] AC6 -> items 1-2 (atomic, owner-only) in commit `4a8ec1c` / tests in
-  `tests/test_identity.py`; items 3-6 (expiry, over-permissive, missing or
-  corrupt, re-pin) are PR 2 — Linux: `5 passed, 38 deselected` (items 1-2
-  only); Windows: pending
-- [ ] AC7 -> PR 2 (the command currently selects no tests) — Linux: pending;
-  Windows: pending
+- [ ] AC6 -> items 1-2 in commit `4a8ec1c`; items 3-5 in `5a4a097`
+  (expiry, over-permissive, missing or corrupt) and `659c30b`
+  (`rotate-identity`); item 6 in `17c93e2` (re-pin) / tests in
+  `tests/test_identity.py`, `tests/test_service.py -k rotate`,
+  `test_relay_repins_after_rotation_and_refuses_old_certificate` — Linux:
+  `14 passed, 45 deselected`; Windows: pending
+- [ ] AC7 -> commit `f4b22ba` / `test_status_reports_four_states` (healthy,
+  wrong-certificate impostor, nothing listening, impostor with a denied owner
+  lookup) — Linux: `4 passed, 27 deselected`; Windows: pending
 - [ ] AC8 -> commit `40cca9f` / test `test_stable_port_serves_tls13_only`,
   mutation-checked (removing the TLS 1.3 minimum makes it fail) — Linux:
   `1 passed, 24 deselected`; Windows: pending
@@ -54,6 +64,8 @@ when they run; nothing here stands in for them.
 
 - Test suite (PR 1): `make check` -> `1015 passed, 4 skipped, 54 deselected`,
   coverage 84%. The 4 skips are pre-existing Windows-only ACL tests.
+- Test suite (PR 2): `make check` -> `1035 passed, 4 skipped, 56 deselected`,
+  coverage 84%.
 - Manual smoke test: `curl --cacert daemon.crt https://127.0.0.1:<port>/`
   returns 200 against a server holding the identity, and fails (exit 60)
   without `--cacert`; this backs the runbook commands.
@@ -76,6 +88,30 @@ when they run; nothing here stands in for them.
 - The TLS 1.2 refusal test offers every cipher. uvicorn's default cipher
   string shares none with Python's default client, which let the test pass
   without the TLS 1.3 minimum (lesson 102).
+- An expired certificate is regenerated only once it has expired, with no
+  early-renewal margin, as AC6 states. A daemon left running past expiry
+  serves a certificate every client refuses; the relay, the delegate and
+  `status` word that case as "expired certificate; restart the daemon"
+  instead of "possible impersonation" (`d9ae7c8`). The wording comes from
+  OpenSSL's verify code 10, which shows the pinned certificate was presented,
+  not that the listener holds its key, so the clients still refuse and send
+  nothing.
+- `rotate_identity` lives in `_daemon.py`, not `_identity.py` as `tasks.md`
+  planned: it needs the singleton lock and the token writer, which live
+  there. It refuses while the daemon runs (the daemon would keep serving the
+  old identity from memory) and rotates the token before the identity, so an
+  interrupted run leaves a start that still fails closed.
+- The relay re-reads the token and certificate once after a failed proof, and
+  retries only if the certificate changed on disk.
+- `status` prints `unverified listener (held by this account|another account);
+  possible impersonation` when the holder is known, and `unverified listener,
+  owner unknown` when it is not. A verified daemon answering `/health` with
+  anything but 200 is reported as `down`; the daemon always answers 200, so
+  that only happens mid-shutdown. A malformed `HIVE_DAEMON_PORT` is a one-line
+  error, exit 1.
+- The AC2 `features.json` command now passes `-m 'crossuser or not
+  crossuser'`. Without it the default `addopts` deselects the cross-user
+  tests and the command would report only the diagnostic tests as green.
 
 ## Promotion candidates
 
