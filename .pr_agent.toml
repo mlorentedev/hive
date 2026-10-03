@@ -35,7 +35,7 @@
 # which is the line this file draws. The excluded models stay excluded by name:
 # qwen3.6/gemma4 are the latency tier, and a reviewer that PASSes cheaply converts a
 # gate into a green checkmark. tests/pr-agent-config.bats holds that at dotfiles.
-model = "openai/mimo-v2.5"
+model = "openai/mimo-v2.6-flash"
 
 # ONE fallback, and lane separation is why it is deepseek rather than a sibling of the
 # primary. NaN's limit is PER MODEL (kubelab #1107/#1203: 8 concurrent to deepseek
