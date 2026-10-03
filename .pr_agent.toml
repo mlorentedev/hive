@@ -22,12 +22,15 @@
 # `openai/` selects LiteLLM's OpenAI-compatible transport; the endpoint is NaN's, set
 # as OPENAI__API_BASE in the workflow. Nothing here talks to OpenAI.
 #
-# mimo-v2.5 leads and deepseek-v4-flash follows because the order is the only one that
+# mimo-v2.6-flash leads and deepseek-v4-flash follows because the order is the only one that
 # can fail loudly. deepseek's characteristic failure is a 200 with an empty body — it
 # spends the output budget on the reasoning chain and never writes an answer — which
 # raises no exception, so LiteLLM never consults a fallback behind it. kubelab measured
 # that shape on run 32440498259 (#1205): step `success` after 4m15s, no RateLimitError,
 # the second model never attempted. mimo fails by saturation (429), which DOES raise.
+# That 429 shape was measured on mimo-v2.5, retired by NaN on 2026-09-30. Its successor
+# has also been seen to hang under load rather than answer 429, which raises nothing
+# (mlorentedev/dotfiles#1923), so this ordering is the best available, not a guarantee.
 #
 # This is not a quality ranking. dotfiles' harness/reviewer-pool.json says of mimo, in
 # its own words, that no ranking against deepseek was established; both are
@@ -35,7 +38,7 @@
 # which is the line this file draws. The excluded models stay excluded by name:
 # qwen3.6/gemma4 are the latency tier, and a reviewer that PASSes cheaply converts a
 # gate into a green checkmark. tests/pr-agent-config.bats holds that at dotfiles.
-model = "openai/mimo-v2.5"
+model = "openai/mimo-v2.6-flash"
 
 # ONE fallback, and lane separation is why it is deepseek rather than a sibling of the
 # primary. NaN's limit is PER MODEL (kubelab #1107/#1203: 8 concurrent to deepseek
