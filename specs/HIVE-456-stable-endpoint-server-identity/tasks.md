@@ -158,8 +158,10 @@ created: "2026-09-30"
   atomically, keeps the record, and exits 0. Its output names the new
   fingerprint only.
 - [x] [AC6] `test_relay_repins_after_rotation_and_refuses_old_certificate`.
-  The relay re-reads the pin once after a verification failure and
-  succeeds. A server that presents the old certificate is refused.
+  The relay re-reads the pin before every connection and succeeds. A server
+  that presents the old certificate is refused. (Planned as a re-read once
+  after a verification failure; changed in `d1b0b7f`, guarded by
+  `test_relay_drops_a_rotated_away_pin_before_its_next_connection`.)
 - [x] [P] [AC7] `tests/test_service.py::test_status_reports_four_states`.
   `hive service status` always runs a pinned `GET /health`, whatever the OS
   or supervisor. It prints the supervisor passthrough (`systemctl` or

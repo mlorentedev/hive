@@ -101,8 +101,10 @@ when they run; nothing here stands in for them.
   there. It refuses while the daemon runs (the daemon would keep serving the
   old identity from memory) and rotates the token before the identity, so an
   interrupted run leaves a start that still fails closed.
-- The relay re-reads the token and certificate once after a failed proof, and
-  retries only if the certificate changed on disk.
+- The relay re-reads the token and certificate before every connection, not
+  once after a failed proof as first built (see the `d1b0b7f` finding below).
+  It repins only if either changed on disk, and fails closed if it cannot read
+  them.
 - `status` prints `unverified listener (held by this account|another account);
   possible impersonation` when the holder is known, and `unverified listener,
   owner unknown` when it is not. A verified daemon answering `/health` with
