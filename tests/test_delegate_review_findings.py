@@ -149,8 +149,8 @@ class TestAnAmbiguousDaemonFailureIsNeverRetried:
 
         local = self._local()
         with (
-            patch("hive._delegate._read_state", return_value=(4242, "t")),
-            patch("hive._delegate._daemon_reachable", return_value=True),
+            patch("hive._delegate._read_state", return_value=(4242, "t", "pem")),
+            patch("hive._delegate._probe_daemon", return_value="verified"),
             patch("hive._delegate._remote_client", return_value=_DiesAfterSubmit()),
             patch("hive.server.create_server") as make,
         ):
@@ -177,8 +177,8 @@ class TestAnAmbiguousDaemonFailureIsNeverRetried:
 
         local = self._local()
         with (
-            patch("hive._delegate._read_state", return_value=(4242, "t")),
-            patch("hive._delegate._daemon_reachable", return_value=True),
+            patch("hive._delegate._read_state", return_value=(4242, "t", "pem")),
+            patch("hive._delegate._probe_daemon", return_value="verified"),
             patch("hive._delegate._remote_client", return_value=_DiesOnHandshake()),
             patch("hive.server.create_server") as make,
         ):

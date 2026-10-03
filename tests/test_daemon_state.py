@@ -19,6 +19,9 @@ def _patch_state_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(daemon, "token_file_path", lambda: tmp_path / "daemon.token")
     monkeypatch.setattr(daemon, "port_file_path", lambda: tmp_path / "daemon.port")
     monkeypatch.setattr(daemon, "lock_file_path", lambda: tmp_path / "daemon.lock")
+    monkeypatch.setattr(daemon, "identity_key_path", lambda: tmp_path / "daemon.key")
+    monkeypatch.setattr(daemon, "identity_cert_path", lambda: tmp_path / "daemon.crt")
+    monkeypatch.setattr(daemon, "identity_state_path", lambda: tmp_path / "identity.state")
 
 
 def test_load_or_create_token_reuses_existing_token(
@@ -27,10 +30,11 @@ def test_load_or_create_token_reuses_existing_token(
 ) -> None:
     import hive._credential as credential
     import hive._daemon as daemon
+    import hive._owner_only as owner_only
 
     _patch_state_paths(monkeypatch, tmp_path)
-    monkeypatch.setattr(daemon, "_enforce_owner_only", lambda path: None)
-    monkeypatch.setattr(daemon, "_verify_owner_only", lambda path: True)
+    monkeypatch.setattr(owner_only, "enforce_owner_only", lambda path: None)
+    monkeypatch.setattr(owner_only, "_verify_owner_only", lambda path: True)
     monkeypatch.setattr(credential, "_verify_owner_only", lambda path: True)
 
     first = daemon.load_or_create_token()
@@ -45,10 +49,11 @@ def test_token_publication_is_atomic_and_cleans_failed_candidate(
     tmp_path: Path,
 ) -> None:
     import hive._daemon as daemon
+    import hive._owner_only as owner_only
 
     _patch_state_paths(monkeypatch, tmp_path)
-    monkeypatch.setattr(daemon, "_enforce_owner_only", lambda path: None)
-    monkeypatch.setattr(daemon, "_verify_owner_only", lambda path: False)
+    monkeypatch.setattr(owner_only, "enforce_owner_only", lambda path: None)
+    monkeypatch.setattr(owner_only, "_verify_owner_only", lambda path: False)
 
     with pytest.raises(RuntimeError, match="owner-only"):
         daemon.load_or_create_token()
@@ -130,26 +135,29 @@ def test_run_serve_uses_stable_port_and_token_across_restarts(
 ) -> None:
     import hive._credential as credential
     import hive._daemon as daemon
+    import hive._owner_only as owner_only
 
     _patch_state_paths(monkeypatch, tmp_path)
     monkeypatch.setattr(daemon, "_startup_self_heal", lambda vault: None)
-    monkeypatch.setattr(daemon, "_enforce_owner_only", lambda path: None)
-    monkeypatch.setattr(daemon, "_verify_owner_only", lambda path: True)
+    monkeypatch.setattr(owner_only, "enforce_owner_only", lambda path: None)
+    monkeypatch.setattr(owner_only, "_verify_owner_only", lambda path: True)
     monkeypatch.setattr(credential, "_verify_owner_only", lambda path: True)
     monkeypatch.setattr(daemon, "configured_daemon_port", lambda: 54282)
     monkeypatch.setattr(daemon, "_port_available", lambda host, port: True)
-    served: list[tuple[int, str]] = []
+    served: list[tuple[int, str, str]] = []
     monkeypatch.setattr(
         daemon,
         "_serve_owned",
-        lambda host, port, token: served.append((port, token)) or False,
+        lambda host, port, token, identity: (
+            served.append((port, token, identity.fingerprint)) or False
+        ),
     )
 
     assert daemon.run_serve() == 0
     assert daemon.run_serve() == 0
 
-    assert [port for port, _token in served] == [54282, 54282]
-    assert served[0][1] == served[1][1]
+    assert [port for port, _token, _fp in served] == [54282, 54282]
+    assert served[0][1:] == served[1][1:]
     assert (tmp_path / "daemon.port").read_text(encoding="utf-8") == "54282"
 
 

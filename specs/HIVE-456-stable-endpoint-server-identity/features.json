@@ -1,0 +1,65 @@
+[
+  {
+    "id": "HIVE-456-stable-endpoint-server-identity-ac1",
+    "behavior": "AC1: Relay and delegate refuse plaintext and wrong-certificate impostors before sending any HTTP byte; impostor saw a ClientHello",
+    "verification": "uv run pytest tests/test_client.py tests/test_delegate_deadline_and_route.py tests/test_daemon.py -k 'impostor' -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-456-stable-endpoint-server-identity-ac2",
+    "behavior": "AC2: Cross-user impostor refused; port-conflict diagnostic names this account / another account / owner could not be determined",
+    "verification": "uv run pytest tests/test_cross_user.py tests/test_daemon_state.py -k 'cross_user or port_conflict_diagnostic' -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-456-stable-endpoint-server-identity-ac3",
+    "behavior": "AC3: Direct HTTPS client trusting only the per-user certificate refuses impostors and initializes against the daemon",
+    "verification": "uv run pytest tests/test_daemon.py -k 'direct_https' -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-456-stable-endpoint-server-identity-ac4",
+    "behavior": "AC4: Token that predates the identity key is rotated once on the first TLS start; captured plaintext-era token gets 401",
+    "verification": "uv run pytest tests/test_identity.py tests/test_daemon.py -k 'pre_tls_token or plaintext_era' -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-456-stable-endpoint-server-identity-ac5",
+    "behavior": "AC5: Ordinary restart keeps key, certificate, fingerprint and token; relay stays sub-second and imports no cryptography",
+    "verification": "uv run pytest tests/test_identity.py tests/test_client.py tests/test_daemon_state.py -k 'reuses_existing or does_not_import or within_one_second or across_restarts' -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-456-stable-endpoint-server-identity-ac6",
+    "behavior": "AC6: Identity material atomic and owner-only; expiry regenerates; over-permissive, missing or corrupt fails closed until rotate-identity; relay re-pins",
+    "verification": "uv run pytest tests/test_identity.py tests/test_service.py tests/test_client.py -k 'identity or rotate or repins' -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-456-stable-endpoint-server-identity-ac7",
+    "behavior": "AC7: hive service status reports healthy / unverified listener / down / owner unknown, non-zero for all but healthy",
+    "verification": "uv run pytest tests/test_service.py -k 'four_states' -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-456-stable-endpoint-server-identity-ac8",
+    "behavior": "AC8: Stable port refuses plaintext HTTP and TLS 1.2; /mcp, /status, /health share the TLS listener",
+    "verification": "uv run pytest tests/test_daemon.py -k 'tls13_only' -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-456-stable-endpoint-server-identity-ac9",
+    "behavior": "AC9: No token or private key material in stdout, stderr, logs, diagnostics or exceptions",
+    "verification": "uv run pytest tests/test_credential_never_emitted.py -q",
+    "state": "pending",
+    "evidence": ""
+  }
+]

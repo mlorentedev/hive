@@ -97,18 +97,23 @@ directory. `daemon.port` remains diagnostic migration metadata, not client
 discovery state. See [ADR-022](docs/adr/adr-022-stable-local-mcp-endpoint.md).
 
 **Security hold:** Until [#456](https://github.com/mlorentedev/hive/issues/456)
-is resolved, do not deploy daemon mode on untrusted multi-user hosts. A local
-process impersonating the fixed listener during downtime can capture the
-persistent bearer through either the stdio adapter or a direct HTTP client.
+is resolved, do not deploy daemon mode on untrusted multi-user hosts. The
+endpoint serves TLS with a per-user certificate that Hive's clients pin, so an
+impostor on the fixed port fails the handshake before any bearer is sent; the
+hold stays until the Linux and Windows evidence, including the cross-user
+check, is recorded.
 
 ```bash
 uv tool install --upgrade hive-vault   # >= 1.32.0
 hive service install                   # supervise hive serve (systemd --user / Task Scheduler)
 ```
 
-HTTP-capable clients should connect directly to
-`http://127.0.0.1:<derived-or-overridden-port>/mcp`; stdio-only clients should
-run `hive client`. Never print or copy the token into logs or shell history.
+Run `hive client` from your MCP host. A host that can verify the daemon's
+certificate may connect directly to
+`https://127.0.0.1:<derived-or-overridden-port>/mcp` (for Node-based hosts,
+`NODE_EXTRA_CA_CERTS` pointing at `daemon.crt` in the state directory); never
+disable verification, and note that `http://` no longer works. Never print or
+copy the token into logs or shell history.
 
 To install a newer release, use the platform-specific command:
 

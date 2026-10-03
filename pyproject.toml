@@ -33,6 +33,11 @@ dependencies = [
     # auditing it and editing that test too (#434).
     # 4.0.9 audited 2026-09-24: full suite green.
     "fastmcp>=4,<5",
+    # Daemon TLS identity (ADR-022 A1, #456). Already present transitively;
+    # declared because hive imports it directly. 42 adds the
+    # timezone-aware not_valid_*_utc accessors the identity code uses.
+    # The stdio relay never imports it (HIVE-437 AC3 import budget).
+    "cryptography>=42",
     "filelock>=3.13",
     "httpx>=0.27.0",
     # 2.x on purpose (#434). On 1.x a response produced after its request
