@@ -418,10 +418,14 @@ client.
 - A handshake failure aborts the request. The error names a possible
   impersonation, so it is distinct from "daemon unavailable", and contains no
   credential.
-- The relay reads the pin from the owner-only store at startup and may re-read
-  it once after a verification failure. That covers a rotation that happened
-  while it was running. Re-reading the store does not trust the server: the
-  store is the owner's own file.
+- The relay re-reads the pin from the owner-only store before every
+  connection, and fails closed if it cannot read it. That covers a rotation
+  that happened while it was running. Re-reading the store does not trust the
+  server: the store is the owner's own file. *Revised 2026-10-03 (`d1b0b7f`, 2026-10-01):*
+  this bullet first said "once after a verification failure". The adversarial
+  review on #456 showed that a relay started before `rotate-identity` would
+  then keep trusting the rotated-away key until a proof failed, and an
+  attacker holding that key never makes one fail.
 - Before the first request, the relay still does nothing heavier than what is
   needed for initialize, so the sub-second requirement still applies with the
   TLS handshake included.

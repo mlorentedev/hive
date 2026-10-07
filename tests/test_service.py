@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 # ── pure renderers (host-OS independent) ─────────────────────────────────
@@ -470,3 +470,293 @@ def test_resolve_exec_ignores_a_layout_whose_launcher_is_missing(
     monkeypatch.setattr(svc.shutil, "which", lambda _: None)
 
     assert "-m hive.server" in svc._resolve_exec()
+
+
+# ── rotate-identity (HIVE-456 AC6) ────────────────────────────────────────
+
+
+def _initialized_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[str, str]:
+    """A state dir after a first TLS start; returns (token, fingerprint)."""
+    from hive._daemon import prepare_daemon_credentials
+
+    monkeypatch.setenv("HIVE_DB_PATH", str(tmp_path / "hive.db"))
+    token, identity = prepare_daemon_credentials()
+    return token, identity.fingerprint
+
+
+def test_rotate_identity_rotates_key_cert_and_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from hive import server
+    from hive._endpoint import identity_key_path, identity_state_path, token_file_path
+
+    old_token, old_fingerprint = _initialized_state(monkeypatch, tmp_path)
+    old_key = identity_key_path().read_bytes()
+
+    assert server._run_service(["rotate-identity"]) == 0
+
+    from hive._daemon import prepare_daemon_credentials
+
+    new_token, identity = prepare_daemon_credentials()
+    assert new_token != old_token
+    assert token_file_path().read_text(encoding="ascii") == new_token
+    assert identity.fingerprint != old_fingerprint
+    assert identity_key_path().read_bytes() != old_key
+    assert identity_state_path().exists()
+    out = capsys.readouterr()
+    emitted = out.out + out.err
+    assert identity.fingerprint in emitted
+    assert new_token not in emitted
+    assert old_token not in emitted
+    assert "PRIVATE KEY" not in emitted
+
+
+def test_rotate_identity_repairs_an_over_permissive_key(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import os
+
+    from hive import server
+    from hive._daemon import prepare_daemon_credentials
+    from hive._endpoint import identity_key_path
+    from hive._identity import IdentityError
+
+    _initialized_state(monkeypatch, tmp_path)
+    if os.name == "nt":
+        import subprocess
+
+        subprocess.run(
+            ["icacls", str(identity_key_path()), "/grant", "*S-1-1-0:(R)"],
+            check=True,
+            capture_output=True,
+        )
+    else:
+        identity_key_path().chmod(0o644)
+    try:
+        prepare_daemon_credentials()
+    except IdentityError:
+        pass
+    else:
+        raise AssertionError("positive control: the damaged key must be refused first")
+
+    assert server._run_service(["rotate-identity"]) == 0
+    prepare_daemon_credentials()
+
+
+def test_rotate_identity_refuses_while_the_daemon_runs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import filelock
+
+    from hive import server
+    from hive._endpoint import identity_cert_path, lock_file_path, token_file_path
+
+    _initialized_state(monkeypatch, tmp_path)
+    cert, token = identity_cert_path().read_bytes(), token_file_path().read_bytes()
+
+    running = filelock.FileLock(str(lock_file_path()))
+    running.acquire(timeout=0)
+    try:
+        assert server._run_service(["rotate-identity"]) != 0
+    finally:
+        running.release()
+
+    assert identity_cert_path().read_bytes() == cert
+    assert token_file_path().read_bytes() == token
+    assert "stop the daemon" in capsys.readouterr().err
+
+
+# ── status probes the stable port over pinned TLS (HIVE-456 AC7) ──────────
+
+
+def _healthy_daemon(identity_dir: Path) -> tuple[object, int]:
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from hive._identity import load_identity
+    from tests.impostor import server_context
+
+    class Health(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            body = b'{"status":"ok"}' if self.path == "/health" else b""
+            self.send_response(200 if self.path == "/health" else 404)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format_string: str, *args: object) -> None:
+            return
+
+    identity = load_identity(identity_dir / "daemon.key", identity_dir / "daemon.crt")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Health)
+    server.socket = server_context(identity).wrap_socket(server.socket, server_side=True)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, int(server.server_address[1])
+
+
+def _free_port() -> int:
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+@pytest.mark.parametrize("scenario", ["healthy", "impostor", "down", "owner_unknown"])
+def test_status_reports_four_states(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    scenario: str,
+) -> None:
+    import sys
+
+    from hive import _endpoint, _service
+    from hive._identity import create_identity
+    from tests.impostor import Impostor
+
+    _initialized_state(monkeypatch, tmp_path)
+    supervisor: list[list[str]] = []
+    monkeypatch.setattr(_service, "_run_passthrough", lambda cmd: supervisor.append(cmd) or 3)
+
+    server = impostor = None
+    if scenario == "healthy":
+        server, port = _healthy_daemon(tmp_path)
+    elif scenario == "down":
+        port = _free_port()
+    else:
+        other = tmp_path / "other"
+        other.mkdir()
+        impostor = Impostor(create_identity(other / "daemon.key", other / "daemon.crt"))
+        port = impostor.port
+        if scenario == "owner_unknown":
+
+            def denied(port: int) -> str:
+                raise PermissionError("access denied")
+
+            monkeypatch.setattr(_endpoint, "_listener_identity", denied)
+    monkeypatch.setenv("HIVE_DAEMON_PORT", str(port))
+
+    try:
+        rc = _service.service_status()
+    finally:
+        if server is not None:
+            server.shutdown()  # type: ignore[attr-defined]
+            server.server_close()  # type: ignore[attr-defined]
+        if impostor is not None:
+            impostor.wait()
+
+    out = capsys.readouterr().out
+    state = out.strip().splitlines()[-1]
+    expected = {
+        "healthy": "healthy",
+        "impostor": "unverified listener",
+        "down": "down",
+        "owner_unknown": "unverified listener, owner unknown",
+    }[scenario]
+    assert state.startswith(f"hive daemon: {expected}"), out
+    assert (rc == 0) == (scenario == "healthy"), "the exit code comes from the probe"
+    if scenario == "impostor":
+        assert "owner unknown" not in state
+        if sys.platform.startswith("linux"):
+            assert "this account" in state, "the /proc lookup names the holder's account class"
+    if impostor is not None:
+        assert impostor.accepted.is_set()
+        assert impostor.raw[:1] == b"\x16"
+        assert impostor.decrypted == bytearray()
+    if sys.platform.startswith("linux") or sys.platform == "win32":
+        assert supervisor, "the supervisor view is still shown where one exists"
+
+
+def test_status_names_an_expired_daemon_certificate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import datetime as dt
+
+    from hive import _service
+    from hive._endpoint import identity_cert_path, identity_key_path
+    from hive._identity import create_identity
+    from tests.impostor import Impostor
+
+    _initialized_state(monkeypatch, tmp_path)
+    long_ago = dt.datetime.now(dt.UTC) - dt.timedelta(days=500)
+    expired = create_identity(identity_key_path(), identity_cert_path(), now=long_ago)
+    listener = Impostor(expired)
+    monkeypatch.setenv("HIVE_DAEMON_PORT", str(listener.port))
+    monkeypatch.setattr(_service, "_run_passthrough", lambda cmd: 0)
+
+    rc = _service.service_status()
+    listener.wait()
+
+    assert rc != 0
+    assert "hive daemon: down (the daemon's certificate expired" in capsys.readouterr().out
+
+
+def test_status_reports_a_malformed_port_override_without_a_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from hive import _service
+
+    monkeypatch.setenv("HIVE_DAEMON_PORT", "not-a-port")
+    monkeypatch.setattr(_service, "_run_passthrough", lambda cmd: 0)
+
+    assert _service.service_status() != 0
+    assert "HIVE_DAEMON_PORT" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("reset", [True, False], ids=["reset", "stall"])
+def test_status_reports_a_listener_that_never_proves_itself(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    reset: bool,
+) -> None:
+    from hive import _service
+    from tests.impostor import SilentListener
+
+    _initialized_state(monkeypatch, tmp_path)
+    listener = SilentListener(reset=reset)
+    monkeypatch.setenv("HIVE_DAEMON_PORT", str(listener.port))
+    monkeypatch.setattr(_service, "_run_passthrough", lambda cmd: 0)
+
+    rc = _service.service_status()
+    listener.wait()
+
+    assert listener.accepted.is_set()
+    assert rc != 0
+    assert "hive daemon: unverified listener" in capsys.readouterr().out
+
+
+def test_rotate_identity_interrupted_after_the_token_still_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The token rotates first, so a crash mid-rotation never leaves it behind."""
+    import hive._identity as identity_module
+    from hive import server
+    from hive._daemon import prepare_daemon_credentials
+    from hive._endpoint import identity_key_path, token_file_path
+    from hive._identity import IdentityError
+    from tests.impostor import make_over_permissive
+
+    old_token, _ = _initialized_state(monkeypatch, tmp_path)
+    make_over_permissive(identity_key_path())
+
+    def crash(*args: object, **kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(identity_module, "create_identity", crash)
+    with pytest.raises(OSError, match="disk full"):
+        server._run_service(["rotate-identity"])
+
+    assert token_file_path().read_text(encoding="ascii") != old_token
+    with pytest.raises(IdentityError):
+        prepare_daemon_credentials()

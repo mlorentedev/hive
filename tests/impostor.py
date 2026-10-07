@@ -13,6 +13,8 @@ import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from hive._identity import Identity
 
 TLS_HANDSHAKE_RECORD = b"\x16"
@@ -87,3 +89,56 @@ class Impostor:
         assert b"POST" not in captured
         assert token.encode() not in captured
         assert self.decrypted == b""
+
+
+class SilentListener:
+    """Accepts the TCP connection, then resets or stalls instead of speaking TLS."""
+
+    def __init__(self, *, reset: bool) -> None:
+        self.listener = socket.create_server(("127.0.0.1", 0))
+        self.port = int(self.listener.getsockname()[1])
+        self.accepted = threading.Event()
+        self._reset = reset
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        import struct
+
+        self.listener.settimeout(10)
+        try:
+            conn, _ = self.listener.accept()
+        except OSError:
+            return
+        self.accepted.set()
+        if self._reset:
+            # SO_LINGER 0 makes close() send an RST.
+            conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            conn.close()
+            return
+        conn.settimeout(5)
+        try:
+            conn.recv(65536)
+            conn.recv(65536)
+        except OSError:
+            pass
+        conn.close()
+
+    def wait(self) -> None:
+        self._thread.join(timeout=10)
+        self.listener.close()
+
+
+def make_over_permissive(path: Path) -> None:
+    """Let every local account read *path* (POSIX mode or a Windows ACE)."""
+    import os
+    import subprocess
+
+    if os.name == "nt":
+        subprocess.run(
+            ["icacls", str(path), "/grant", "*S-1-1-0:(R)"],
+            check=True,
+            capture_output=True,
+        )
+    else:
+        path.chmod(0o644)

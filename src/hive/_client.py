@@ -8,7 +8,7 @@ import json
 import math
 import ssl
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hive._credential import _read_token
 from hive._endpoint import (
@@ -18,7 +18,16 @@ from hive._endpoint import (
     identity_cert_path,
     token_file_path,
 )
-from hive._tls import fingerprint_matches, load_pinned_certificate, pem_fingerprint, pinned_context
+from hive._tls import (
+    fingerprint_matches,
+    load_pinned_certificate,
+    pem_fingerprint,
+    pinned_context,
+    presented_expired_pin,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _CONNECT_TIMEOUT_S = 0.75
 _READ_TIMEOUT_S = 70.0
@@ -89,6 +98,10 @@ def _sse_frames(response: http.client.HTTPResponse) -> list[dict[str, Any]]:
     return frames
 
 
+class _UnverifiedListenerError(Exception):
+    """The listener did not prove the pinned identity."""
+
+
 class HttpRelay:
     """Translate stdio JSON-RPC messages into Streamable HTTP requests.
 
@@ -97,12 +110,19 @@ class HttpRelay:
     fingerprint, before the bearer or any message is written (ADR-022 A1).
     """
 
-    def __init__(self, host: str, port: int, token: str, cert_pem: str) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        token: str,
+        cert_pem: str,
+        *,
+        reload: Callable[[], tuple[str, str]] | None = None,
+    ) -> None:
         self._host = host
         self._port = port
-        self._token = token
-        self._context = pinned_context(cert_pem)
-        self._fingerprint = pem_fingerprint(cert_pem)
+        self._reload = reload
+        self._pin(token, cert_pem)
         self._session_id = ""
         self._protocol_version = ""
         self._bootstrap_message: dict[str, Any] | None = None
@@ -135,7 +155,39 @@ class HttpRelay:
             "not prove the owner's identity (possible impersonation); nothing was sent",
         )
 
+    def _pin(self, token: str, cert_pem: str) -> None:
+        self._token = token
+        self._context = pinned_context(cert_pem)
+        self._fingerprint = pem_fingerprint(cert_pem)
+
+    def _refresh_pin(self) -> None:
+        """Re-read the owner's token and certificate before every connection.
+
+        ``hive service rotate-identity`` replaces both while a relay may still
+        be running. Checking only after a failed proof would keep trusting a
+        rotated-away key, which is exactly the key an attacker may hold. A pin
+        that can no longer be read fails closed rather than falling back to
+        the one in memory.
+        """
+        if self._reload is None:
+            return
+        try:
+            token, cert_pem = self._reload()
+        except (OSError, RuntimeError, ValueError):
+            raise ClientError(
+                "could not re-read the Hive daemon certificate or token; nothing was sent",
+            ) from None
+        if pem_fingerprint(cert_pem) != self._fingerprint or token != self._token:
+            self._pin(token, cert_pem)
+
     def _connect(self) -> http.client.HTTPSConnection:
+        self._refresh_pin()
+        try:
+            return self._handshake()
+        except _UnverifiedListenerError:
+            raise self._impersonation() from None
+
+    def _handshake(self) -> http.client.HTTPSConnection:
         connection = http.client.HTTPSConnection(
             self._host,
             self._port,
@@ -146,14 +198,20 @@ class HttpRelay:
             connection.connect()
         except ssl.SSLError as exc:
             connection.close()
-            raise self._impersonation() from exc
+            if presented_expired_pin(exc):
+                raise ClientError(
+                    f"the Hive daemon at {self._endpoint()} presented an expired "
+                    "certificate; restart the daemon to regenerate it, then check "
+                    "`hive service status`; nothing was sent",
+                ) from exc
+            raise _UnverifiedListenerError from exc
         except OSError as exc:
             connection.close()
             raise ClientError(f"Hive daemon unavailable at {self._endpoint()}") from exc
         sock = connection.sock
         if not isinstance(sock, ssl.SSLSocket) or not fingerprint_matches(sock, self._fingerprint):
             connection.close()
-            raise self._impersonation()
+            raise _UnverifiedListenerError
         return connection
 
     def _open(
@@ -271,16 +329,20 @@ def _error_frame(message: dict[str, Any], error: ClientError) -> dict[str, Any]:
     }
 
 
+def _owner_credentials() -> tuple[str, str]:
+    """The owner's bearer and pinned certificate, read from the state dir."""
+    return _read_token(token_file_path()), load_pinned_certificate(identity_cert_path())
+
+
 def run_client(host: str = DEFAULT_HOST) -> int:
     """Relay stdio to the stable daemon, failing explicitly when unavailable."""
     try:
         port = configured_daemon_port()
-        token = _read_token(token_file_path())
-        cert_pem = load_pinned_certificate(identity_cert_path())
+        token, cert_pem = _owner_credentials()
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"hive client: {exc}", file=sys.stderr)
         return 1
-    relay = HttpRelay(host, port, token, cert_pem)
+    relay = HttpRelay(host, port, token, cert_pem, reload=_owner_credentials)
     try:
         for raw in sys.stdin.buffer:
             try:

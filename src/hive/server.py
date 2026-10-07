@@ -737,7 +737,7 @@ def _run_client(argv: list[str]) -> int:
 
 
 def _run_service(argv: list[str]) -> int:
-    """``hive service {install,uninstall,status}`` — manage the per-user daemon
+    """``hive service {install,uninstall,status,rotate-identity}`` — manage the per-user daemon
     service (systemd ``--user`` on Linux, Task Scheduler on Windows). Returns a
     process exit code for the caller (e.g. a dotfiles installer)."""
     import argparse
@@ -754,7 +754,15 @@ def _run_service(argv: list[str]) -> int:
     )
     sub.add_parser("uninstall", help="stop + remove the service")
     sub.add_parser("status", help="show the supervisor's view of the daemon")
+    sub.add_parser(
+        "rotate-identity",
+        help="replace the daemon's TLS key, certificate and token (daemon stopped)",
+    )
     opts = parser.parse_args(argv)
+    if opts.action == "rotate-identity":
+        from hive._daemon import rotate_identity
+
+        return rotate_identity()
     if opts.action == "install":
         return install_service(enable=not opts.no_enable)
     if opts.action == "uninstall":
@@ -818,7 +826,8 @@ Commands:
   client                               relay stdio to the daemon; never starts a fallback owner
   delegate --model M --timeout S       run one task against one model; JSON on stdout
                                        (exit 1 task failed, 3 pool unavailable, 4 timeout)
-  service {install,uninstall,status}   manage the daemon as a per-user OS service
+  service {install,uninstall,status,rotate-identity}
+                                       manage the daemon as a per-user OS service
   self-upgrade [version]               build + swap to a hive-vault version (PyPI latest if omitted)
 
 Options:
@@ -879,7 +888,7 @@ def main() -> None:
     ``hive serve`` runs the Phase C single-owner daemon over loopback HTTP +
     bearer token (ADR-011). ``hive client`` relays stdio to that daemon
     without fallback.
-    ``hive service {install,uninstall,status}`` manages the daemon
+    ``hive service {install,uninstall,status,rotate-identity}`` manages the daemon
     as a per-user OS service. ``hive --version`` / ``--help`` print and exit;
     an unknown token is a usage error (exit 2). ``create_server()`` is called
     here rather than at module import so importing ``hive.server`` is
