@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -525,7 +525,7 @@ wheels = [
 
 [[package]]
 name = "hive-vault"
-version = "4.2.2"
+version = "4.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },

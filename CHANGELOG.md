@@ -1,5 +1,28 @@
 # Changelog
 
+## [4.3.0](https://github.com/mlorentedev/hive/compare/v4.2.2...v4.3.0) (2026-10-07)
+
+
+### Features
+
+* add identity rotation, a proven status probe and the cross-user check ([#464](https://github.com/mlorentedev/hive/issues/464)) ([88e15f9](https://github.com/mlorentedev/hive/commit/88e15f9b173ea97cca83024adbd7965271881237))
+* prove the daemon's identity over pinned TLS before sending the bearer ([#463](https://github.com/mlorentedev/hive/issues/463)) ([d3b8f36](https://github.com/mlorentedev/hive/commit/d3b8f36aa999720a352f80adf420ff10e51bb630))
+* stabilize local MCP endpoint and thin client ([#453](https://github.com/mlorentedev/hive/issues/453)) ([46e72cb](https://github.com/mlorentedev/hive/commit/46e72cbaa63065a373cdc2bb0b6bd015f132e950))
+
+
+### Bug Fixes
+
+* **ci:** move PR-Agent off the retired mimo-v2.5 model ([#472](https://github.com/mlorentedev/hive/issues/472)) ([8326c33](https://github.com/mlorentedev/hive/commit/8326c336f126aa4704c136ba44d10b64a978b098))
+* **site:** retain SVG favicon alongside PNG fallback ([#452](https://github.com/mlorentedev/hive/issues/452)) ([89c1c38](https://github.com/mlorentedev/hive/commit/89c1c38c0cd4a7d306deeec42cfcd94dcfcafde5))
+* **site:** show favicon in browser tabs ([#451](https://github.com/mlorentedev/hive/issues/451)) ([e88e2a5](https://github.com/mlorentedev/hive/commit/e88e2a532721916d3bb3a09f877802003c471ddf))
+
+
+### Documentation
+
+* **adr:** define stable local MCP endpoint ([#448](https://github.com/mlorentedev/hive/issues/448)) ([96dd114](https://github.com/mlorentedev/hive/commit/96dd114b146d907b5bfce2de9d8957078483f221))
+* **adr:** require server identity before secrets on the stable endpoint ([#460](https://github.com/mlorentedev/hive/issues/460)) ([4eb25dd](https://github.com/mlorentedev/hive/commit/4eb25dd663a80a60ab020b255a184eaa3594ced5))
+* **adr:** scope positive controls and per-platform direct HTTP claims ([#461](https://github.com/mlorentedev/hive/issues/461)) ([c2de19e](https://github.com/mlorentedev/hive/commit/c2de19e3144c2dc17422209695a6828b57235bdd))
+
 ## [4.2.2](https://github.com/mlorentedev/hive/compare/v4.2.1...v4.2.2) (2026-09-25)
 
 
