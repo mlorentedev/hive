@@ -280,3 +280,32 @@ def test_proc_lookup_ignores_a_listener_on_another_address(
 
     tcp.write_text(header + row.format(addr="00000000", uid=1002), encoding="ascii")
     assert endpoint._proc_listener_identity(54474) == "posix:1002"
+
+
+def test_windows_lookup_ignores_a_listener_on_another_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Windows lookup applies the same loopback-only rule as /proc."""
+    from types import SimpleNamespace
+
+    import psutil
+
+    import hive._endpoint as endpoint
+
+    def listener(ip: str, pid: int) -> SimpleNamespace:
+        return SimpleNamespace(
+            status=psutil.CONN_LISTEN, laddr=SimpleNamespace(ip=ip, port=54474), pid=pid
+        )
+
+    sids = {1001: "S-1-5-21-1-2-3-1001", 1000: "S-1-5-21-1-2-3-1000"}
+    monkeypatch.setattr(endpoint, "_windows_process_sid", lambda pid: sids[pid])
+    # 10.11.12.13:54474 held by another account does not hold the loopback port.
+    monkeypatch.setattr(psutil, "net_connections", lambda kind: [listener("10.11.12.13", 1001)])
+    assert endpoint._windows_listener_identity(54474) is None
+
+    monkeypatch.setattr(
+        psutil,
+        "net_connections",
+        lambda kind: [listener("10.11.12.13", 1001), listener("127.0.0.1", 1000)],
+    )
+    assert endpoint._windows_listener_identity(54474) == "windows:S-1-5-21-1-2-3-1000"

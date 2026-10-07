@@ -34,6 +34,8 @@ _LOOPBACK_HOLDERS = frozenset(
         "0000000000000000FFFF00000100007F",
     }
 )
+# The same holders in the dotted form psutil reports on Windows.
+_LOOPBACK_HOLDER_IPS = frozenset({"127.0.0.1", "0.0.0.0", "::", "::1", "::ffff:127.0.0.1"})
 _TOKEN_USER_CLASS = 1
 
 
@@ -206,7 +208,12 @@ def _windows_listener_identity(port: int) -> str | None:
     except psutil.Error as exc:
         raise OSError("could not list TCP listeners") from exc
     for conn in connections:
-        if conn.status == psutil.CONN_LISTEN and conn.laddr and conn.laddr.port == port:
+        if (
+            conn.status == psutil.CONN_LISTEN
+            and conn.laddr
+            and conn.laddr.port == port
+            and conn.laddr.ip in _LOOPBACK_HOLDER_IPS
+        ):
             if not conn.pid:
                 return None
             return canonical_identity(platform="win32", sid=_windows_process_sid(conn.pid))
