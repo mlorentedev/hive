@@ -34,10 +34,14 @@ def enforce_owner_only(path: Path) -> None:
     """Apply owner-only permissions, raising when the OS cannot enforce them."""
     if os.name == "nt":
         sid = current_user_identity().split(":", 1)[1]
-        result = _run_icacls(path, "/inheritance:r", "/grant:r", f"*{sid}:(F)")
-        if result is None or result.returncode != 0:
-            detail = "" if result is None else result.stderr.strip()
-            raise RuntimeError(f"could not enforce owner-only daemon credential ACL: {detail}")
+        # An elevated token creates files owned by BUILTIN\Administrators, and
+        # the DACL rewrite alone leaves that owner in place (#484). Take
+        # ownership first, while the inherited ACEs still allow it.
+        for args in (("/setowner", f"*{sid}"), ("/inheritance:r", "/grant:r", f"*{sid}:(F)")):
+            result = _run_icacls(path, *args)
+            if result is None or result.returncode != 0:
+                detail = "" if result is None else result.stderr.strip()
+                raise RuntimeError(f"could not enforce owner-only daemon credential ACL: {detail}")
         return
     path.chmod(0o600)
 
