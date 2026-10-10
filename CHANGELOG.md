@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.3.1](https://github.com/mlorentedev/hive/compare/v4.3.0...v4.3.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* **service:** start the daemon when installing it on Windows ([#480](https://github.com/mlorentedev/hive/issues/480)) ([4c0257f](https://github.com/mlorentedev/hive/commit/4c0257f5622810cbe309e6f30cb2415d78af706d))
+
 ## [4.3.0](https://github.com/mlorentedev/hive/compare/v4.2.2...v4.3.0) (2026-10-07)
 
 
