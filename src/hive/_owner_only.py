@@ -15,7 +15,7 @@ import tempfile
 from ctypes import wintypes
 from pathlib import Path
 
-from hive._credential import _verify_owner_only
+from hive._credential import _verify_owner_only, _windows_security_api
 from hive._endpoint import _last_windows_error, current_user_identity
 
 # SetNamedSecurityInfoW: SE_FILE_OBJECT, and the owner plus a protected DACL.
@@ -26,13 +26,38 @@ _PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000
 _SDDL_REVISION_1 = 1
 
 
-def _windows_set_owner_only(path: Path, sid: str) -> None:
-    """Replace the owner and the whole DACL with one ACE for *sid*.
+def _owned_by(path: Path, sid: ctypes.c_void_p) -> bool:
+    """Whether *path*'s owner is *sid*; ``False`` when the owner cannot be read."""
+    advapi, kernel = _windows_security_api()
+    owner, descriptor = ctypes.c_void_p(), ctypes.c_void_p()
+    try:
+        status = advapi.GetNamedSecurityInfoW(
+            str(path),
+            _SE_FILE_OBJECT,
+            _OWNER_SECURITY_INFORMATION,
+            ctypes.byref(owner),
+            None,
+            None,
+            None,
+            ctypes.byref(descriptor),
+        )
+        return status == 0 and bool(owner.value) and bool(advapi.EqualSid(owner, sid))
+    finally:
+        if descriptor.value:
+            kernel.LocalFree(descriptor)
 
-    One call sets the full descriptor, the ``chmod 0o600`` of Windows. Editing the
+
+def _windows_set_owner_only(path: Path, sid: str) -> None:
+    """Replace the whole DACL with one ACE for *sid*, and take ownership if needed.
+
+    One call sets the descriptor, the ``chmod 0o600`` of Windows. Editing the
     existing DACL with icacls left two gaps (#484): an elevated token creates
     files owned by BUILTIN\\Administrators, and ``/inheritance:r`` drops only
     inherited ACEs, so the explicit ones a 0o700 directory hands its files survived.
+
+    The owner is written only when it is not already *sid*. A standard user's
+    files are already theirs, and an owner can always rewrite its own DACL, so
+    the non-admin path needs no right beyond that.
     """
     win_dll = getattr(ctypes, "WinDLL")  # noqa: B009
     advapi: ctypes.CDLL = win_dll("advapi32", use_last_error=True)
@@ -84,13 +109,14 @@ def _windows_set_owner_only(path: Path, sid: str) -> None:
             descriptor, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted)
         ):
             raise _last_windows_error()
+        info = _DACL_SECURITY_INFORMATION | _PROTECTED_DACL_SECURITY_INFORMATION
+        if not _owned_by(path, owner):
+            info |= _OWNER_SECURITY_INFORMATION
         status = advapi.SetNamedSecurityInfoW(
             str(path),
             _SE_FILE_OBJECT,
-            _OWNER_SECURITY_INFORMATION
-            | _DACL_SECURITY_INFORMATION
-            | _PROTECTED_DACL_SECURITY_INFORMATION,
-            owner,
+            info,
+            owner if info & _OWNER_SECURITY_INFORMATION else None,
             None,
             dacl,
             None,
