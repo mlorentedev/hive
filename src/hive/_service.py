@@ -26,6 +26,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -281,11 +282,16 @@ def startup_vbs_path() -> Path:
 # ── supervisor invocation (mocked in tests; real on the CI matrix) ───────
 
 
-def _run(cmd: list[str]) -> int:
+def _run(cmd: list[str], *, timeout: float | None = None) -> int:
     """Run *cmd*, capturing output. Broad ``except`` per the cross-OS rule — a
     missing supervisor binary raises ``FileNotFoundError``, not a clean error."""
     try:
-        proc = subprocess.run(cmd, check=False, capture_output=True, text=True)  # noqa: S603
+        proc = subprocess.run(  # noqa: S603
+            cmd, check=False, capture_output=True, text=True, timeout=timeout
+        )
+    except subprocess.TimeoutExpired:
+        print(f"hive: {cmd[0]} did not finish within {timeout:g}s", file=sys.stderr)
+        return 1
     except Exception as exc:  # noqa: BLE001 — missing binary / OS quirks
         _log.warning("hive.service command failed: %s (%r)", cmd, exc)
         print(f"hive: command not available: {cmd[0]}", file=sys.stderr)
@@ -355,9 +361,18 @@ def _install_systemd(*, enable: bool) -> int:
         return 0
     rc = _systemctl("daemon-reload")
     rc = _systemctl("enable", "--now", "hive.service") or rc
-    if rc == 0:
-        print("hive: service enabled and started (systemctl --user)")
-    return rc
+    if rc != 0:
+        return rc
+    state = _await_daemon()
+    if state != "healthy":
+        print(
+            f"hive: service enabled, but the daemon is {state}; "
+            "see `systemctl --user status hive.service`.",
+            file=sys.stderr,
+        )
+        return 1
+    print("hive: service enabled and started (systemctl --user)")
+    return 0
 
 
 def _install_windows(*, enable: bool) -> int:
@@ -375,11 +390,15 @@ def _install_windows(*, enable: bool) -> int:
     if rc == 0:
         # Parity with systemd's `enable --now`: the LogonTrigger alone leaves the
         # daemon down until the next logon, so every `hive client` fails until
-        # then. IgnoreNew makes /Run a no-op while the daemon already runs.
-        if _run(["schtasks", "/Run", "/TN", WINDOWS_TASK_NAME]) != 0:
+        # then. The verdict is the daemon answering, not /Run's exit code: a
+        # daemon that already runs is a success whatever /Run reports.
+        ran = _run(["schtasks", "/Run", "/TN", WINDOWS_TASK_NAME], timeout=_PROBE_TIMEOUT_S)
+        state = _await_daemon(_START_DEADLINE_S if ran == 0 else 0.0)
+        if state != "healthy":
             print(
-                f"hive: registered scheduled task {WINDOWS_TASK_NAME} but could not "
-                f"start it; run `schtasks /Run /TN {WINDOWS_TASK_NAME}`.",
+                f"hive: registered scheduled task {WINDOWS_TASK_NAME}, but the daemon "
+                f"is {state}; run `schtasks /Run /TN {WINDOWS_TASK_NAME}`, then "
+                "`hive service status`.",
                 file=sys.stderr,
             )
             return 1
@@ -411,10 +430,12 @@ def _install_windows_startup_fallback() -> int:
     # Start it now through the same launcher logon will run, so this session
     # and the next one run one definition; the daemon's singleton lock keeps a
     # second start from becoming a second owner.
-    if _spawn_detached(["wscript.exe", str(path)]) != 0:
+    spawned = _spawn_detached(["wscript.exe", str(path)]) == 0
+    state = _await_daemon() if spawned else "not started"
+    if state != "healthy":
         print(
-            f"hive: installed a per-user Startup launcher at {path}, but could not "
-            f"start it; the daemon starts at your next logon, or run `{exe} serve`.",
+            f"hive: installed a per-user Startup launcher at {path}, but the daemon "
+            f"is {state}; the launcher runs again at your next logon, or run `{exe} serve`.",
             file=sys.stderr,
         )
         return 1
@@ -435,6 +456,26 @@ def _spawn_detached(cmd: list[str]) -> int:
         _log.warning("hive.service could not start %s (%r)", cmd, exc)
         return 1
     return 0
+
+
+# Bounds the wait for a daemon install has just started: a cold Python start,
+# the vault index and TLS identity load, with room for a slow first logon.
+_START_DEADLINE_S = 30.0
+_START_POLL_S = 0.5
+
+
+def _await_daemon(deadline_s: float = _START_DEADLINE_S) -> str:
+    """Probe until the daemon answers or *deadline_s* passes; return the last state.
+
+    Install promises a daemon that answers, not a supervisor that was asked to
+    start one, so every OS's install ends here. A zero deadline probes once.
+    """
+    end = time.monotonic() + deadline_s
+    while True:
+        state = daemon_state()
+        if state == "healthy" or time.monotonic() >= end:
+            return state
+        time.sleep(_START_POLL_S)
 
 
 def install_service(*, enable: bool = True) -> int:
