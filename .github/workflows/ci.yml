@@ -91,11 +91,9 @@ jobs:
         run: uv sync --locked --extra dev --python 3.12
 
       - name: Test owner-only credentials and identity
-        run: uv run pytest tests/test_daemon_state.py tests/test_identity.py -v
-
-      - name: ACL diagnostics (temporary, #484)
-        if: failure()
-        run: uv run python .github/scripts/acl-diag.py
+        run: >-
+          uv run pytest -v tests/test_daemon_state.py tests/test_identity.py tests/test_tls.py
+          tests/test_client.py tests/test_service.py tests/test_credential_never_emitted.py
 
   cross_user_identity:
     # HIVE-456 AC2: a listener run by another local account must not pass as
