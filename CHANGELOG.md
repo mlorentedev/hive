@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.3.2](https://github.com/mlorentedev/hive/compare/v4.3.1...v4.3.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* **credential:** own Windows daemon secrets when running elevated ([#485](https://github.com/mlorentedev/hive/issues/485)) ([7eb80a0](https://github.com/mlorentedev/hive/commit/7eb80a05a1f1e3b2ebf4752358f97115fc9aaf65))
+
 ## [4.3.1](https://github.com/mlorentedev/hive/compare/v4.3.0...v4.3.1) (2026-10-10)
 
 
