@@ -93,6 +93,10 @@ jobs:
       - name: Test owner-only credentials and identity
         run: uv run pytest tests/test_daemon_state.py tests/test_identity.py -v
 
+      - name: ACL diagnostics (temporary, #484)
+        if: failure()
+        run: uv run python .github/scripts/acl-diag.py
+
   cross_user_identity:
     # HIVE-456 AC2: a listener run by another local account must not pass as
     # the daemon. The Windows run is manual (verify-server-identity-windows.md).
