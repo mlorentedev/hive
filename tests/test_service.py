@@ -114,6 +114,7 @@ def test_install_writes_systemd_unit_and_enables(
     monkeypatch.setattr(svc, "systemd_unit_path", lambda: unit_path)
     monkeypatch.setattr(svc, "_resolve_exec", lambda: "/usr/bin/hive")
     monkeypatch.setattr(svc, "_systemctl", lambda *a: calls.append(list(a)) or 0)
+    monkeypatch.setattr(svc, "_await_daemon", lambda deadline_s=30.0: "healthy")
 
     rc = svc.install_service(enable=True)
 
@@ -122,6 +123,27 @@ def test_install_writes_systemd_unit_and_enables(
     assert "Restart=on-failure" in unit_path.read_text(encoding="utf-8")
     assert ["daemon-reload"] in calls
     assert any("enable" in c for c in calls)
+
+
+def test_install_systemd_whose_daemon_never_answers_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`enable --now` succeeding says systemd started a process, not that the
+    daemon answers; install promises the latter (#479)."""
+    import hive._service as svc
+
+    monkeypatch.setattr(svc, "_platform", lambda: "linux")
+    monkeypatch.setattr(svc, "systemd_unit_path", lambda: tmp_path / "hive.service")
+    monkeypatch.setattr(svc, "_resolve_exec", lambda: "/usr/bin/hive")
+    monkeypatch.setattr(svc, "_systemctl", lambda *a: 0)
+    monkeypatch.setattr(svc, "_await_daemon", lambda deadline_s=30.0: "down")
+
+    rc = svc.install_service(enable=True)
+
+    assert rc != 0
+    assert "the daemon is down" in capsys.readouterr().err
 
 
 def test_install_no_enable_writes_unit_but_skips_systemctl(
@@ -159,12 +181,59 @@ def test_install_windows_registers_scheduled_task(
         return 0
 
     monkeypatch.setattr(svc, "_schtasks_create", _fake_schtasks)
+    runs: list[list[str]] = []
+    monkeypatch.setattr(svc, "_run", lambda cmd, **_: runs.append(cmd) or 0)
+    monkeypatch.setattr(svc, "_await_daemon", lambda deadline_s=30.0: "healthy")
     rc = svc.install_service(enable=True)
 
     assert rc == 0
     assert "<LogonTrigger>" in str(recorded["xml"])
     assert "<LogonType>S4U</LogonType>" in str(recorded["xml"])
     assert "while($true)" in str(recorded["xml"])
+    # A second /Run while the daemon runs must not start a second instance.
+    assert "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>" in str(recorded["xml"])
+    # Parity with systemd's `enable --now`: the daemon runs before the next logon.
+    assert runs == [["schtasks", "/Run", "/TN", svc.WINDOWS_TASK_NAME]]
+
+
+def test_install_windows_that_cannot_start_the_task_is_not_silent(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A registered task that does not start leaves every `hive client` failing
+    until the next logon, so install says so and returns non-zero."""
+    import hive._service as svc
+
+    monkeypatch.setattr(svc, "_platform", lambda: "windows")
+    monkeypatch.setattr(svc, "_resolve_exec", lambda: r"C:\hive.exe")
+    monkeypatch.setattr(svc, "_schtasks_create", lambda *a, **k: 0)
+    monkeypatch.setattr(svc, "_run", lambda cmd, **_: 1)
+    waits: list[float] = []
+    monkeypatch.setattr(
+        svc, "_await_daemon", lambda deadline_s=30.0: waits.append(deadline_s) or "down"
+    )
+
+    rc = svc.install_service(enable=True)
+
+    assert rc != 0
+    assert "schtasks /Run" in capsys.readouterr().err
+    assert waits == [0.0]  # nothing was started, so one probe, not the full wait
+
+
+def test_install_windows_with_the_daemon_already_running_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-installing while the task runs: whatever /Run reports for a running
+    instance, the daemon answers, and that is the verdict."""
+    import hive._service as svc
+
+    monkeypatch.setattr(svc, "_platform", lambda: "windows")
+    monkeypatch.setattr(svc, "_resolve_exec", lambda: r"C:\hive.exe")
+    monkeypatch.setattr(svc, "_schtasks_create", lambda *a, **k: 0)
+    monkeypatch.setattr(svc, "_run", lambda cmd, **_: 1)
+    monkeypatch.setattr(svc, "_await_daemon", lambda deadline_s=30.0: "healthy")
+
+    assert svc.install_service(enable=True) == 0
 
 
 def test_install_windows_falls_back_to_startup_when_schtasks_blocked(
@@ -180,12 +249,98 @@ def test_install_windows_falls_back_to_startup_when_schtasks_blocked(
     monkeypatch.setattr(svc, "_resolve_exec", lambda: r"C:\hive.exe")
     monkeypatch.setattr(svc, "_schtasks_create", lambda *a, **k: 1)  # policy-locked
     monkeypatch.setattr(svc, "startup_vbs_path", lambda: vbs_path)
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(svc, "_spawn_detached", lambda cmd: spawned.append(cmd) or 0)
+    monkeypatch.setattr(svc, "_await_daemon", lambda deadline_s=30.0: "healthy")
 
     rc = svc.install_service(enable=True)
 
     assert rc == 0
     assert vbs_path.exists()
     assert "serve" in vbs_path.read_text(encoding="utf-8")
+    # Started now through the launcher logon will run, not left for the next logon.
+    assert spawned == [["wscript.exe", str(vbs_path)]]
+
+
+def test_install_windows_fallback_that_cannot_start_is_not_silent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import hive._service as svc
+
+    vbs_path = tmp_path / "Startup" / "hive-serve.vbs"
+    monkeypatch.setattr(svc, "_platform", lambda: "windows")
+    monkeypatch.setattr(svc, "_resolve_exec", lambda: r"C:\hive.exe")
+    monkeypatch.setattr(svc, "_schtasks_create", lambda *a, **k: 1)
+    monkeypatch.setattr(svc, "startup_vbs_path", lambda: vbs_path)
+    monkeypatch.setattr(svc, "_spawn_detached", lambda cmd: 1)
+
+    rc = svc.install_service(enable=True)
+
+    assert rc != 0
+    assert vbs_path.exists()
+    assert "the daemon is not started" in capsys.readouterr().err
+
+
+def test_install_windows_fallback_whose_daemon_never_answers_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The launcher starting is not the daemon answering: a .vbs that runs and
+    then fails (stale path, script error) must not read as a success."""
+    import hive._service as svc
+
+    vbs_path = tmp_path / "Startup" / "hive-serve.vbs"
+    monkeypatch.setattr(svc, "_platform", lambda: "windows")
+    monkeypatch.setattr(svc, "_resolve_exec", lambda: r"C:\hive.exe")
+    monkeypatch.setattr(svc, "_schtasks_create", lambda *a, **k: 1)
+    monkeypatch.setattr(svc, "startup_vbs_path", lambda: vbs_path)
+    monkeypatch.setattr(svc, "_spawn_detached", lambda cmd: 0)
+    monkeypatch.setattr(svc, "_await_daemon", lambda deadline_s=30.0: "down")
+
+    rc = svc.install_service(enable=True)
+
+    assert rc != 0
+    assert "the daemon is down" in capsys.readouterr().err
+
+
+def test_await_daemon_polls_until_the_daemon_answers(monkeypatch: pytest.MonkeyPatch) -> None:
+    import hive._service as svc
+
+    states = iter(["down", "down", "healthy"])
+    monkeypatch.setattr(svc, "daemon_state", lambda: next(states))
+    monkeypatch.setattr(svc.time, "sleep", lambda _s: None)
+
+    assert svc._await_daemon(30.0) == "healthy"
+
+
+def test_await_daemon_with_no_deadline_probes_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    import hive._service as svc
+
+    probes: list[str] = []
+    monkeypatch.setattr(svc, "daemon_state", lambda: probes.append("p") or "down")
+
+    assert svc._await_daemon(0.0) == "down"
+    assert probes == ["p"]
+
+
+def test_run_that_times_out_fails_and_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import subprocess
+
+    import hive._service as svc
+
+    def _hang(cmd: list[str], **kwargs: object) -> object:
+        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])  # type: ignore[arg-type]
+
+    monkeypatch.setattr(svc.subprocess, "run", _hang)
+
+    assert svc._run(["schtasks", "/Run"], timeout=10.0) == 1
+    assert "did not finish within 10s" in capsys.readouterr().err
 
 
 def test_install_windows_fallback_failure_is_not_silent(

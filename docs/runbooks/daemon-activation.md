@@ -80,7 +80,13 @@ the token.
   (`Restart=on-failure`, `WantedBy=default.target`), then
   `systemctl --user daemon-reload && enable --now`.
 - **Windows** registers the `HiveVaultDaemon` Scheduled Task
-  (`LogonTrigger` + `RestartOnFailure`).
+  (`LogonTrigger` + `RestartOnFailure`) and starts it with `schtasks /Run`.
+  Where Task Scheduler is locked, it writes a Startup-folder launcher and runs
+  it.
+
+On every OS, install then waits up to 30 s for the same pinned `/health` probe
+and exits 1 with the daemon's state if it never reports `healthy`. A zero exit
+means the daemon answers, not only that a supervisor was asked to start it.
 
 Use `hive service install --no-enable` to write the unit/task without starting
 it (staged setup).
