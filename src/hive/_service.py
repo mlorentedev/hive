@@ -373,7 +373,17 @@ def _install_windows(*, enable: bool) -> int:
         return 0
     rc = _schtasks_create(WINDOWS_TASK_NAME, xml=xml)
     if rc == 0:
-        print(f"hive: registered scheduled task {WINDOWS_TASK_NAME}")
+        # Parity with systemd's `enable --now`: the LogonTrigger alone leaves the
+        # daemon down until the next logon, so every `hive client` fails until
+        # then. IgnoreNew makes /Run a no-op while the daemon already runs.
+        if _run(["schtasks", "/Run", "/TN", WINDOWS_TASK_NAME]) != 0:
+            print(
+                f"hive: registered scheduled task {WINDOWS_TASK_NAME} but could not "
+                f"start it; run `schtasks /Run /TN {WINDOWS_TASK_NAME}`.",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"hive: registered and started scheduled task {WINDOWS_TASK_NAME}")
         return 0
     # Task Scheduler can be policy-locked for a non-admin/domain user; fall back
     # to a per-user Startup launcher that needs no admin (#252).
@@ -398,11 +408,32 @@ def _install_windows_startup_fallback() -> int:
             file=sys.stderr,
         )
         return 1
+    # Start it now through the same launcher logon will run, so this session
+    # and the next one run one definition; the daemon's singleton lock keeps a
+    # second start from becoming a second owner.
+    if _spawn_detached(["wscript.exe", str(path)]) != 0:
+        print(
+            f"hive: installed a per-user Startup launcher at {path}, but could not "
+            f"start it; the daemon starts at your next logon, or run `{exe} serve`.",
+            file=sys.stderr,
+        )
+        return 1
     print(
-        f"hive: Task Scheduler unavailable — installed a per-user Startup launcher "
-        f"at {path}. The daemon starts at your next logon; run `{exe} serve` now to "
-        f"start it this session.",
+        f"hive: Task Scheduler unavailable — installed and started a per-user "
+        f"Startup launcher at {path}.",
     )
+    return 0
+
+
+def _spawn_detached(cmd: list[str]) -> int:
+    """Start *cmd* without waiting for it. Broad ``except`` per the cross-OS rule."""
+    try:
+        subprocess.Popen(  # noqa: S603
+            cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+    except Exception as exc:  # noqa: BLE001 — missing binary / OS quirks
+        _log.warning("hive.service could not start %s (%r)", cmd, exc)
+        return 1
     return 0
 
 

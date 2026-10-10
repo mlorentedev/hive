@@ -159,12 +159,35 @@ def test_install_windows_registers_scheduled_task(
         return 0
 
     monkeypatch.setattr(svc, "_schtasks_create", _fake_schtasks)
+    runs: list[list[str]] = []
+    monkeypatch.setattr(svc, "_run", lambda cmd: runs.append(cmd) or 0)
     rc = svc.install_service(enable=True)
 
     assert rc == 0
     assert "<LogonTrigger>" in str(recorded["xml"])
     assert "<LogonType>S4U</LogonType>" in str(recorded["xml"])
     assert "while($true)" in str(recorded["xml"])
+    # Parity with systemd's `enable --now`: the daemon runs before the next logon.
+    assert runs == [["schtasks", "/Run", "/TN", svc.WINDOWS_TASK_NAME]]
+
+
+def test_install_windows_that_cannot_start_the_task_is_not_silent(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A registered task that does not start leaves every `hive client` failing
+    until the next logon, so install says so and returns non-zero."""
+    import hive._service as svc
+
+    monkeypatch.setattr(svc, "_platform", lambda: "windows")
+    monkeypatch.setattr(svc, "_resolve_exec", lambda: r"C:\hive.exe")
+    monkeypatch.setattr(svc, "_schtasks_create", lambda *a, **k: 0)
+    monkeypatch.setattr(svc, "_run", lambda cmd: 1)
+
+    rc = svc.install_service(enable=True)
+
+    assert rc != 0
+    assert "schtasks /Run" in capsys.readouterr().err
 
 
 def test_install_windows_falls_back_to_startup_when_schtasks_blocked(
@@ -180,12 +203,37 @@ def test_install_windows_falls_back_to_startup_when_schtasks_blocked(
     monkeypatch.setattr(svc, "_resolve_exec", lambda: r"C:\hive.exe")
     monkeypatch.setattr(svc, "_schtasks_create", lambda *a, **k: 1)  # policy-locked
     monkeypatch.setattr(svc, "startup_vbs_path", lambda: vbs_path)
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(svc, "_spawn_detached", lambda cmd: spawned.append(cmd) or 0)
 
     rc = svc.install_service(enable=True)
 
     assert rc == 0
     assert vbs_path.exists()
     assert "serve" in vbs_path.read_text(encoding="utf-8")
+    # Started now through the launcher logon will run, not left for the next logon.
+    assert spawned == [["wscript.exe", str(vbs_path)]]
+
+
+def test_install_windows_fallback_that_cannot_start_is_not_silent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import hive._service as svc
+
+    vbs_path = tmp_path / "Startup" / "hive-serve.vbs"
+    monkeypatch.setattr(svc, "_platform", lambda: "windows")
+    monkeypatch.setattr(svc, "_resolve_exec", lambda: r"C:\hive.exe")
+    monkeypatch.setattr(svc, "_schtasks_create", lambda *a, **k: 1)
+    monkeypatch.setattr(svc, "startup_vbs_path", lambda: vbs_path)
+    monkeypatch.setattr(svc, "_spawn_detached", lambda cmd: 1)
+
+    rc = svc.install_service(enable=True)
+
+    assert rc != 0
+    assert vbs_path.exists()
+    assert "could not start" in capsys.readouterr().err
 
 
 def test_install_windows_fallback_failure_is_not_silent(
