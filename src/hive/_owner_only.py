@@ -9,35 +9,133 @@ a reader never observes a partial or over-permissive file.
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import os
-import subprocess
 import tempfile
+from ctypes import wintypes
 from pathlib import Path
 
-from hive._credential import _verify_owner_only
-from hive._endpoint import current_user_identity
+from hive._credential import _verify_owner_only, _windows_security_api
+from hive._endpoint import _last_windows_error, current_user_identity
+
+# SetNamedSecurityInfoW: SE_FILE_OBJECT, and the owner plus a protected DACL.
+_SE_FILE_OBJECT = 1
+_OWNER_SECURITY_INFORMATION = 0x1
+_DACL_SECURITY_INFORMATION = 0x4
+_PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000
+_SDDL_REVISION_1 = 1
 
 
-def _run_icacls(path: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
+def _owned_by(path: Path, sid: ctypes.c_void_p) -> bool:
+    """Whether *path*'s owner is *sid*; ``False`` when the owner cannot be read."""
+    advapi, kernel = _windows_security_api()
+    owner, descriptor = ctypes.c_void_p(), ctypes.c_void_p()
     try:
-        return subprocess.run(  # noqa: S603,S607
-            ["icacls", str(path), *args],
-            check=False,
-            capture_output=True,
-            text=True,
+        status = advapi.GetNamedSecurityInfoW(
+            str(path),
+            _SE_FILE_OBJECT,
+            _OWNER_SECURITY_INFORMATION,
+            ctypes.byref(owner),
+            None,
+            None,
+            None,
+            ctypes.byref(descriptor),
         )
-    except Exception:  # noqa: BLE001 — permission enforcement must fail closed
-        return None
+        return status == 0 and bool(owner.value) and bool(advapi.EqualSid(owner, sid))
+    finally:
+        if descriptor.value:
+            kernel.LocalFree(descriptor)
+
+
+def _windows_set_owner_only(path: Path, sid: str) -> None:
+    """Replace the whole DACL with one ACE for *sid*, and take ownership if needed.
+
+    One call sets the descriptor, the ``chmod 0o600`` of Windows. Editing the
+    existing DACL with icacls left two gaps (#484): an elevated token creates
+    files owned by BUILTIN\\Administrators, and ``/inheritance:r`` drops only
+    inherited ACEs, so the explicit ones a 0o700 directory hands its files survived.
+
+    The owner is written only when it is not already *sid*. A standard user's
+    files are already theirs, and an owner can always rewrite its own DACL, so
+    the non-admin path needs no right beyond that.
+    """
+    win_dll = getattr(ctypes, "WinDLL")  # noqa: B009
+    advapi: ctypes.CDLL = win_dll("advapi32", use_last_error=True)
+    kernel: ctypes.CDLL = win_dll("kernel32", use_last_error=True)
+    pointer = ctypes.POINTER(ctypes.c_void_p)
+    bool_pointer = ctypes.POINTER(wintypes.BOOL)
+    advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        pointer,
+        ctypes.c_void_p,
+    ]
+    advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = wintypes.BOOL
+    advapi.GetSecurityDescriptorOwner.argtypes = [ctypes.c_void_p, pointer, bool_pointer]
+    advapi.GetSecurityDescriptorOwner.restype = wintypes.BOOL
+    advapi.GetSecurityDescriptorDacl.argtypes = [
+        ctypes.c_void_p,
+        bool_pointer,
+        pointer,
+        bool_pointer,
+    ]
+    advapi.GetSecurityDescriptorDacl.restype = wintypes.BOOL
+    advapi.SetNamedSecurityInfoW.argtypes = [
+        wintypes.LPCWSTR,
+        ctypes.c_int,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+    ]
+    advapi.SetNamedSecurityInfoW.restype = wintypes.DWORD
+    kernel.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel.LocalFree.restype = ctypes.c_void_p
+
+    descriptor = ctypes.c_void_p()
+    if not advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        f"O:{sid}D:P(A;;FA;;;{sid})", _SDDL_REVISION_1, ctypes.byref(descriptor), None
+    ):
+        raise _last_windows_error()
+    try:
+        owner, dacl = ctypes.c_void_p(), ctypes.c_void_p()
+        present, defaulted = wintypes.BOOL(), wintypes.BOOL()
+        if not advapi.GetSecurityDescriptorOwner(
+            descriptor, ctypes.byref(owner), ctypes.byref(defaulted)
+        ):
+            raise _last_windows_error()
+        if not advapi.GetSecurityDescriptorDacl(
+            descriptor, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted)
+        ):
+            raise _last_windows_error()
+        info = _DACL_SECURITY_INFORMATION | _PROTECTED_DACL_SECURITY_INFORMATION
+        if not _owned_by(path, owner):
+            info |= _OWNER_SECURITY_INFORMATION
+        status = advapi.SetNamedSecurityInfoW(
+            str(path),
+            _SE_FILE_OBJECT,
+            info,
+            owner if info & _OWNER_SECURITY_INFORMATION else None,
+            None,
+            dacl,
+            None,
+        )
+        if status != 0:
+            raise OSError(status, "SetNamedSecurityInfoW failed")
+    finally:
+        kernel.LocalFree(descriptor)
 
 
 def enforce_owner_only(path: Path) -> None:
     """Apply owner-only permissions, raising when the OS cannot enforce them."""
     if os.name == "nt":
         sid = current_user_identity().split(":", 1)[1]
-        result = _run_icacls(path, "/inheritance:r", "/grant:r", f"*{sid}:(F)")
-        if result is None or result.returncode != 0:
-            detail = "" if result is None else result.stderr.strip()
-            raise RuntimeError(f"could not enforce owner-only daemon credential ACL: {detail}")
+        try:
+            _windows_set_owner_only(path, sid)
+        except OSError as exc:  # permission enforcement must fail closed
+            msg = f"could not enforce owner-only daemon credential ACL: {exc}"
+            raise RuntimeError(msg) from exc
         return
     path.chmod(0o600)
 

@@ -112,6 +112,25 @@ def test_windows_credential_verification_avoids_subprocesses(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ACL verification")
+def test_windows_enforce_on_a_file_already_owned_rewrites_only_the_dacl(tmp_path: Path) -> None:
+    """The second pass finds the user already owning the file, which is the
+    standard-user path (#484): it must still leave exactly one ACE, without
+    asking for the right to change the owner."""
+    import hive._credential as credential
+    from hive._daemon import _enforce_owner_only
+
+    path = tmp_path / "synthetic.token"
+    path.write_text("a" * 43, encoding="utf-8")
+    _enforce_owner_only(path)
+    subprocess.run(["icacls", str(path), "/grant", "*S-1-1-0:(R)"], check=True, capture_output=True)
+    assert not credential._verify_owner_only(path)
+
+    _enforce_owner_only(path)
+
+    assert credential._verify_owner_only(path)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL verification")
 def test_windows_credential_verification_rejects_an_extra_principal(tmp_path: Path) -> None:
     import hive._credential as credential
     from hive._daemon import _enforce_owner_only
