@@ -52,3 +52,29 @@ Before archiving, flag what (if anything) should be promoted to the vault.
 - [ ] Folder moved: `specs/HIVE-118-phase-c-daemon-model/` -> `specs/archive/HIVE-118-phase-c-daemon-model/`
 - [ ] Backlog entry in vault `11-tasks.md` ticked with PR link
 - [ ] Promotions above executed (ADR-011 at minimum)
+
+- 2026-10-13 (macOS launchd backend, #488, `feat/launchd-service`): unit tests
+  `test_render_launchd_plist_*` (restart contract, argv kept as elements,
+  secrets sourced not baked: the wrapper is executed with a synthetic env file),
+  `test_install_launchd_*` (load, idempotent re-run, reload of a changed
+  definition, console-session failure, unanswered daemon, `--no-enable`),
+  `test_uninstall_launchd_*`, `test_status_launchd_*`. macOS is not in the CI
+  matrix, so the real leg ran on the owner's Mac (macOS 27.0.1, build 26A434;
+  hive 4.3.0 as the resolved launcher): first install loaded the agent and the
+  daemon answered `healthy`, `daemon.token` was created; a second install kept
+  the same pid; `kill -9` of the daemon was restarted by launchd within the
+  throttle interval and answered `healthy` again. The reload path (plist
+  edited, then install) first FAILED on the real Mac: `bootout` returns before
+  launchd finishes, and the immediate `bootstrap` got `5: Input/output error`,
+  leaving the daemon down. Fixed by waiting (bounded) for `launchctl print` to
+  report the job gone before `bootstrap`
+  (`test_install_launchd_that_never_unloads_does_not_bootstrap`); re-run on the
+  Mac: rc 0, new pid, plist restored, `healthy`, and a further install kept that
+  pid. Full suite on the Mac, run once
+  before the reload fix: 1065 passed, 5 skipped, 57 deselected, with
+  `test_status_reports_four_states[impostor]` among the deselected (it fails
+  on macOS for the pre-existing #478, unrelated to this change). After the
+  reload and review fixes, `tests/test_service.py` was re-run on its own with
+  the same test deselected. Uninstall on the Mac: rc 0, `launchctl print`
+  rc 113 (job gone), plist removed; a second uninstall rc 0; reinstall rc 0,
+  `healthy`.

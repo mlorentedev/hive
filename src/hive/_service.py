@@ -7,13 +7,17 @@ self-contained and cross-OS:
   login (``WantedBy=default.target``).
 * **Windows** — a Task Scheduler task with a ``LogonTrigger`` + ``RestartOnFailure``
   (the per-user analogue of ``systemd --user``).
-* **macOS** — a documented stub (launchd); a follow-up, not in the CI matrix.
+* **macOS** — a launchd agent in ``~/Library/LaunchAgents`` with ``RunAtLoad``
+  and ``KeepAlive {SuccessfulExit: false}``, loaded into the ``gui/<uid>``
+  domain. macOS is not in the CI matrix; the renderer and the ``launchctl``
+  sequence are unit-tested, and the real agent was verified on a Mac.
 
 The supervisor's restart policy is the consumer of the slice 1.3 exit-code
 contract: a drift-triggered stop exits 75 and a crash exits non-zero → the
 supervisor restarts into the new code; a clean stop / singleton-decline exits 0
-→ no restart. Both ``Restart=on-failure`` and Task Scheduler ``RestartOnFailure``
-express exactly "restart only when the last run failed".
+→ no restart. ``Restart=on-failure``, the Windows supervisor loop and launchd's
+``KeepAlive {SuccessfulExit: false}`` all express exactly "restart only when the
+last run failed".
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import plistlib
 import shutil
 import socket
 import subprocess
@@ -37,6 +42,12 @@ _log = logging.getLogger(__name__)
 
 SYSTEMD_UNIT_FILENAME = "hive.service"
 WINDOWS_TASK_NAME = "HiveVaultDaemon"
+LAUNCHD_LABEL = "io.github.mlorentedev.hive"
+
+# launchd's floor between two starts of a job that keeps exiting. A drift exit
+# (75) is the common restart and should be quick; the default is 10s as well,
+# set explicitly so the restart contract is read here, not recalled.
+_LAUNCHD_THROTTLE_S = 10
 
 # Bounded so a wedged launcher cannot hang `hive service install`; a healthy
 # `--version` returns in milliseconds.
@@ -64,6 +75,18 @@ def _config_root() -> Path:
 
 def systemd_unit_path() -> Path:
     return _config_root() / "systemd" / "user" / SYSTEMD_UNIT_FILENAME
+
+
+def launchd_plist_path() -> Path:
+    """launchd loads per-user agents from this directory only, so it is not
+    under ``_config_root()`` like the systemd unit."""
+    return Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
+
+
+def launchd_log_path() -> Path:
+    """Where launchd sends the daemon's stdout and stderr; without it a crash
+    traceback goes nowhere."""
+    return Path.home() / "Library" / "Logs" / "hive" / "serve.log"
 
 
 def _current_layout_exec() -> str | None:
@@ -106,8 +129,8 @@ def _executes(command: str) -> bool:
     return proc.returncode == 0
 
 
-def _resolve_exec() -> str:
-    """Absolute command the supervisor runs (the unit/task appends ``serve``).
+def _resolve_argv() -> list[str]:
+    """Argument vector the supervisor runs (the unit/task/agent appends ``serve``).
 
     Resolution order, most-owned first:
 
@@ -115,14 +138,23 @@ def _resolve_exec() -> str:
     2. a ``hive`` on PATH, but only once verified to start;
     3. ``<python> -m hive.server``, which works because this interpreter has
        hive importable by construction.
+
+    A vector, not a string: launchd's ``ProgramArguments`` is never split by a
+    shell, so the module fallback joined into one element is a daemon that
+    never starts, and an interpreter path with a space cannot survive a split.
     """
     layout = _current_layout_exec()
     if layout:
-        return layout
+        return [layout]
     found = shutil.which("hive")
     if found and _executes(found):
-        return found
-    return f"{sys.executable} -m hive.server"
+        return [found]
+    return [sys.executable, "-m", "hive.server"]
+
+
+def _resolve_exec() -> str:
+    """``_resolve_argv`` as the command line systemd and Task Scheduler take."""
+    return " ".join(_resolve_argv())
 
 
 def _current_windows_user() -> str:
@@ -162,6 +194,43 @@ def render_systemd_unit(exec_start: str, *, vault: str) -> str:
         "[Install]\n"
         "WantedBy=default.target\n"
     )
+
+
+# Sources the optional env file, then execs the daemon, so the process launchd
+# supervises is hive itself. `$0` is the env file and `$@` the daemon's argv.
+_LAUNCHD_ENV_WRAPPER = 'set -a; if [ -r "$0" ]; then . "$0"; fi; set +a; exec "$@"'
+
+
+def render_launchd_plist(argv: list[str], *, vault: str, log: str) -> bytes:
+    """A launchd agent for ``hive serve``, the macOS analogue of the systemd unit.
+
+    * ``RunAtLoad`` + ``KeepAlive {SuccessfulExit: false}`` is launchd's spelling
+      of ``Restart=on-failure``: a drift (75) or a crash restarts the daemon, a
+      clean stop or a singleton-decline (0) leaves it down.
+    * ``VAULT_PATH`` is baked because launchd starts agents with a minimal
+      environment. Secrets are not: the same optional, owner-only
+      ``hive.env`` the systemd unit reads is sourced at start, so nothing
+      sensitive is written to a plist in ``~/Library/LaunchAgents``.
+    """
+    env_file = _config_root() / "hive" / "hive.env"
+    plist = {
+        "Label": LAUNCHD_LABEL,
+        "ProgramArguments": [
+            "/bin/sh",
+            "-c",
+            _LAUNCHD_ENV_WRAPPER,
+            str(env_file),
+            *argv,
+            "serve",
+        ],
+        "EnvironmentVariables": {"VAULT_PATH": vault},
+        "RunAtLoad": True,
+        "KeepAlive": {"SuccessfulExit": False},
+        "ThrottleInterval": _LAUNCHD_THROTTLE_S,
+        "StandardOutPath": log,
+        "StandardErrorPath": log,
+    }
+    return plistlib.dumps(plist)
 
 
 _WINDOWS_TASK_TEMPLATE = (
@@ -282,9 +351,12 @@ def startup_vbs_path() -> Path:
 # ── supervisor invocation (mocked in tests; real on the CI matrix) ───────
 
 
-def _run(cmd: list[str], *, timeout: float | None = None) -> int:
+def _run(cmd: list[str], *, timeout: float | None = None, quiet: bool = False) -> int:
     """Run *cmd*, capturing output. Broad ``except`` per the cross-OS rule — a
-    missing supervisor binary raises ``FileNotFoundError``, not a clean error."""
+    missing supervisor binary raises ``FileNotFoundError``, not a clean error.
+
+    *quiet* keeps a failure's stderr to the log, for a probe whose non-zero
+    exit is an answer ("not loaded"), not an error to show the user."""
     try:
         proc = subprocess.run(  # noqa: S603
             cmd, check=False, capture_output=True, text=True, timeout=timeout
@@ -302,7 +374,7 @@ def _run(cmd: list[str], *, timeout: float | None = None) -> int:
         # Logging is unconfigured in the normal CLI path, so the warning above
         # is invisible — surface the child's stderr so the user sees WHY it
         # failed instead of a bare non-zero exit (#252).
-        if stderr:
+        if stderr and not quiet:
             print(stderr, file=sys.stderr)
     return proc.returncode
 
@@ -320,6 +392,35 @@ def _systemctl(*args: str) -> int:
     return _run(["systemctl", "--user", *args])
 
 
+def _launchd_domain() -> str:
+    """The per-user GUI domain: it exists only while that user is logged in at
+    the console, the condition under which an agent should run."""
+    return f"gui/{os.getuid()}"
+
+
+def _launchctl(*args: str, quiet: bool = False) -> int:
+    return _run(["launchctl", *args], quiet=quiet)
+
+
+# Bounds the wait for launchd to finish tearing down a job after `bootout`.
+_UNLOAD_DEADLINE_S = 10.0
+
+
+def _await_unloaded(target: str, deadline_s: float = _UNLOAD_DEADLINE_S) -> bool:
+    """Wait until *target* is no longer loaded; True once it is gone.
+
+    ``launchctl bootout`` returns before launchd has finished removing the job,
+    and a ``bootstrap`` issued in that window fails with ``5: Input/output
+    error`` — measured on a real Mac, where it left the daemon down.
+    """
+    end = time.monotonic() + deadline_s
+    while _launchctl("print", target, quiet=True) == 0:
+        if time.monotonic() >= end:
+            return False
+        time.sleep(_START_POLL_S)
+    return True
+
+
 def _schtasks_create(task_name: str, *, xml: str) -> int:
     """Register *xml* as Scheduled Task *task_name* (UTF-16, as schtasks wants)."""
     fd, name = tempfile.mkstemp(suffix=".xml")
@@ -334,9 +435,9 @@ def _schtasks_create(task_name: str, *, xml: str) -> int:
 
 def _unsupported(action: str) -> int:
     print(
-        f"hive service {action}: automatic setup is not yet supported on "
-        f"{sys.platform}. On macOS, create a launchd agent (KeepAlive=true) "
-        f"running `{_resolve_exec()} serve`. Tracked as a follow-up.",
+        f"hive service {action}: no supervisor is supported on {sys.platform}. "
+        f"Run `{_resolve_exec()} serve` under your platform's service manager, "
+        "restarting it only when it exits non-zero.",
         file=sys.stderr,
     )
     return 1
@@ -446,6 +547,89 @@ def _install_windows_startup_fallback() -> int:
     return 0
 
 
+def _install_launchd(*, enable: bool) -> int:
+    path = launchd_plist_path()
+    log = launchd_log_path()
+    plist = render_launchd_plist(_resolve_argv(), vault=str(settings.vault_path), log=str(log))
+    previous = path.read_bytes() if path.exists() else None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    if previous != plist:
+        path.write_bytes(plist)
+        print(f"hive: wrote launchd agent {path}")
+    domain = _launchd_domain()
+    if not enable:
+        print(f"hive: run `launchctl bootstrap {domain} {path}` when ready")
+        return 0
+    target = f"{domain}/{LAUNCHD_LABEL}"
+    loaded = _launchctl("print", target, quiet=True) == 0
+    if loaded and previous != plist:
+        # launchd keeps the definition it loaded; a changed plist reaches it
+        # only through a reload. An unchanged one is left running, so a
+        # repeated install does not drop the daemon's live sessions.
+        _launchctl("bootout", target, quiet=True)
+        if not _await_unloaded(target, _UNLOAD_DEADLINE_S):
+            # Put the old definition back, so the re-run this message asks for
+            # sees the change again instead of kickstarting the old agent.
+            if previous is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_bytes(previous)
+            print(
+                f"hive: launchd did not unload {target} within "
+                f"{_UNLOAD_DEADLINE_S:g}s; re-run `hive service install`.",
+                file=sys.stderr,
+            )
+            return 1
+        loaded = False
+    if not loaded:
+        rc = _launchctl("bootstrap", domain, str(path))
+        if rc != 0:
+            print(
+                f"hive: launchctl could not load {path} into {domain} (rc {rc}). "
+                "The agent domain exists only for a user logged in at the Mac's "
+                "console, so an SSH-only session cannot load it; otherwise see "
+                f"`launchctl print {target}`.",
+                file=sys.stderr,
+            )
+            return rc
+    # Loaded but not running (it last exited 0, so KeepAlive left it down):
+    # kickstart without -k starts it, and leaves a running daemon alone.
+    _launchctl("kickstart", target, quiet=True)
+    state = _await_daemon()
+    if state != "healthy":
+        print(
+            f"hive: agent loaded, but the daemon is {state}; see "
+            f"`launchctl print {target}` and {log}.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"hive: service loaded and started (launchd {target})")
+    return 0
+
+
+def _uninstall_launchd() -> int:
+    target = f"{_launchd_domain()}/{LAUNCHD_LABEL}"
+    if _launchctl("print", target, quiet=True) == 0:
+        _launchctl("bootout", target, quiet=True)
+        if not _await_unloaded(target, _UNLOAD_DEADLINE_S):
+            print(
+                f"hive: launchd did not unload {target} within "
+                f"{_UNLOAD_DEADLINE_S:g}s; the agent is still loaded.",
+                file=sys.stderr,
+            )
+            return 1
+    path = launchd_plist_path()
+    if path.exists():
+        try:
+            path.unlink()
+        except OSError as exc:
+            _log.warning("hive.service could not remove %s: %s", path, exc)
+            return 1
+    print("hive: service removed")
+    return 0
+
+
 def _spawn_detached(cmd: list[str]) -> int:
     """Start *cmd* without waiting for it. Broad ``except`` per the cross-OS rule."""
     try:
@@ -485,6 +669,8 @@ def install_service(*, enable: bool = True) -> int:
         return _install_systemd(enable=enable)
     if plat == "windows":
         return _install_windows(enable=enable)
+    if plat == "darwin":
+        return _install_launchd(enable=enable)
     return _unsupported("install")
 
 
@@ -512,6 +698,8 @@ def uninstall_service() -> int:
             print("hive: service removed")
             return 0
         return rc
+    if plat == "darwin":
+        return _uninstall_launchd()
     return _unsupported("uninstall")
 
 
@@ -600,6 +788,8 @@ def service_status() -> int:
         _run_passthrough(["systemctl", "--user", "status", "hive.service"])
     elif plat == "windows":
         _run_passthrough(["schtasks", "/Query", "/TN", WINDOWS_TASK_NAME, "/V"])
+    elif plat == "darwin":
+        _run_passthrough(["launchctl", "print", f"{_launchd_domain()}/{LAUNCHD_LABEL}"])
     try:
         state = daemon_state()
     except (RuntimeError, ValueError) as exc:
