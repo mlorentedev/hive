@@ -70,5 +70,11 @@ Before archiving, flag what (if anything) should be promoted to the vault.
   report the job gone before `bootstrap`
   (`test_install_launchd_that_never_unloads_does_not_bootstrap`); re-run on the
   Mac: rc 0, new pid, plist restored, `healthy`, and a further install kept that
-  pid. Full suite: 1065 passed, 5 skipped; the one
-  macOS failure is the pre-existing #478.
+  pid. Full suite on the Mac, run once
+  before the reload fix: 1065 passed, 5 skipped, 57 deselected, with
+  `test_status_reports_four_states[impostor]` among the deselected (it fails
+  on macOS for the pre-existing #478, unrelated to this change). After the
+  reload and review fixes, `tests/test_service.py` was re-run on its own with
+  the same test deselected. Uninstall on the Mac: rc 0, `launchctl print`
+  rc 113 (job gone), plist removed; a second uninstall rc 0; reinstall rc 0,
+  `healthy`.

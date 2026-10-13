@@ -590,6 +590,8 @@ def test_install_launchd_that_never_unloads_does_not_bootstrap(
     assert svc.install_service(enable=True) == 1
     assert "bootstrap" not in _verbs(calls)
     assert "did not unload" in capsys.readouterr().err
+    # The old definition is back, so a re-run sees the change and reloads.
+    assert plist_path.read_bytes() == b"an older definition"
 
 
 def test_install_launchd_outside_a_console_session_says_why(
@@ -646,6 +648,38 @@ def test_uninstall_launchd_unloads_and_removes_the_agent(
     assert svc.uninstall_service() == 0
     assert not plist_path.exists()
     assert ["bootout", f"gui/501/{svc.LAUNCHD_LABEL}"] in calls
+
+
+def test_uninstall_launchd_that_never_unloads_keeps_the_agent_and_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import hive._service as svc
+
+    plist_path = tmp_path / f"{svc.LAUNCHD_LABEL}.plist"
+    plist_path.write_bytes(b"x")
+    monkeypatch.setattr(svc, "_platform", lambda: "darwin")
+    monkeypatch.setattr(svc, "launchd_plist_path", lambda: plist_path)
+    monkeypatch.setattr(svc, "_launchd_domain", lambda: "gui/501")
+    monkeypatch.setattr(svc, "_launchctl", lambda *a, quiet=False: 0)
+    monkeypatch.setattr(svc, "_UNLOAD_DEADLINE_S", 0.0)
+
+    assert svc.uninstall_service() == 1
+    assert plist_path.exists()
+    assert "still loaded" in capsys.readouterr().err
+
+
+def test_uninstall_launchd_when_nothing_is_loaded_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import hive._service as svc
+
+    calls, _ = _darwin(monkeypatch, tmp_path, loaded=False)
+
+    assert svc.uninstall_service() == 0
+    assert "bootout" not in _verbs(calls)
 
 
 def test_status_launchd_shows_the_agent_then_probes(

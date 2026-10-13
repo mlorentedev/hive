@@ -569,6 +569,12 @@ def _install_launchd(*, enable: bool) -> int:
         # repeated install does not drop the daemon's live sessions.
         _launchctl("bootout", target, quiet=True)
         if not _await_unloaded(target, _UNLOAD_DEADLINE_S):
+            # Put the old definition back, so the re-run this message asks for
+            # sees the change again instead of kickstarting the old agent.
+            if previous is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_bytes(previous)
             print(
                 f"hive: launchd did not unload {target} within "
                 f"{_UNLOAD_DEADLINE_S:g}s; re-run `hive service install`.",
@@ -603,7 +609,16 @@ def _install_launchd(*, enable: bool) -> int:
 
 
 def _uninstall_launchd() -> int:
-    _launchctl("bootout", f"{_launchd_domain()}/{LAUNCHD_LABEL}", quiet=True)
+    target = f"{_launchd_domain()}/{LAUNCHD_LABEL}"
+    if _launchctl("print", target, quiet=True) == 0:
+        _launchctl("bootout", target, quiet=True)
+        if not _await_unloaded(target, _UNLOAD_DEADLINE_S):
+            print(
+                f"hive: launchd did not unload {target} within "
+                f"{_UNLOAD_DEADLINE_S:g}s; the agent is still loaded.",
+                file=sys.stderr,
+            )
+            return 1
     path = launchd_plist_path()
     if path.exists():
         try:
