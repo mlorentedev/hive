@@ -233,7 +233,9 @@ cp "$BK" "$HOME/.claude.json"          # restore the uvx hive-vault entry
   single-owner steady state. New sessions use `hive client` → one owner.
 - **VAULT_PATH.** The Linux unit bakes `Environment=VAULT_PATH=` (systemd
   `--user` starts with a minimal environment) plus an optional
-  `EnvironmentFile=-~/.config/hive/hive.env` for secrets. Windows Scheduled
+  `EnvironmentFile=-~/.config/hive/hive.env` for secrets. The macOS launchd
+  agent bakes `VAULT_PATH` too and sources the same `hive.env` at start, so no
+  secret is written to the plist. Windows Scheduled
   Tasks inherit the user-profile environment, so a user-level `VAULT_PATH` (or
   the default `~/Projects/knowledge`) is used as-is.
 - **Restart-on-upgrade.** Once supervised, a platform-appropriate upgrade

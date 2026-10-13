@@ -42,7 +42,7 @@ carga del vault al inicio de sesión.
 
 `hive service` integra `hive serve` en el supervisor de tu SO para que arranque
 al iniciar sesión y se reinicie ante fallos. Es multiplataforma: **systemd
-`--user`** en Linux, **Task Scheduler** en Windows.
+`--user`** en Linux, **Task Scheduler** en Windows, **launchd** en macOS.
 
 ```bash
 uv tool install --upgrade hive-vault   # requiere hive-vault >= 1.32.0
@@ -55,6 +55,11 @@ hive service status                    # vista del supervisor + sondeo /health a
   `systemctl --user daemon-reload && enable --now`.
 - **Windows** registra la tarea programada `HiveVaultDaemon`
   (`LogonTrigger` + `RestartOnFailure`).
+- **macOS** escribe `~/Library/LaunchAgents/io.github.mlorentedev.hive.plist`
+  (`RunAtLoad`, `KeepAlive {SuccessfulExit: false}`) y lo carga en el dominio
+  `gui/<uid>` con `launchctl bootstrap`. Ese dominio solo existe para un usuario
+  con sesión iniciada en la consola: ejecútalo desde un terminal del Mac, no
+  desde una sesión solo SSH. La salida va a `~/Library/Logs/hive/serve.log`.
 
 Usa `hive service install --no-enable` para escribir el unit/task sin
 arrancarlo, y `hive service uninstall` para detenerlo y eliminarlo.
@@ -137,7 +142,8 @@ son seguras ante un reinicio porque son idempotentes at-most-once
 | `HIVE_UPGRADE_POLL_S` | `30.0` | Segundos entre comprobaciones de drift de versión en `hive serve`. Menor = el daemon adopta una versión nueva antes tras una actualización; mayor = menos búsquedas `importlib.metadata`. Validado `> 0` y `<= 3600`. |
 
 Defínela en el entorno del daemon (en Linux, vía `Environment=` /
-`EnvironmentFile=` del unit; en Windows, el entorno del perfil de usuario que
+`EnvironmentFile=` del unit; en macOS, `~/.config/hive/hive.env`, que el
+agente carga al arrancar; en Windows, el entorno del perfil de usuario que
 hereda la tarea programada).
 
 ## Verificar el daemon

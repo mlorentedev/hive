@@ -40,7 +40,7 @@ vault-loading latency to session start.
 
 `hive service` wires `hive serve` into your OS supervisor so it starts on login
 and restarts on failure. It is cross-platform: **systemd `--user`** on Linux,
-**Task Scheduler** on Windows.
+**Task Scheduler** on Windows, **launchd** on macOS.
 
 ```bash
 uv tool install --upgrade hive-vault   # needs hive-vault >= 1.32.0
@@ -53,6 +53,11 @@ hive service status                    # supervisor's view + pinned /health prob
   `systemctl --user daemon-reload && enable --now`.
 - **Windows** registers the `HiveVaultDaemon` Scheduled Task
   (`LogonTrigger` + `RestartOnFailure`).
+- **macOS** writes `~/Library/LaunchAgents/io.github.mlorentedev.hive.plist`
+  (`RunAtLoad`, `KeepAlive {SuccessfulExit: false}`), then loads it into the
+  `gui/<uid>` domain with `launchctl bootstrap`. That domain exists only for a
+  user logged in at the console, so run it from a terminal on the Mac, not from
+  an SSH-only session. Output goes to `~/Library/Logs/hive/serve.log`.
 
 Use `hive service install --no-enable` to write the unit/task without starting
 it, and `hive service uninstall` to stop and remove it.
@@ -129,7 +134,8 @@ because writes are at-most-once idempotent
 | `HIVE_UPGRADE_POLL_S` | `30.0` | Seconds between version-drift checks in `hive serve`. Lower = the daemon adopts a new version sooner after an upgrade; higher = fewer `importlib.metadata` lookups. Validated `> 0` and `<= 3600`. |
 
 Set it in the daemon's environment (on Linux, via the unit's
-`Environment=` / `EnvironmentFile=`; on Windows, the user-profile environment
+`Environment=` / `EnvironmentFile=`; on macOS, `~/.config/hive/hive.env`, which
+the agent sources at start; on Windows, the user-profile environment
 the Scheduled Task inherits).
 
 ## Verifying the daemon

@@ -388,16 +388,245 @@ def test_uninstall_windows_removes_startup_fallback(
     assert not vbs_path.exists()
 
 
-def test_install_macos_is_a_clear_stub(monkeypatch: pytest.MonkeyPatch) -> None:
-    """launchd is a documented follow-up (not in the ubuntu+windows CI matrix):
-    install must not silently no-op — it returns a non-zero code and prints the
-    manual step rather than pretending to have installed anything."""
+def test_install_on_an_unsupported_platform_is_not_silent(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A platform with no supervisor must not silently no-op: install returns a
+    non-zero code and names the manual step instead of pretending."""
     import hive._service as svc
 
-    monkeypatch.setattr(svc, "_platform", lambda: "darwin")
+    monkeypatch.setattr(svc, "_platform", lambda: "freebsd")
+    monkeypatch.setattr(svc, "_resolve_exec", lambda: "/usr/local/bin/hive")
     rc = svc.install_service(enable=True)
 
     assert rc != 0
+    assert "/usr/local/bin/hive serve" in capsys.readouterr().err
+
+
+# ── macOS: launchd agent ──────────────────────────────────────────────────
+
+
+def test_render_launchd_plist_encodes_the_exit75_restart_contract() -> None:
+    """launchd's spelling of `Restart=on-failure`: RunAtLoad starts it, and
+    KeepAlive {SuccessfulExit: false} restarts it only after a non-zero exit
+    (drift 75 or crash), never after a clean stop / singleton-decline (0)."""
+    import plistlib
+
+    from hive._service import LAUNCHD_LABEL, render_launchd_plist
+
+    plist = plistlib.loads(
+        render_launchd_plist(
+            ["/Users/u/.local/bin/hive"], vault="/Users/u/vault", log="/l/serve.log"
+        )
+    )
+
+    assert plist["Label"] == LAUNCHD_LABEL
+    assert plist["RunAtLoad"] is True
+    assert plist["KeepAlive"] == {"SuccessfulExit": False}
+    assert plist["ThrottleInterval"] > 0
+    assert plist["EnvironmentVariables"] == {"VAULT_PATH": "/Users/u/vault"}
+    assert plist["StandardOutPath"] == plist["StandardErrorPath"] == "/l/serve.log"
+    assert plist["ProgramArguments"][-2:] == ["/Users/u/.local/bin/hive", "serve"]
+
+
+def test_render_launchd_plist_keeps_each_argument_its_own_element() -> None:
+    """launchd never word-splits ProgramArguments: the module fallback joined
+    into one element would be a daemon that never starts, and an interpreter
+    path holding a space must stay one element."""
+    import plistlib
+
+    from hive._service import render_launchd_plist
+
+    argv = ["/Applications/My Python/bin/python3", "-m", "hive.server"]
+    plist = plistlib.loads(render_launchd_plist(argv, vault="/v", log="/l"))
+
+    assert plist["ProgramArguments"][-4:] == [*argv, "serve"]
+
+
+def test_render_launchd_plist_sources_secrets_and_never_bakes_them(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Secrets come from the same optional, owner-only hive.env the systemd
+    unit reads; the plist carries its path, never a value from it."""
+    import plistlib
+    import subprocess
+
+    from hive._service import render_launchd_plist
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    env_file = tmp_path / "hive" / "hive.env"
+    env_file.parent.mkdir()
+    env_file.write_text("HIVE_WORKER_API_KEY=synthetic-not-a-secret\n", encoding="utf-8")
+
+    raw = render_launchd_plist(["/usr/bin/env"], vault="/v", log="/l")
+    assert b"synthetic-not-a-secret" not in raw
+
+    # Run the wrapper as launchd would, with `env` standing in for the daemon:
+    # the variable reaches the process, and a missing file is not an error.
+    args = plistlib.loads(raw)["ProgramArguments"][:-1]
+    out = subprocess.run(args, check=True, capture_output=True, text=True).stdout
+    assert "HIVE_WORKER_API_KEY=synthetic-not-a-secret" in out
+    env_file.unlink()
+    assert subprocess.run(args, check=False, capture_output=True).returncode == 0
+
+
+def _darwin(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    loaded: bool,
+    bootstrap_rc: int = 0,
+    state: str = "healthy",
+) -> tuple[list[list[str]], Path]:
+    import hive._service as svc
+
+    calls: list[list[str]] = []
+    plist_path = tmp_path / "LaunchAgents" / f"{svc.LAUNCHD_LABEL}.plist"
+
+    def _launchctl(*args: str, quiet: bool = False) -> int:
+        calls.append(list(args))
+        if args[0] == "print":
+            return 0 if loaded else 113
+        if args[0] == "bootstrap":
+            return bootstrap_rc
+        return 0
+
+    monkeypatch.setattr(svc, "_platform", lambda: "darwin")
+    monkeypatch.setattr(svc, "launchd_plist_path", lambda: plist_path)
+    monkeypatch.setattr(svc, "launchd_log_path", lambda: tmp_path / "Logs" / "serve.log")
+    monkeypatch.setattr(svc, "_resolve_argv", lambda: ["/usr/local/bin/hive"])
+    monkeypatch.setattr(svc, "_launchd_domain", lambda: "gui/501")
+    monkeypatch.setattr(svc, "_launchctl", _launchctl)
+    monkeypatch.setattr(svc, "_await_daemon", lambda deadline_s=30.0: state)
+    return calls, plist_path
+
+
+def _verbs(calls: list[list[str]]) -> list[str]:
+    return [c[0] for c in calls]
+
+
+def test_install_launchd_loads_and_starts_the_agent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import hive._service as svc
+
+    calls, plist_path = _darwin(monkeypatch, tmp_path, loaded=False)
+
+    rc = svc.install_service(enable=True)
+
+    assert rc == 0
+    assert plist_path.exists()
+    assert (tmp_path / "Logs").is_dir()  # launchd does not create the log dir
+    assert ["bootstrap", "gui/501", str(plist_path)] in calls
+    assert "bootout" not in _verbs(calls)
+
+
+def test_install_launchd_twice_leaves_the_running_daemon_alone(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A repeated install with an unchanged plist reloads nothing, so a
+    converge that runs it every time does not drop live sessions."""
+    import hive._service as svc
+
+    _, plist_path = _darwin(monkeypatch, tmp_path, loaded=False)
+    assert svc.install_service(enable=True) == 0
+    calls, _ = _darwin(monkeypatch, tmp_path, loaded=True)
+
+    assert svc.install_service(enable=True) == 0
+    assert "bootout" not in _verbs(calls)
+    assert "bootstrap" not in _verbs(calls)
+    # kickstart without -k: starts a stopped daemon, never kills a running one.
+    assert ["kickstart", f"gui/501/{svc.LAUNCHD_LABEL}"] in calls
+
+
+def test_install_launchd_reloads_a_changed_definition(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import hive._service as svc
+
+    calls, plist_path = _darwin(monkeypatch, tmp_path, loaded=True)
+    plist_path.parent.mkdir(parents=True)
+    plist_path.write_bytes(b"an older definition")
+
+    assert svc.install_service(enable=True) == 0
+    verbs = _verbs(calls)
+    assert verbs.index("bootout") < verbs.index("bootstrap")
+
+
+def test_install_launchd_outside_a_console_session_says_why(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """From an SSH-only session the gui/<uid> domain does not exist and
+    bootstrap fails; install must say so, not report success."""
+    import hive._service as svc
+
+    _darwin(monkeypatch, tmp_path, loaded=False, bootstrap_rc=5)
+
+    assert svc.install_service(enable=True) == 5
+    assert "console" in capsys.readouterr().err
+
+
+def test_install_launchd_whose_daemon_never_answers_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import hive._service as svc
+
+    _darwin(monkeypatch, tmp_path, loaded=False, state="down")
+
+    assert svc.install_service(enable=True) == 1
+    assert "the daemon is down" in capsys.readouterr().err
+
+
+def test_install_launchd_no_enable_writes_the_agent_but_loads_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import hive._service as svc
+
+    calls, plist_path = _darwin(monkeypatch, tmp_path, loaded=False)
+
+    assert svc.install_service(enable=False) == 0
+    assert plist_path.exists()
+    assert calls == []
+
+
+def test_uninstall_launchd_unloads_and_removes_the_agent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import hive._service as svc
+
+    calls, plist_path = _darwin(monkeypatch, tmp_path, loaded=True)
+    plist_path.parent.mkdir(parents=True)
+    plist_path.write_bytes(b"x")
+
+    assert svc.uninstall_service() == 0
+    assert not plist_path.exists()
+    assert ["bootout", f"gui/501/{svc.LAUNCHD_LABEL}"] in calls
+
+
+def test_status_launchd_shows_the_agent_then_probes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hive._service as svc
+
+    shown: list[list[str]] = []
+    monkeypatch.setattr(svc, "_platform", lambda: "darwin")
+    monkeypatch.setattr(svc, "_launchd_domain", lambda: "gui/501")
+    monkeypatch.setattr(svc, "_run_passthrough", lambda cmd: shown.append(cmd) or 0)
+    monkeypatch.setattr(svc, "daemon_state", lambda: "healthy")
+
+    assert svc.service_status() == 0
+    assert shown == [["launchctl", "print", f"gui/501/{svc.LAUNCHD_LABEL}"]]
 
 
 def test_uninstall_linux_removes_unit_and_disables(
@@ -593,6 +822,7 @@ def test_resolve_exec_falls_back_to_module_invocation(
     monkeypatch.setattr(svc.shutil, "which", lambda _: None)
 
     assert "-m hive.server" in svc._resolve_exec()
+    assert svc._resolve_argv()[1:] == ["-m", "hive.server"]
 
 
 def test_executes_treats_any_probe_failure_as_not_runnable(
@@ -625,6 +855,7 @@ def test_resolve_exec_ignores_a_layout_whose_launcher_is_missing(
     monkeypatch.setattr(svc.shutil, "which", lambda _: None)
 
     assert "-m hive.server" in svc._resolve_exec()
+    assert svc._resolve_argv()[1:] == ["-m", "hive.server"]
 
 
 # ── rotate-identity (HIVE-456 AC6) ────────────────────────────────────────

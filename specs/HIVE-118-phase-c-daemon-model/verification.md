@@ -52,3 +52,16 @@ Before archiving, flag what (if anything) should be promoted to the vault.
 - [ ] Folder moved: `specs/HIVE-118-phase-c-daemon-model/` -> `specs/archive/HIVE-118-phase-c-daemon-model/`
 - [ ] Backlog entry in vault `11-tasks.md` ticked with PR link
 - [ ] Promotions above executed (ADR-011 at minimum)
+
+- 2026-10-13 (macOS launchd backend, #488, `feat/launchd-service`): unit tests
+  `test_render_launchd_plist_*` (restart contract, argv kept as elements,
+  secrets sourced not baked: the wrapper is executed with a synthetic env file),
+  `test_install_launchd_*` (load, idempotent re-run, reload of a changed
+  definition, console-session failure, unanswered daemon, `--no-enable`),
+  `test_uninstall_launchd_*`, `test_status_launchd_*`. macOS is not in the CI
+  matrix, so the real leg ran on the owner's Mac (macOS 27, hive 4.3.0 as the
+  resolved launcher): first install loaded the agent and the daemon answered
+  `healthy`, `daemon.token` was created; a second install kept the same pid;
+  `kill -9` of the daemon was restarted by launchd within the throttle interval
+  and answered `healthy` again. Full suite: 1065 passed, 5 skipped; the one
+  macOS failure is the pre-existing #478.
