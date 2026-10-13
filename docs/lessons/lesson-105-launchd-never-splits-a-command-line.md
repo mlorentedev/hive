@@ -30,6 +30,12 @@ plist is plaintext in `~/Library/LaunchAgents`, so secrets stay in the
 owner-only `hive.env`, which the agent sources at start, as the systemd unit
 does through `EnvironmentFile=`.
 
+A third only the real Mac showed: `launchctl bootout` returns before launchd
+has removed the job, and a `bootstrap` issued right after fails with
+`5: Input/output error`, so a reload left the daemon down while the mocked
+test passed. Install now waits, bounded, until `launchctl print` stops finding
+the job.
+
 **Why:** A supervisor's command field looks like the same thing across OSes,
 but it is a shell line on one and an exec vector on another. Resolve to the
 vector, which loses nothing, and render the string from it.

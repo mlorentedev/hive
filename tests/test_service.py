@@ -9,6 +9,7 @@ calls are validated by the cross-OS CI matrix (ubuntu + windows).
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
@@ -444,6 +445,7 @@ def test_render_launchd_plist_keeps_each_argument_its_own_element() -> None:
     assert plist["ProgramArguments"][-4:] == [*argv, "serve"]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="runs the /bin/sh wrapper launchd runs")
 def test_render_launchd_plist_sources_secrets_and_never_bakes_them(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -485,10 +487,14 @@ def _darwin(
     calls: list[list[str]] = []
     plist_path = tmp_path / "LaunchAgents" / f"{svc.LAUNCHD_LABEL}.plist"
 
+    state_loaded = {"v": loaded}
+
     def _launchctl(*args: str, quiet: bool = False) -> int:
         calls.append(list(args))
+        if args[0] == "bootout":
+            state_loaded["v"] = False
         if args[0] == "print":
-            return 0 if loaded else 113
+            return 0 if state_loaded["v"] else 113
         if args[0] == "bootstrap":
             return bootstrap_rc
         return 0
@@ -555,7 +561,35 @@ def test_install_launchd_reloads_a_changed_definition(
 
     assert svc.install_service(enable=True) == 0
     verbs = _verbs(calls)
+    # bootout returns before launchd finishes; bootstrap only once it is gone.
     assert verbs.index("bootout") < verbs.index("bootstrap")
+    assert "print" in verbs[verbs.index("bootout") : verbs.index("bootstrap")]
+
+
+def test_install_launchd_that_never_unloads_does_not_bootstrap(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A bootstrap into a job still being torn down fails with 5: I/O error
+    and leaves the daemon down; past the deadline install stops and says so."""
+    import hive._service as svc
+
+    calls: list[list[str]] = []
+    plist_path = tmp_path / "LaunchAgents" / f"{svc.LAUNCHD_LABEL}.plist"
+    plist_path.parent.mkdir(parents=True)
+    plist_path.write_bytes(b"an older definition")
+    monkeypatch.setattr(svc, "_platform", lambda: "darwin")
+    monkeypatch.setattr(svc, "launchd_plist_path", lambda: plist_path)
+    monkeypatch.setattr(svc, "launchd_log_path", lambda: tmp_path / "Logs" / "serve.log")
+    monkeypatch.setattr(svc, "_resolve_argv", lambda: ["/usr/local/bin/hive"])
+    monkeypatch.setattr(svc, "_launchd_domain", lambda: "gui/501")
+    monkeypatch.setattr(svc, "_launchctl", lambda *a, quiet=False: calls.append(list(a)) or 0)
+    monkeypatch.setattr(svc, "_UNLOAD_DEADLINE_S", 0.0)
+
+    assert svc.install_service(enable=True) == 1
+    assert "bootstrap" not in _verbs(calls)
+    assert "did not unload" in capsys.readouterr().err
 
 
 def test_install_launchd_outside_a_console_session_says_why(

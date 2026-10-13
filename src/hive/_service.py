@@ -402,6 +402,25 @@ def _launchctl(*args: str, quiet: bool = False) -> int:
     return _run(["launchctl", *args], quiet=quiet)
 
 
+# Bounds the wait for launchd to finish tearing down a job after `bootout`.
+_UNLOAD_DEADLINE_S = 10.0
+
+
+def _await_unloaded(target: str, deadline_s: float = _UNLOAD_DEADLINE_S) -> bool:
+    """Wait until *target* is no longer loaded; True once it is gone.
+
+    ``launchctl bootout`` returns before launchd has finished removing the job,
+    and a ``bootstrap`` issued in that window fails with ``5: Input/output
+    error`` — measured on a real Mac, where it left the daemon down.
+    """
+    end = time.monotonic() + deadline_s
+    while _launchctl("print", target, quiet=True) == 0:
+        if time.monotonic() >= end:
+            return False
+        time.sleep(_START_POLL_S)
+    return True
+
+
 def _schtasks_create(task_name: str, *, xml: str) -> int:
     """Register *xml* as Scheduled Task *task_name* (UTF-16, as schtasks wants)."""
     fd, name = tempfile.mkstemp(suffix=".xml")
@@ -549,15 +568,22 @@ def _install_launchd(*, enable: bool) -> int:
         # only through a reload. An unchanged one is left running, so a
         # repeated install does not drop the daemon's live sessions.
         _launchctl("bootout", target, quiet=True)
+        if not _await_unloaded(target, _UNLOAD_DEADLINE_S):
+            print(
+                f"hive: launchd did not unload {target} within "
+                f"{_UNLOAD_DEADLINE_S:g}s; re-run `hive service install`.",
+                file=sys.stderr,
+            )
+            return 1
         loaded = False
     if not loaded:
         rc = _launchctl("bootstrap", domain, str(path))
         if rc != 0:
             print(
-                f"hive: launchctl could not load {path} into {domain}. The agent "
-                "domain exists only for a user logged in at the Mac's console; "
-                "from an SSH-only session, log in at the console and re-run "
-                "`hive service install`.",
+                f"hive: launchctl could not load {path} into {domain} (rc {rc}). "
+                "The agent domain exists only for a user logged in at the Mac's "
+                "console, so an SSH-only session cannot load it; otherwise see "
+                f"`launchctl print {target}`.",
                 file=sys.stderr,
             )
             return rc
