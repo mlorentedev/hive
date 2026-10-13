@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.4.0](https://github.com/mlorentedev/hive/compare/v4.3.2...v4.4.0) (2026-10-13)
+
+
+### Features
+
+* **service:** supervise the daemon with a launchd agent on macOS ([#489](https://github.com/mlorentedev/hive/issues/489)) ([529e502](https://github.com/mlorentedev/hive/commit/529e5028f4453004e0a6dde1b5fe4dc0cfc114dd))
+
 ## [4.3.2](https://github.com/mlorentedev/hive/compare/v4.3.1...v4.3.2) (2026-10-10)
 
 
