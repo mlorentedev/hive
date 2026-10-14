@@ -382,3 +382,17 @@ def test_lsof_lookup_reports_an_unavailable_tool_as_undetermined(
     monkeypatch.setattr(subprocess, "run", broken)
     with pytest.raises(OSError):
         endpoint._lsof_listener_identity(54474)
+
+
+def test_port_holder_degrades_to_undetermined_when_lsof_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The darwin lookup raises on a broken lsof; port_holder must turn that into an answer."""
+    import hive._endpoint as endpoint
+
+    def broken(*args: object, **kwargs: object) -> None:
+        raise FileNotFoundError("lsof")
+
+    monkeypatch.setattr(endpoint.sys, "platform", "darwin")
+    monkeypatch.setattr(subprocess, "run", broken)
+    assert endpoint.port_holder(54474) == "owner could not be determined"
