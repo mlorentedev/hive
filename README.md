@@ -20,7 +20,7 @@ Hive is an [MCP](https://modelcontextprotocol.io/) server that connects your AI 
 | Metric | Without Hive | With Hive |
 |---|---|---|
 | Context loaded per session | ~800 lines (static) | ~50 lines (on demand) |
-| Token cost for context | 100% every session | 6% average per query |
+| Token cost for context | 100% every session | 0.6% for five project-context queries (real vault, 493K tokens) |
 | Knowledge retained between sessions | 0% | 100% (in vault) |
 
 > Measured on a real vault with 19 projects, 200+ files. See [benchmarks](https://mlorentedev.github.io/hive/guides/benchmarks/).
@@ -60,8 +60,7 @@ Hive degrades gracefully — every recommended or optional dependency reveals mo
   - The **[obsidian-git plugin](https://github.com/Vinzent03/obsidian-git)** with auto-commit set to **5–10 minutes**. Pair it with `vault_write(commit=False)` / `vault_patch(commit=False)` to push the git workload off the synchronous tool path; see *Recommended configuration* below.
 
 - **Optional**
-  - **[Ollama](https://ollama.com/)** running `qwen2.5-coder:7b` (or compatible) for local, free `delegate_task` / `capture_lesson` worker calls.
-  - An **OpenRouter** API key (`OPENROUTER_API_KEY`) as a free-tier and paid fallback worker.
+  - Any **OpenAI-compatible `/v1` endpoint** as the worker for `delegate_task` / `capture_lesson`, set with `HIVE_WORKER_BASE_URL`, `HIVE_WORKER_API_KEY` and `HIVE_WORKER_MODEL`.
   - A **backup git remote** (e.g. private GitHub repo) so vault history survives a disk loss.
 
 ### Recommended configuration
@@ -140,10 +139,12 @@ version, exits `75`, and the supervisor restarts it into the new code. See the
 | `vault_query` | Load project context, tasks, roadmap, lessons — or any file by path |
 | `vault_search` | Full-text search with metadata filters, regex, ranked results, recent changes, lesson-usage ranking (`rank_by`) |
 | `vault_list` | Browse projects and files with glob filtering |
+| `vault_ask` | Optional semantic Q&A with source citations; disabled until an embeddings backend is configured (`[semantic]` extra) |
 | `vault_health` | Server identity (version, vault path, backends), health metrics, drift detection, usage stats, opt-in runtime block |
 | `vault_write` | Create, append, or replace vault files. `commit=False` defers the git commit for batching |
 | `vault_patch` | Surgical find-and-replace. `commit=False` defers the git commit for batching |
 | `vault_commit` | Flush pending `commit=False` writes into one git commit |
+| `vault_delete` | Delete one file, committed synchronously so it stays recoverable from git history |
 | `capture_lesson` | Capture lessons inline / batch-extract from text / look up existing lessons by keyword (`find=`) |
 | `session_briefing` | Tasks + lessons + git log + health in one call |
 | `delegate_task` | Route tasks to cheaper models or summarize vault files |
@@ -172,9 +173,9 @@ Storage: SQLite side-table at `HIVE_LESSON_DB_PATH` (default `~/.local/share/hiv
 ```
 MCP Host (Claude Code, Gemini CLI, Codex CLI, Cursor, ...)
     └── hive-vault (MCP server, stdio)
-            ├── Vault Tools (7) ── Obsidian vault (Markdown + YAML frontmatter)
+            ├── Vault Tools (9) ── Obsidian vault (Markdown + YAML frontmatter)
             ├── Session Tools (1) ── Adaptive context assembly
-            └── Worker Tools (2) ── Ollama (free) → OpenRouter free → paid ($1/mo cap) → reject
+            └── Worker Tools (3) ── one OpenAI-compatible endpoint, no internal fallback
 ```
 
 ## Documentation
