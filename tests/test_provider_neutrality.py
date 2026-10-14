@@ -64,19 +64,22 @@ class TestNoBrandInProviderFacingModules:
         )
 
 
-class TestNoBrandInPytestMarkers:
-    def test_marker_descriptions_name_no_specific_provider(self) -> None:
-        """``pytest --markers`` prints these, so a retired provider here misleads (#415)."""
-        import tomllib
+class TestNoBrandInPyproject:
+    def test_pyproject_names_no_specific_provider(self) -> None:
+        """``pytest --markers`` and PyPI print this file; a retired provider here misleads (#415).
 
+        Read as text, like the module guard above: comments, keywords and marker
+        descriptions are all in scope, and nothing parsed can drop out silently.
+        """
         pyproject = _src_dir().parents[1] / "pyproject.toml"
-        markers = tomllib.loads(pyproject.read_text(encoding="utf-8"))["tool"]["pytest"][
-            "ini_options"
-        ]["markers"]
-        # A mapping would iterate as bare names and scan nothing: fail closed instead.
-        assert isinstance(markers, list), "markers must stay a list of 'name: description'"
-        offenders = [m for m in markers if _BRANDS.search(m)]
-        assert not offenders, f"pytest markers name a specific provider: {offenders}"
+        offenders = [
+            f"pyproject.toml:{n}: {line.strip()}"
+            for n, line in enumerate(pyproject.read_text(encoding="utf-8").splitlines(), 1)
+            if _BRANDS.search(line)
+        ]
+        assert not offenders, "pyproject.toml names a specific provider:\n  " + "\n  ".join(
+            offenders
+        )
 
 
 class TestProviderLabelIsDerived:
