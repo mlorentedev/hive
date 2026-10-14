@@ -64,6 +64,19 @@ class TestNoBrandInProviderFacingModules:
         )
 
 
+class TestNoBrandInPytestMarkers:
+    def test_marker_descriptions_name_no_specific_provider(self) -> None:
+        """``pytest --markers`` prints these, so a retired provider here misleads (#415)."""
+        import tomllib
+
+        pyproject = _src_dir().parents[1] / "pyproject.toml"
+        markers = tomllib.loads(pyproject.read_text(encoding="utf-8"))["tool"]["pytest"][
+            "ini_options"
+        ]["markers"]
+        offenders = [m for m in markers if _BRANDS.search(m)]
+        assert not offenders, f"pytest markers name a specific provider: {offenders}"
+
+
 class TestProviderLabelIsDerived:
     """The label cannot disagree with the endpoint, because it comes from it."""
 
