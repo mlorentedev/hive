@@ -334,7 +334,6 @@ def test_lsof_lookup_ignores_a_listener_on_another_address(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The macOS lookup applies the same loopback-only rule as /proc and psutil."""
-    import subprocess
     from types import SimpleNamespace
 
     import hive._endpoint as endpoint
@@ -359,13 +358,22 @@ def test_lsof_lookup_ignores_a_listener_on_another_address(
     lsof("p13\nu1003\nf6\nn[::1]:54474\n")
     assert endpoint._lsof_listener_identity(54474) == "posix:1003"
 
+    # A process record without a uid must not inherit the previous process's.
+    lsof("p14\nu1004\nf7\nn10.11.12.13:54474\np15\nf8\nn127.0.0.1:54474\n")
+    assert endpoint._lsof_listener_identity(54474) is None
 
-@pytest.mark.parametrize("failure", [FileNotFoundError("lsof"), OSError("denied")])
+    # lsof exits 1 with empty stdout when nothing listens.
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=1, stdout=""))
+    assert endpoint._lsof_listener_identity(54474) is None
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [FileNotFoundError("lsof"), OSError("denied"), subprocess.TimeoutExpired("lsof", 5)],
+)
 def test_lsof_lookup_reports_an_unavailable_tool_as_undetermined(
     monkeypatch: pytest.MonkeyPatch, failure: Exception
 ) -> None:
-    import subprocess
-
     import hive._endpoint as endpoint
 
     def broken(*args: object, **kwargs: object) -> None:

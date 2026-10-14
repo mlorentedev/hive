@@ -255,10 +255,14 @@ def _lsof_listener_identity(port: int) -> str | None:
         )
     except Exception as exc:  # FileNotFoundError, TimeoutExpired, PermissionError ...
         raise OSError("could not list TCP listeners") from exc
+    # lsof exits 1 on "no match" and on some errors; both leave stdout empty, so
+    # the result is None and the caller reports the owner as undetermined.
     uid = ""
     for line in result.stdout.splitlines():
         field, value = line[:1], line[1:]
-        if field == "u":
+        if field == "p":
+            uid = ""  # a process record without a uid must not inherit the previous one
+        elif field == "u":
             uid = value
         elif field == "n" and uid.isdigit() and _lsof_holds_loopback(value, port):
             return canonical_identity(platform="darwin", uid=int(uid))
