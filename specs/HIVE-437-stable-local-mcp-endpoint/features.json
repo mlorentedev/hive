@@ -11,7 +11,7 @@
     "behavior": "Ordinary daemon restarts bind the same endpoint and reuse one atomically published owner-only token.",
     "verification": "uv run python -m pytest tests/test_daemon_state.py tests/test_daemon.py -k \"token or stable_port or stable_endpoint_restart\" -q",
     "state": "pending",
-    "evidence": "token/stable_port/stable_endpoint_restart selector: 8 passed"
+    "evidence": "token/stable_port/stable_endpoint_restart selector: 11 passed (macOS, 2026-10-14)"
   },
   {
     "id": "HIVE-437-stable-local-mcp-endpoint-f3",
@@ -25,14 +25,14 @@
     "behavior": "The stdio adapter explicitly rejects unavailable or invalid daemon state and never starts an unmanaged fallback server.",
     "verification": "uv run python -m pytest tests/test_client.py tests/test_daemon_state.py -k \"credential or connection_failure or existing_invalid_token or existing_permission_invalid_token\" -q",
     "state": "pending",
-    "evidence": "credential/connection_failure/invalid_token selector: 8 passed"
+    "evidence": "credential/connection_failure/invalid_token selector: 6 passed, 2 skipped (Windows ACL) on macOS 2026-10-14; the two corrupt-certificate regressions run in the full suite"
   },
   {
     "id": "HIVE-437-stable-local-mcp-endpoint-f5",
     "behavior": "The adapter preserves Streamable HTTP JSON, SSE, protocol-version, and legacy session behavior without exposing credentials.",
     "verification": "uv run python -m pytest tests/test_client.py -k \"relay or session or protocol or secret\" -q",
     "state": "pending",
-    "evidence": "relay/session/protocol/secret selector: 4 passed; in-flight cancellation is not covered (#454)"
+    "evidence": "relay/session/protocol/secret selector: 13 passed (macOS, 2026-10-14); in-flight cancellation is not covered (#454) and SSE is buffered, not streamed (#499)"
   },
   {
     "id": "HIVE-437-stable-local-mcp-endpoint-f6",

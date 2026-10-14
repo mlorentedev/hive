@@ -20,7 +20,11 @@ created: "2026-09-28"
   repeatability on every loaded host. The import-graph test also passed.
 - [x] AC4: `test_client_without_credential_fails_without_starting_fallback`,
   `test_client_rejects_corrupt_or_permission_invalid_credential`, and
-  `test_relay_connection_failure_is_explicit_and_redacts_token` pass.
+  `test_relay_connection_failure_is_explicit_and_redacts_token` pass. A
+  corrupt certificate body is covered since the archive review:
+  `test_client_reports_a_corrupt_certificate_without_a_traceback` (startup)
+  and `test_relay_fails_closed_when_the_rotated_certificate_is_corrupt`
+  (mid-session rotation).
 - [ ] AC5: `test_relay_preserves_json_session_protocol_and_sse`,
   `test_relay_adds_current_protocol_metadata_header`, and
   `test_relay_reinitializes_after_daemon_restart_loses_session` pass.
@@ -38,8 +42,9 @@ created: "2026-09-28"
 
 ## Test status
 
-- Feature selectors in `features.json`: f1 13 passed, f2 8 passed, f4
-  8 passed, f5 4 passed, f6 1 passed in earlier local Windows runs. The
+- Feature selectors in `features.json`, earlier local Windows runs (superseded
+  by the macOS archive run below): f1 13 passed, f2 8 passed, f4
+  8 passed, f5 4 passed, f6 1 passed. The
   f3 selector passed 3 tests on a fresh isolated run. The `state` fields
   remain `pending`: the feature harness owns the terminal gate; measured
   results belong in this verification log, not a manually promoted state.
@@ -77,6 +82,29 @@ with `uv sync --all-extras`:
 - AC5 stays partial by decision: the relay keeps the session, protocol header
   and SSE contract, but in-flight cancellation is not forwarded until the
   current HTTP call returns. hive#454 (BUG-002) owns it and is open.
+
+## Adversarial review before the archive (2026-10-14)
+
+An independent reviewer pass (Claude, same vendor as most of the
+implementation, so informal: hive has no reviewer pool to sign one, see
+dotfiles#2439) returned FAIL on one finding. The pass also confirmed that the
+`run_serve` split is behaviour-preserving and that every touched production
+function is under 40 lines (longest: `_windows_owner_only`, 37).
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | AC4: a `daemon.crt` with a valid header and a corrupt body made `hive client` exit with a raw `ssl.SSLError` traceback, at startup and after a rotation | **Fixed.** `_parse_pin` builds both the TLS context and the fingerprint, and turns `ssl.SSLError`/`ValueError` into a `ClientError` naming `hive service rotate-identity`. Construction and `_refresh_pin` both go through it, and `run_client` builds the relay inside its guarded block. The regression tests are parametrized over a body that is not DER and one that is not base64, because they fail at different layers. They were red before the fix, and the not-base64 rotation case was red after a first fix that guarded only the context. |
+| 2 | AC5: cancellation waits behind the in-flight call | **Deferred**, already recorded above: hive#454, open. |
+| 3 | SSE `data:` frames are buffered until the stream ends, not streamed as the proposal says | **Ticketed**: hive#499. |
+| 4 | AC3's sub-second claim was measured on Windows only | **Accepted.** The macOS run passed the same test; the Windows caveat above stands. |
+| 5 | AC2/AC7 are proven by composition: the restart test sets `HIVE_DAEMON_PORT`, so no test spans the uid-derived default port, a real bind and the client | **Accepted gap.** The default-port formula (f1), the bind policy (AC2 tests) and the restart through the client (f6) are each tested. A test spanning all three would bind a per-user port that a real daemon on the same host may hold. |
+| 6 | AC6: the Windows ACL tests skip on macOS; the log-leak test does not assert a non-empty log | **Accepted.** The ACL tests ran on the Windows runs above and run in CI's windows leg. |
+| 7 | Stale f2/f5 counts | **Fixed** in `features.json` evidence and the note above. |
+| 8 | `_owner_only.py::_windows_set_owner_only` is over 40 lines | **Ticketed**: hive#500. The function predates this spec (#463, #485) and is outside its files; 63 production functions break `AGENTS.md`'s 40-line rule, and nothing enforces it. |
+| 9 | The ACs say HTTP; the transport is pinned TLS 1.3 since #463 (ADR-022 A1) | **Recorded here.** Every "HTTP" in the ACs is now HTTPS with a pinned certificate. The behaviour each AC asks for is unchanged. |
+
+Run after the fix: full suite 1072 passed and 5 skipped, with the same hive#478
+test deselected; mypy and ruff are clean.
 
 ## Decisions made during implementation
 

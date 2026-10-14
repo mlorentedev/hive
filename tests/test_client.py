@@ -658,3 +658,73 @@ def test_relay_fails_closed_when_the_pin_cannot_be_reread(
     with pytest.raises(ClientError, match="certificate"):
         relay.forward(_TOOLS_LIST)
     assert handler.requests == []
+
+
+# Certificates that pass the header check in `load_pinned_certificate` but
+# whose body is not a certificate, reachable by a truncated write or a hand
+# edit. They fail at different layers: a valid-base64 body decodes and only the
+# TLS context rejects it; an invalid one fails while computing the fingerprint.
+_CORRUPT_PEMS = [
+    pytest.param(
+        "-----BEGIN CERTIFICATE-----\nbm90IGEgY2VydGlmaWNhdGU=\n-----END CERTIFICATE-----\n",
+        id="not-der",
+    ),
+    pytest.param(
+        "-----BEGIN CERTIFICATE-----\nnot base64 at all\n-----END CERTIFICATE-----\n",
+        id="not-base64",
+    ),
+]
+
+
+@pytest.mark.parametrize("corrupt_pem", _CORRUPT_PEMS)
+def test_client_reports_a_corrupt_certificate_without_a_traceback(
+    tmp_path: Path, corrupt_pem: str
+) -> None:
+    from hive._daemon import _enforce_owner_only
+
+    token = "a" * 43
+    for name, text in (("daemon.token", token), ("daemon.crt", corrupt_pem)):
+        path = tmp_path / name
+        path.write_text(text, encoding="ascii")
+        _enforce_owner_only(path)
+    env = {
+        **os.environ,
+        "HIVE_DB_PATH": str(tmp_path / "worker.db"),
+        "HIVE_DAEMON_PORT": "1",
+    }
+
+    result = subprocess.run(
+        [sys.executable, "-m", "hive.cli", "client"],
+        input='{"jsonrpc":"2.0","id":1,"method":"initialize"}\n',
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=3.0,
+    )
+
+    assert result.returncode != 0
+    assert "Traceback" not in result.stderr
+    assert "rotate-identity" in result.stderr
+    assert token not in result.stderr + result.stdout
+
+
+@pytest.mark.parametrize("corrupt_pem", _CORRUPT_PEMS)
+def test_relay_fails_closed_when_the_rotated_certificate_is_corrupt(
+    mcp_http_server: tuple[str, int, type[_McpHandler]],
+    corrupt_pem: str,
+) -> None:
+    from hive._client import ClientError, HttpRelay
+
+    host, port, handler = mcp_http_server
+    relay = HttpRelay(
+        host,
+        port,
+        "secret-token",
+        handler.cert_pem,
+        reload=lambda: ("rotated-token", corrupt_pem),
+    )
+    with pytest.raises(ClientError, match="rotate-identity") as excinfo:
+        relay.forward(_TOOLS_LIST)
+    assert "secret-token" not in str(excinfo.value)
+    assert handler.requests == []

@@ -102,6 +102,23 @@ class _UnverifiedListenerError(Exception):
     """The listener did not prove the pinned identity."""
 
 
+def _parse_pin(cert_pem: str) -> tuple[ssl.SSLContext, str]:
+    """The TLS context and fingerprint a relay pins, or an actionable error.
+
+    The header check in ``load_pinned_certificate`` lets a truncated or
+    hand-edited body through. It fails here, either decoding the fingerprint
+    or loading the trust anchor, and must fail as a ``ClientError`` rather
+    than a traceback (HIVE-437 AC4).
+    """
+    try:
+        return pinned_context(cert_pem), pem_fingerprint(cert_pem)
+    except (ssl.SSLError, ValueError):
+        raise ClientError(
+            "the daemon identity certificate is corrupt; run "
+            "`hive service rotate-identity`; nothing was sent",
+        ) from None
+
+
 class HttpRelay:
     """Translate stdio JSON-RPC messages into Streamable HTTP requests.
 
@@ -157,8 +174,7 @@ class HttpRelay:
 
     def _pin(self, token: str, cert_pem: str) -> None:
         self._token = token
-        self._context = pinned_context(cert_pem)
-        self._fingerprint = pem_fingerprint(cert_pem)
+        self._context, self._fingerprint = _parse_pin(cert_pem)
 
     def _refresh_pin(self) -> None:
         """Re-read the owner's token and certificate before every connection.
@@ -177,8 +193,9 @@ class HttpRelay:
             raise ClientError(
                 "could not re-read the Hive daemon certificate or token; nothing was sent",
             ) from None
-        if pem_fingerprint(cert_pem) != self._fingerprint or token != self._token:
-            self._pin(token, cert_pem)
+        context, fingerprint = _parse_pin(cert_pem)
+        if fingerprint != self._fingerprint or token != self._token:
+            self._token, self._context, self._fingerprint = token, context, fingerprint
 
     def _connect(self) -> http.client.HTTPSConnection:
         self._refresh_pin()
@@ -339,10 +356,10 @@ def run_client(host: str = DEFAULT_HOST) -> int:
     try:
         port = configured_daemon_port()
         token, cert_pem = _owner_credentials()
+        relay = HttpRelay(host, port, token, cert_pem, reload=_owner_credentials)
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"hive client: {exc}", file=sys.stderr)
         return 1
-    relay = HttpRelay(host, port, token, cert_pem, reload=_owner_credentials)
     try:
         for raw in sys.stdin.buffer:
             try:
