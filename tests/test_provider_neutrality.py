@@ -64,6 +64,24 @@ class TestNoBrandInProviderFacingModules:
         )
 
 
+class TestNoBrandInPyproject:
+    def test_pyproject_names_no_specific_provider(self) -> None:
+        """``pytest --markers`` and PyPI print this file; a retired provider here misleads (#415).
+
+        Read as text, like the module guard above: comments, keywords and marker
+        descriptions are all in scope, and nothing parsed can drop out silently.
+        """
+        pyproject = _src_dir().parents[1] / "pyproject.toml"
+        offenders = [
+            f"pyproject.toml:{n}: {line.strip()}"
+            for n, line in enumerate(pyproject.read_text(encoding="utf-8").splitlines(), 1)
+            if _BRANDS.search(line)
+        ]
+        assert not offenders, "pyproject.toml names a specific provider:\n  " + "\n  ".join(
+            offenders
+        )
+
+
 class TestProviderLabelIsDerived:
     """The label cannot disagree with the endpoint, because it comes from it."""
 

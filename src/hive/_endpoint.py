@@ -237,12 +237,54 @@ def _proc_listener_identity(port: int) -> str | None:
     return None
 
 
+def _lsof_listener_identity(port: int) -> str | None:
+    """macOS has no /proc, and psutil.net_connections needs root there.
+
+    ``lsof`` lists the caller's own sockets without privilege, which is the case
+    that matters: a listener it cannot see belongs to someone else.
+    """
+    import subprocess  # lazy: the client entrypoint must not import it (test_client)
+
+    try:
+        result = subprocess.run(
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fun"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception as exc:  # FileNotFoundError, TimeoutExpired, PermissionError ...
+        raise OSError("could not list TCP listeners") from exc
+    # lsof exits 1 on "no match" and on some errors; both leave stdout empty, so
+    # the result is None and the caller reports the owner as undetermined.
+    uid = ""
+    for line in result.stdout.splitlines():
+        field, value = line[:1], line[1:]
+        if field == "p":
+            uid = ""  # a process record without a uid must not inherit the previous one
+        elif field == "u":
+            uid = value
+        elif field == "n" and uid.isdigit() and _lsof_holds_loopback(value, port):
+            return canonical_identity(platform="darwin", uid=int(uid))
+    return None
+
+
+def _lsof_holds_loopback(name: str, port: int) -> bool:
+    """True when an lsof name (``127.0.0.1:1234``, ``*:1234``, ``[::1]:1234``) holds the port."""
+    address, _, local_port = name.rpartition(":")
+    return local_port == str(port) and (
+        address == "*" or address.strip("[]") in _LOOPBACK_HOLDER_IPS
+    )
+
+
 def _listener_identity(port: int) -> str | None:
     """Canonical identity of the account listening on *port*, or ``None``."""
     if sys.platform == "win32":
         return _windows_listener_identity(port)
     if sys.platform.startswith("linux"):
         return _proc_listener_identity(port)
+    if sys.platform == "darwin":
+        return _lsof_listener_identity(port)
     return None
 
 
