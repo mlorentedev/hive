@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.4.1](https://github.com/mlorentedev/hive/compare/v4.4.0...v4.4.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* **client:** report a corrupt daemon certificate instead of a traceback ([#501](https://github.com/mlorentedev/hive/issues/501)) ([3d8aed0](https://github.com/mlorentedev/hive/commit/3d8aed0a971706d97910cab52351a15c613b2795))
+* **endpoint:** name a listener's owner on macOS via lsof ([#495](https://github.com/mlorentedev/hive/issues/495)) ([5d7fa5d](https://github.com/mlorentedev/hive/commit/5d7fa5dffe5a388b1cab158da1a8470f7a13f01a))
+
+
+### Documentation
+
+* **readme:** list every registered tool and drop the unmeasured token claim ([#497](https://github.com/mlorentedev/hive/issues/497)) ([b33514f](https://github.com/mlorentedev/hive/commit/b33514fa2367502f93f532a09be9730d559155c7))
+
 ## [4.4.0](https://github.com/mlorentedev/hive/compare/v4.3.2...v4.4.0) (2026-10-13)
 
 
