@@ -73,6 +73,8 @@ class TestNoBrandInPytestMarkers:
         markers = tomllib.loads(pyproject.read_text(encoding="utf-8"))["tool"]["pytest"][
             "ini_options"
         ]["markers"]
+        # A mapping would iterate as bare names and scan nothing: fail closed instead.
+        assert isinstance(markers, list), "markers must stay a list of 'name: description'"
         offenders = [m for m in markers if _BRANDS.search(m)]
         assert not offenders, f"pytest markers name a specific provider: {offenders}"
 
