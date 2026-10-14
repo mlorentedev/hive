@@ -328,3 +328,49 @@ def test_windows_lookup_ignores_a_listener_on_another_address(
         lambda kind: [listener("10.11.12.13", 1001), listener("127.0.0.1", 1000)],
     )
     assert endpoint._windows_listener_identity(54474) == "windows:S-1-5-21-1-2-3-1000"
+
+
+def test_lsof_lookup_ignores_a_listener_on_another_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The macOS lookup applies the same loopback-only rule as /proc and psutil."""
+    import subprocess
+    from types import SimpleNamespace
+
+    import hive._endpoint as endpoint
+
+    def lsof(output: str) -> None:
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=output),
+        )
+
+    # 10.11.12.13:54474 held by uid 1001 does not hold the loopback port.
+    lsof("p10\nu1001\nf3\nn10.11.12.13:54474\n")
+    assert endpoint._lsof_listener_identity(54474) is None
+
+    lsof("p10\nu1001\nf3\nn10.11.12.13:54474\np11\nu1000\nf4\nn127.0.0.1:54474\n")
+    assert endpoint._lsof_listener_identity(54474) == "posix:1000"
+
+    lsof("p12\nu1002\nf5\nn*:54474\n")
+    assert endpoint._lsof_listener_identity(54474) == "posix:1002"
+
+    lsof("p13\nu1003\nf6\nn[::1]:54474\n")
+    assert endpoint._lsof_listener_identity(54474) == "posix:1003"
+
+
+@pytest.mark.parametrize("failure", [FileNotFoundError("lsof"), OSError("denied")])
+def test_lsof_lookup_reports_an_unavailable_tool_as_undetermined(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    import subprocess
+
+    import hive._endpoint as endpoint
+
+    def broken(*args: object, **kwargs: object) -> None:
+        raise failure
+
+    monkeypatch.setattr(subprocess, "run", broken)
+    with pytest.raises(OSError):
+        endpoint._lsof_listener_identity(54474)
