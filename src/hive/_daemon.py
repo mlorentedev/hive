@@ -464,41 +464,52 @@ def run_serve(host: str = DEFAULT_HOST, port: int = 0) -> int:
             file=sys.stderr,
         )
         return 0
-
     try:
-        # Single ownership is now proven, so clearing a prior crash's stale
-        # locks cannot race a live sibling daemon (ADR-011 startup self-heal).
-        _startup_self_heal(settings.vault_path)
-
-        resolved_port = port or configured_daemon_port()
-        if not _port_available(host, resolved_port):
-            from hive._endpoint import port_holder
-
-            print(
-                f"hive: stable daemon port {resolved_port} is already in use by "
-                f"{port_holder(resolved_port)}; stop the conflicting process or set "
-                "HIVE_DAEMON_PORT",
-                file=sys.stderr,
-            )
-            return 1
-        from hive._identity import IdentityError
-
-        try:
-            token, identity = prepare_daemon_credentials()
-        except (IdentityError, RuntimeError) as exc:
-            # IdentityError for the key or certificate, RuntimeError for a
-            # token that is unreadable or not owner-only; both may be exposed.
-            print(
-                f"hive: {exc}; run `hive service rotate-identity` to regenerate "
-                "the identity and rotate the token",
-                file=sys.stderr,
-            )
-            return 1
-        # Retained temporarily as diagnostic migration metadata. Clients derive
-        # the endpoint independently and never discover it through this file.
-        write_owner_only(port_file_path(), str(resolved_port))
-
-        drifted = _serve_owned(host, resolved_port, token, identity)
-        return EXIT_RESTART_ON_UPGRADE if drifted else 0
+        return _run_owned(host, port)
     finally:
         singleton.release()
+
+
+def _run_owned(host: str, port: int) -> int:
+    """Start the daemon once single ownership is proven; return its exit code."""
+    # Single ownership is now proven, so clearing a prior crash's stale
+    # locks cannot race a live sibling daemon (ADR-011 startup self-heal).
+    _startup_self_heal(settings.vault_path)
+
+    resolved_port = port or configured_daemon_port()
+    if _port_taken(host, resolved_port):
+        return 1
+    from hive._identity import IdentityError
+
+    try:
+        token, identity = prepare_daemon_credentials()
+    except (IdentityError, RuntimeError) as exc:
+        # IdentityError for the key or certificate, RuntimeError for a
+        # token that is unreadable or not owner-only; both may be exposed.
+        print(
+            f"hive: {exc}; run `hive service rotate-identity` to regenerate "
+            "the identity and rotate the token",
+            file=sys.stderr,
+        )
+        return 1
+    # Retained temporarily as diagnostic migration metadata. Clients derive
+    # the endpoint independently and never discover it through this file.
+    write_owner_only(port_file_path(), str(resolved_port))
+
+    drifted = _serve_owned(host, resolved_port, token, identity)
+    return EXIT_RESTART_ON_UPGRADE if drifted else 0
+
+
+def _port_taken(host: str, port: int) -> bool:
+    """Report on stderr, and return True, when the stable port is held."""
+    if _port_available(host, port):
+        return False
+    from hive._endpoint import port_holder
+
+    print(
+        f"hive: stable daemon port {port} is already in use by "
+        f"{port_holder(port)}; stop the conflicting process or set "
+        "HIVE_DAEMON_PORT",
+        file=sys.stderr,
+    )
+    return True

@@ -52,17 +52,20 @@ created: "2026-09-28"
 - [x] [AC1] [AC4] [AC6] Update `README.md` and CLI help for
   `HIVE_DAEMON_PORT`, persistent token handling, explicit no-fallback behavior,
   and the temporary diagnostic role of `daemon.port`.
-- [ ] Refactor only after all targeted tests are green; keep production
-  functions below 40 lines and avoid new dependencies.
+- [x] Refactor only after all targeted tests are green; keep production
+  functions below 40 lines and avoid new dependencies. `run_serve` was 48
+  lines before this spec, 49 after it and 64 after #464; it is split into
+  `run_serve` (30), `_run_owned` (28) and `_port_taken` (13), behaviour
+  unchanged, with no new dependency (2026-10-14, archive PR)
 
 ## Closing
 
-- [ ] Every acceptance criterion from `proposal.md` is covered by at least one test
-- [ ] Every acceptance criterion has a matching entry in `features.json` (see below) with a non-vacuous verification command
-- [ ] Type checks pass
-- [ ] Lint passes
-- [ ] No unrelated changes in the diff (no scope creep)
-- [ ] `verification.md` filled in
+- [x] Every acceptance criterion from `proposal.md` is covered by at least one test
+- [x] Every acceptance criterion has a matching entry in `features.json` (see below) with a non-vacuous verification command
+- [x] Type checks pass
+- [x] Lint passes
+- [x] No unrelated changes in the diff (no scope creep)
+- [x] `verification.md` filled in
 - [ ] PR opened referencing this spec folder
 
 ## Machine-readable features

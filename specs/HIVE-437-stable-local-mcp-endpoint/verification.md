@@ -61,6 +61,23 @@ created: "2026-09-28"
 - No regressions in the targeted test suite: yes (56 passed); full suite:
   pending CI.
 
+## Archive run, macOS (2026-10-14)
+
+Run on the Mac from `origin/master` (`e6b29f09`) plus the `run_serve` split,
+with `uv sync --all-extras`:
+
+- Every `features.json` verification exits 0: f1 13 passed, f2 11 passed,
+  f3 3 passed, f4 6 passed and 2 skipped, f5 13 passed, f6 1 passed.
+- `uv run mypy src/`: no issues in 38 files. `uv run ruff check src/ tests/`
+  and `uv run ruff format --check src/ tests/`: clean.
+- Full suite: 1068 passed, 5 skipped. One test was deselected,
+  `test_service.py::test_status_reports_four_states[impostor]`: macOS cannot
+  name a listener's owner yet. That is hive#478, fixed by PR #495, and it is
+  unrelated to this spec. CI on master (ubuntu, windows) is green.
+- AC5 stays partial by decision: the relay keeps the session, protocol header
+  and SSE contract, but in-flight cancellation is not forwarded until the
+  current HTTP call returns. hive#454 (BUG-002) owns it and is open.
+
 ## Decisions made during implementation
 
 Brief log of non-obvious trade-offs or course corrections taken during the work. Routine choices belong in commit messages, not here.
@@ -80,11 +97,11 @@ Brief log of non-obvious trade-offs or course corrections taken during the work.
 
 Answer each line `yes: <path>`, naming the file you promoted, or `no: <reason>`. `dotf spec archive` refuses a line left unanswered, a `no` without a reason, and a `yes` whose file does not exist; a `00_meta/` path is looked up in the vault.
 
-- [ ] Lesson for the repo's `docs/lessons/`? no: startup diagnosis is recorded
+- [x] Lesson for the repo's `docs/lessons/`? no: startup diagnosis is recorded
   in `docs/troubleshooting/stable-client-startup.md`; revisit after AC3.
-- [ ] ADR-worthy decision for the repo's `docs/adr/adr-XXX.md`? no: ADR-022
+- [x] ADR-worthy decision for the repo's `docs/adr/adr-XXX.md`? no: ADR-022
   already owns the endpoint and adapter decisions.
-- [ ] New pattern candidate for `00_meta/patterns/`? Only if this recurs in >1 project. no: this is a Hive-specific client integration.
+- [x] New pattern candidate for `00_meta/patterns/`? Only if this recurs in >1 project. no: this is a Hive-specific client integration.
 
 ## Archive checklist
 
