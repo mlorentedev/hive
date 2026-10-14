@@ -23,8 +23,8 @@ async def test_readme_lists_exactly_the_registered_tools(tmp_path: Path) -> None
         registered = {tool.name for tool in await mcp.list_tools()}
     finally:
         ctx = getattr(mcp, "_hive_ctx", None)
-        if ctx is not None:
-            ctx.close()
+        assert ctx is not None, "create_server no longer attaches _hive_ctx: close it another way"
+        ctx.close()
 
     documented = _readme_tools()
     assert registered - documented == set(), "registered but missing from the README tool table"

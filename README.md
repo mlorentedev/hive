@@ -23,7 +23,7 @@ Hive is an [MCP](https://modelcontextprotocol.io/) server that connects your AI 
 | Token cost for context | 100% every session | 0.6% for five project-context queries (real vault, 493K tokens) |
 | Knowledge retained between sessions | 0% | 100% (in vault) |
 
-> Measured on a real vault with 19 projects, 200+ files. See [benchmarks](https://mlorentedev.github.io/hive/guides/benchmarks/).
+> Only the token-cost row is a measurement (5 project-context queries on a real 493K-token vault; method and numbers in the [benchmarks](https://mlorentedev.github.io/hive/guides/benchmarks/)). The line counts and the retention row describe how the two setups work; they are not measured.
 
 ## Quick Start
 
