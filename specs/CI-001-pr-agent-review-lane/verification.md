@@ -77,8 +77,17 @@ a real burst:
    shows one `in_progress` and the rest `pending`/`completed`, none `cancelled`
    for a shape other than supersession.
 3. Each PR carries a `PR Reviewer Guide` comment authored by `github-actions[bot]`.
-4. Any `review` failure that remains is a 15-minute run (external saturation),
-   not a superseded one — that distinction is what AC3 buys.
+4. Classify any remaining `review` failure by **inspecting the failed step and the
+   run's conclusion**, never by duration alone: the attempt bound is now 12
+   minutes, the job bound 15. A step timeout at ~12 min is a hung attempt; a
+   credential step failure, a missing marker or an API error is neither; and a
+   `cancelled` conclusion means supersession. Only a step-level timeout is
+   attributable to model-pool saturation.
+
+The machine proxy in `features.json` (`group_by` over the hour bucket + no
+`cancelled`/`failure` in the window) fails closed today — it returns `false`
+against the current history, which still contains the four 15-minute hangs — and
+it cannot see "a review was published per PR"; step 3 above covers that by hand.
 
 ## Suite gate
 
@@ -91,7 +100,6 @@ Baseline on `master` before this branch was 1080 passed; the five new tests are
 this file. Lint and `mypy --strict src/` ran clean in the same invocation.
 
 ## Known limits, stated rather than hidden
-
 - Cancellation is applied when the executing step closes, not instantly (probe:
   the superseded step ran its full 92 s). The lane therefore holds a superseded
   review for up to the 12-minute attempt bound.
