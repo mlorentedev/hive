@@ -1,0 +1,30 @@
+[
+  {
+    "id": "CI-001-pr-agent-review-lane-ac1",
+    "behavior": "AC1: Two concurrency scopes in pr-agent.yml \u2014 per-PR workflow group that cancels, repository-wide job lane with queue: max \u2014 and the queue key is not beside a cancelling group",
+    "verification": "uv run pytest tests/test_pr_agent_workflow.py -k 'queuing or supersession or cancelling' -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "CI-001-pr-agent-review-lane-ac2",
+    "behavior": "AC2: The PR-Agent step declares a timeout strictly below the job bound, so a hung attempt releases the lane",
+    "verification": "uv run pytest tests/test_pr_agent_workflow.py::test_a_hung_attempt_releases_the_lane -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "CI-001-pr-agent-review-lane-ac3",
+    "behavior": "AC3: The publish guard is gated on !cancelled(), so a superseded run reports no missing review",
+    "verification": "uv run pytest tests/test_pr_agent_workflow.py::test_a_superseded_run_attests_nothing -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "CI-001-pr-agent-review-lane-ac4",
+    "behavior": "AC4: A burst of four pull requests each receive a review \u2014 machine proxy: a four-plus run bucket that is neither cancelled nor failed; the published Guide per PR is confirmed by hand",
+    "verification": "gh run list --workflow=pr-agent.yml --limit 40 --json event,createdAt,conclusion | jq -e '([.[] | select(.event==\"pull_request\")] | group_by(.createdAt[0:13]) | any(.[]; length >= 4)) and ([.[] | select(.conclusion==\"failure\" or .conclusion==\"cancelled\")] | length == 0)'",
+    "state": "pending",
+    "evidence": ""
+  }
+]
