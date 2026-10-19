@@ -41,6 +41,12 @@ concurrency:
   # first ~20 s building, and CodeRabbit's auto-summary comment lands inside that
   # window reliably — measured upstream on two PRs: both cancelled mid-build, both
   # green, zero reviews produced.
+  #
+  # This group is per pull request ON PURPOSE, and only that: it buys supersession at
+  # enqueue time, so a push cancels the stale review of its own PR wherever that run is
+  # waiting. The repository-wide lane that stops four PRs from spending the model pool
+  # at once is the JOB-level group below, not this one — GitHub refuses `queue: max`
+  # beside `cancel-in-progress: true`, so the two cannot share a block (#503).
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
   cancel-in-progress: true
 
@@ -99,6 +105,28 @@ jobs:
         && startsWith(github.event.comment.body, '/'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # One review at a time per REPOSITORY, not the per-PR racing this file used to do.
+    #
+    # Measured before this lane existed (#503): NaN's limit is five concurrent requests
+    # PER MODEL and it is shared with pi, qq, the sibling repositories' review pools and
+    # hive's own delegate worker. Four PRs reviewed in parallel, as this workflow allowed,
+    # spent four of those slots on one repository; the failing runs did not report 429 but
+    # HUNG, each one reaching the job bound with the `PR-Agent` step cancelled and the
+    # publish guard failing after it. Four such runs in the records, none producing a
+    # review.
+    #
+    # `queue: max` is the load-bearing key. With the default (`queue: single`) a group
+    # keeps ONE pending run and a newer one replaces it, so a third PR loses its review
+    # without the guard ever running — silent, on a repository where `review` is not a
+    # required check. Probed here on four simultaneous runs: one running, three pending,
+    # none discarded, and a push still cancelled the older run of its own ref (#503).
+    # The same arrangement has run in dotfiles since 2026-10-01 and is pinned by tests in
+    # kubelab; `tests/test_pr_agent_workflow.py` pins it here, because actionlint does not
+    # know this key and nothing else would notice it disappearing.
+    concurrency:
+      group: pr-agent-review-${{ github.repository }}
+      cancel-in-progress: false
+      queue: max
     steps:
       # `The-PR-Agent/pr-agent`, not `qodo-ai/pr-agent` as #786's body says: the
       # project has been renamed and the old path now redirects. Pinned to a tag
@@ -132,6 +160,14 @@ jobs:
           fi
       - name: PR-Agent
         uses: The-PR-Agent/pr-agent@8e5a9295973b24af4b70cafd0b660a230811ef9e  # v0.47.0
+        # Bounded attempt, below the job's own 15-minute limit. Once reviews are
+        # serialized, a hung attempt is not just a failed review: it is the whole lane,
+        # and four hangs at the job bound would hold every other PR for an hour. 12
+        # minutes clears the slowest review measured on this model (10.5 min upstream)
+        # and leaves the stamp, the credential check and the guard their time. A timeout
+        # here ends the step and hands the verdict to the guard below, which still fails
+        # loudly — `ai_timeout` does not fire on the hang this bounds (#503).
+        timeout-minutes: 12
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI__KEY: ${{ secrets.NAN_API_KEY }}
@@ -193,10 +229,17 @@ jobs:
         # Only the paths that actually run `/review`. An issue_comment invoking
         # `/describe` or `/improve` legitimately publishes no Guide, and failing
         # those would teach the reader to ignore this check.
-        # `always()` would also run this after the credential step failed and stack a
-        # wrong NaN-concurrency diagnosis on top of the remedy; skip it in that case.
+        # The credential step failing would also stack a wrong NaN-concurrency diagnosis
+        # on top of the remedy; skip it in that case.
+        # `!cancelled()`, not `always()`: a run cancelled by a push was TOLD to stop, so
+        # it has nothing to attest and the successor run on the newer head owns the
+        # verdict. With `always()` the guard failed it anyway, which put a red `review` on
+        # every superseded SHA — four of the nine cancelled runs in the last 60 had no
+        # infrastructure involvement at all, and the two populations were
+        # indistinguishable (#503). `!cancelled()` still runs the guard when a step above
+        # failed, which is what the credential and publish failures need.
         if: >
-          always() && steps.credential.outcome != 'failure'
+          !cancelled() && steps.credential.outcome != 'failure'
             && (github.event_name == 'pull_request'
               || (github.event_name == 'issue_comment'
                   && contains(github.event.comment.body, '/review')))
