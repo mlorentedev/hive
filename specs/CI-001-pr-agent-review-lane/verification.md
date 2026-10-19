@@ -79,6 +79,16 @@ Before this change the same shape ended `Fail if no review was published ->
 failure` on every superseded run. It also shows the cost the proposal predicted:
 the superseded attempt held the lane for 6 min 30 s before cancellation closed it.
 
+## A correction about this record's own evidence
+
+The first version of the `features.json` commands used `-k 'bound'` and `-k 'cancelled'`,
+which select no test in this file. Re-run without a pipe, they exit **5** — pytest
+refuses, and nothing could have been marked complete on them. An earlier note in this
+PR said they exited `0`, which was the exit status of `tail`, not of pytest:
+[[docs/lessons/lesson-094-a-verification-command-that-selects-zero-tests|lesson-094]] is
+about exactly that observer error, and it caught this record making it. The claim was
+corrected on the PR rather than left in place.
+
 ## AC4 — a burst of four real pull requests (OPEN)
 
 Not claimed. The fix removes hive's self-inflicted collisions; it cannot remove
