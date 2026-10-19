@@ -66,6 +66,19 @@ guard if: !cancelled() && steps.credential.outcome != 'failure' && (github.event
 lingering `always()`. `!cancelled()` still runs the guard after a failed step,
 so the credential and publish failures keep their diagnosis.
 
+**Observed in production on this pull request**, which is the first one to run
+the new config (a `pull_request` event runs the workflow from the PR's merge
+ref, so the fix applied to its own review):
+
+| run | planted | outcome |
+|---|---|---|
+| 39185684229 | first push | run `cancelled`; step 5 `PR-Agent` `cancelled`; step 6 guard **`skipped`** |
+| 39186143313 | push 20 s after, superseding it | admitted to the lane 2 s later, `PR-Agent` `success`, guard `success`, Guide published |
+
+Before this change the same shape ended `Fail if no review was published ->
+failure` on every superseded run. It also shows the cost the proposal predicted:
+the superseded attempt held the lane for 6 min 30 s before cancellation closed it.
+
 ## AC4 — a burst of four real pull requests (OPEN)
 
 Not claimed. The fix removes hive's self-inflicted collisions; it cannot remove

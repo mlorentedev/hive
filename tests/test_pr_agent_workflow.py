@@ -1,5 +1,13 @@
 """Invariants for the reviewer workflow's concurrency and guards (#503, CI-001).
 
+These pin the DECLARATION, not the scheduler: no unit test can observe GitHub
+Actions queueing. The behaviour they describe was measured on a throwaway probe
+(four simultaneous runs: one running, three pending, none discarded) and again in
+production on this pull request, where the superseded run's publish guard is
+`skipped` instead of `failed`. The tests exist because the failure mode of losing
+these keys is silent and looks exactly like the bug they fix.
+
+
 Why these are tests and not prose: the arrangement below exists to stop this
 repository from colliding with itself in a model pool it does not own (five
 concurrent requests per model, shared with pi, qq, the sibling repositories'
@@ -46,7 +54,7 @@ def _step(name: str) -> dict[str, Any]:
     raise AssertionError(f"no step named {name!r} in the review job")
 
 
-def test_inference_runs_are_queued_not_raced_across_pull_requests() -> None:
+def test_the_reviewer_job_declares_a_queuing_lane() -> None:
     """One review at a time per repository, and nothing discarded while waiting."""
     lane = _review_job()["concurrency"]
     assert lane["group"] == LANE_GROUP, (
