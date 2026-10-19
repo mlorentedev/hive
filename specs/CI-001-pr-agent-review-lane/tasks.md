@@ -18,30 +18,30 @@ created: "2026-10-18"
 
 ## Implementation
 
-- [ ] [P] [AC1] Write the failing invariant test: `tests/test_pr_agent_workflow.py`
+- [x] [P] [AC1] Write the failing invariant test: `tests/test_pr_agent_workflow.py`
       parses `.github/workflows/pr-agent.yml` and asserts the two concurrency
       scopes, the `queue: max` key and that `queue` is not beside a cancelling
       group (red: job-level group absent today)
-- [ ] [AC1] Add the job-level lane (`group`, `cancel-in-progress: false`,
+- [x] [AC1] Add the job-level lane (`group`, `cancel-in-progress: false`,
       `queue: max`) below the job's `timeout-minutes`, with the comment that says
       why the queue cannot live beside the cancelling group
-- [ ] [P] [AC2] Write the failing bound test: step `timeout-minutes` present and
+- [x] [P] [AC2] Write the failing bound test: step `timeout-minutes` present and
       strictly below the job bound (red: the step declares none)
-- [ ] [AC2] Add `timeout-minutes: 12` to the `PR-Agent` step
-- [ ] [P] [AC3] Write the failing guard test: the publish guard's `if:` contains
+- [x] [AC2] Add `timeout-minutes: 12` to the `PR-Agent` step
+- [x] [P] [AC3] Write the failing guard test: the publish guard's `if:` contains
       `!cancelled()` (red: it uses `always()`)
-- [ ] [AC3] Gate the guard on `!cancelled()` so a superseded run attests nothing
-- [ ] Refactor: keep the new comments to the facts measured in #503, no prose
+- [x] [AC3] Gate the guard on `!cancelled()` so a superseded run attests nothing
+- [x] Refactor: keep the new comments to the facts measured in #503, no prose
       duplication with the file's existing blocks
 
 ## Closing
 
-- [ ] Every acceptance criterion is covered by at least one test
-- [ ] Every acceptance criterion has a `features.json` entry with a non-vacuous
+- [x] Every acceptance criterion is covered by at least one test
+- [x] Every acceptance criterion has a `features.json` entry with a non-vacuous
       verification command
-- [ ] `make check` green (lint + mypy --strict + full suite)
-- [ ] No unrelated changes in the diff
-- [ ] `verification.md` filled with the command output that proves each AC
+- [x] `make check` green (lint + mypy --strict + full suite)
+- [x] No unrelated changes in the diff
+- [x] `verification.md` filled with the command output that proves each AC
 - [ ] PR opened referencing this spec folder
 
 ## Machine-readable features

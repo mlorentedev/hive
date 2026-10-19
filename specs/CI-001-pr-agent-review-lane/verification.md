@@ -1,42 +1,102 @@
 ---
-tags: [spec, verification, templates]
+tags: [spec, verification]
 created: "2026-10-18"
 ---
 
 # Verification - CI-001-pr-agent-review-lane
 
-## Evidence
+> Evidence only: commands run and what they returned, in this session. AC4 is
+> the one criterion that cannot be closed by a unit test; it is left open with
+> the exact measurement that closes it, rather than marked done on intent.
 
-Map every acceptance criterion from `proposal.md` to concrete proof (commit hash, test name, or observed behavior).
+## Baseline (before this change)
 
-- [ ] Criterion 1 -> commit `<hash>` / test `<name>`
-- [ ] Criterion 2 -> commit `<hash>` / test `<name>`
-- [ ] Criterion 3 -> commit `<hash>` / test `<name>`
+```
+$ uv run pytest tests/test_pr_agent_workflow.py -q      # new file, against the old workflow
+4 failed, 1 passed in 0.32s
+```
 
-## Test status
+The failures name the three absent pieces: no job-level lane
+(`test_inference_runs_are_queued_not_raced_across_pull_requests`,
+`test_the_queue_is_not_beside_a_cancelling_group`), no step bound
+(`test_a_hung_attempt_releases_the_lane`), and `always()` on the guard
+(`test_a_superseded_run_attests_nothing`). `test_supersession_stays_at_the_workflow_level`
+already passed — the per-PR group existed, and this change must not remove it.
 
-- Test suite: `<command> -> <output / coverage %>`
-- Manual smoke test: what was exercised, what was observed
-- No regressions in existing test suite: yes / no (if no, document)
+## AC1 — two concurrency scopes, lane not beside a cancelling group
 
-## Decisions made during implementation
+```
+$ uv run pytest tests/test_pr_agent_workflow.py -q
+5 passed in 0.08s
 
-Brief log of non-obvious trade-offs or course corrections taken during the work. Routine choices belong in commit messages, not here.
+$ uv run python -c "<parse the workflow and print the two scopes>"
+workflow: True | per-PR key: True
+job lane: {'group': 'pr-agent-review-${{ github.repository }}', 'cancel-in-progress': False, 'queue': 'max'}
+```
 
--
--
+Three tests hold it: the lane's group/`cancel-in-progress`/`queue` triple, the
+workflow group still keyed on the pull-request number and the issue number, and
+the assertion that `queue` appears in neither cancelling block.
 
-## Promotion candidates
+**Behaviour evidence (probe, #503 comment):** four simultaneous runs with this
+arrangement were `1 in_progress + 3 pending`, none discarded
+(runs 39174829690, 39174829735, 39174829835, 39174829838), and a push to one ref
+cancelled that ref's older run (39174829690 → `cancelled`), reproduced with and
+without the job lane (control 39174957387).
 
-Answer each line `yes: <path>`, naming the file you promoted, or `no: <reason>`. `dotf spec archive` refuses a line left unanswered, a `no` without a reason, and a `yes` whose file does not exist; a `00_meta/` path is looked up in the vault.
+## AC2 — the attempt is bounded below the job bound
 
-- [ ] Lesson for the repo's `docs/lessons/`? <yes: path / no: reason>
-- [ ] ADR-worthy decision for the repo's `docs/adr/adr-XXX.md`? <yes: path / no: reason>
-- [ ] New pattern candidate for `00_meta/patterns/`? Only if this recurs in >1 project. <yes: path / no: reason>
+```
+$ python -c "<parse>"
+bounds: job 15 step 12
+```
 
-## Archive checklist
+`test_a_hung_attempt_releases_the_lane` asserts both keys exist and that the
+step bound is strictly smaller, because a step bound at or above the job bound
+never fires — the job limit cancels the step in flight, which is exactly how
+each of the four recorded reds spent 15 minutes.
 
-- [ ] `proposal.md` frontmatter set to `status: archived`
-- [ ] Folder moved: `specs/CI-001-pr-agent-review-lane/` -> `specs/archive/CI-001-pr-agent-review-lane/`
-- [ ] Bitácora board ticket for this spec moved to Done / closed with PR link (ADR-018)
-- [ ] Promotions above executed (if any)
+## AC3 — a superseded run attests nothing
+
+```
+guard if: !cancelled() && steps.credential.outcome != 'failure' && (github.event_name == ...
+```
+
+`test_a_superseded_run_attests_nothing` requires `!cancelled()` and rejects a
+lingering `always()`. `!cancelled()` still runs the guard after a failed step,
+so the credential and publish failures keep their diagnosis.
+
+## AC4 — a burst of four real pull requests (OPEN)
+
+Not claimed. The fix removes hive's self-inflicted collisions; it cannot remove
+saturation caused by the pool's other consumers, so the only honest evidence is
+a real burst:
+
+1. Four open, non-draft pull requests created within a few minutes of each other.
+2. `gh run list --workflow=pr-agent.yml --limit 8 --json databaseId,status,conclusion`
+   shows one `in_progress` and the rest `pending`/`completed`, none `cancelled`
+   for a shape other than supersession.
+3. Each PR carries a `PR Reviewer Guide` comment authored by `github-actions[bot]`.
+4. Any `review` failure that remains is a 15-minute run (external saturation),
+   not a superseded one — that distinction is what AC3 buys.
+
+## Suite gate
+
+```
+$ make check
+1085 passed, 5 skipped, 56 deselected in 185.19s (0:03:05)
+```
+
+Baseline on `master` before this branch was 1080 passed; the five new tests are
+this file. Lint and `mypy --strict src/` ran clean in the same invocation.
+
+## Known limits, stated rather than hidden
+
+- Cancellation is applied when the executing step closes, not instantly (probe:
+  the superseded step ran its full 92 s). The lane therefore holds a superseded
+  review for up to the 12-minute attempt bound.
+- `queue:` at job level is accepted by GitHub but unknown to actionlint, and
+  there is no actionlint in this repo's CI. The tests above are the whole gate.
+- The retry path (a probe step, because PR-Agent exits 0 on a swallowed 429) is
+  out of scope here and becomes the next change if AC4's burst still produces
+  hangs.
