@@ -1,0 +1,30 @@
+[
+  {
+    "id": "CI-001-pr-agent-review-lane-ac1",
+    "behavior": "AC1: Two concurrency scopes in pr-agent.yml — per-PR workflow group that cancels, repository-wide job lane with queue: max — and the queue key is not beside a cancelling group",
+    "verification": "uv run pytest tests/test_pr_agent_workflow.py -k 'lane or scopes or queue' -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "CI-001-pr-agent-review-lane-ac2",
+    "behavior": "AC2: The PR-Agent step declares a timeout strictly below the job bound, so a hung attempt releases the lane",
+    "verification": "uv run pytest tests/test_pr_agent_workflow.py -k 'bound' -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "CI-001-pr-agent-review-lane-ac3",
+    "behavior": "AC3: The publish guard is gated on !cancelled(), so a superseded run reports no missing review",
+    "verification": "uv run pytest tests/test_pr_agent_workflow.py -k 'cancelled' -q",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "CI-001-pr-agent-review-lane-ac4",
+    "behavior": "AC4: A burst of four real pull requests each receive a review, one running plus three pending at once, with no supersession reds",
+    "verification": "gh run list --workflow=pr-agent.yml --limit 20 --json conclusion --jq '[.[] | select(.conclusion==\"failure\")] | length' | grep -qx 0",
+    "state": "pending",
+    "evidence": ""
+  }
+]
