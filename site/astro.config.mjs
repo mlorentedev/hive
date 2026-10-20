@@ -1,4 +1,3 @@
-import "./deliberately-missing-module.mjs"; // TEMP: proves the PR build goes red (#477), reverted next commit
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
