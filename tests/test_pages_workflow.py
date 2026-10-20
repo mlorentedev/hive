@@ -57,6 +57,10 @@ def test_master_pushes_still_deploy() -> None:
     push = _triggers()["push"]
     assert push["branches"] == ["master"]
     assert "site/**" in push["paths"]
+    assert ".github/workflows/pages.yml" in push["paths"], (
+        "merging a change to this workflow must deploy, or its deploy job first "
+        "runs untested on the next unrelated site bump"
+    )
 
 
 def test_a_pull_request_never_deploys() -> None:

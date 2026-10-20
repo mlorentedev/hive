@@ -3,7 +3,7 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [master]
-    paths: ['site/**']
+    paths: ['site/**', '.github/workflows/pages.yml']
   # Build-only on PRs, so a site change (every Dependabot npm bump) is built
   # before merge instead of failing the deploy after it (#477).
   pull_request:
