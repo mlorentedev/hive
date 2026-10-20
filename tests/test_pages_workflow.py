@@ -51,6 +51,11 @@ def test_pull_requests_that_touch_the_site_build_it() -> None:
     assert ".github/workflows/pages.yml" in pull_request["paths"], (
         "a PR changing this workflow must exercise it, or the check is edited blind"
     )
+    build = _job("build")
+    assert "if" not in build, "a gated build job turns the PR check green without building"
+    commands = [s.get("run") for s in build["steps"]]
+    assert "npm ci" in commands
+    assert "npm run build" in commands
 
 
 def test_master_pushes_still_deploy() -> None:
