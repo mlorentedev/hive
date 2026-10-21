@@ -120,20 +120,34 @@ def _json_frame(raw: bytes) -> dict[str, Any]:
     return value
 
 
-def _sse_frames(response: http.client.HTTPResponse) -> list[dict[str, Any]]:
+def _discard(frame: dict[str, Any]) -> None:
+    return
+
+
+def _sse_frames(
+    response: http.client.HTTPResponse,
+    emit: Callable[[dict[str, Any]], None],
+) -> list[dict[str, Any]]:
+    """Parse an SSE body, handing each frame to ``emit`` as soon as it ends (#499)."""
     frames: list[dict[str, Any]] = []
     data: list[bytes] = []
+
+    def end_event() -> None:
+        frame = _json_frame(b"\n".join(data))
+        data.clear()
+        frames.append(frame)
+        emit(frame)
+
     while line := response.readline():
         stripped = line.rstrip(b"\r\n")
         if not stripped:
             if data:
-                frames.append(_json_frame(b"\n".join(data)))
-                data.clear()
+                end_event()
             continue
         if stripped.startswith(b"data:"):
             data.append(stripped[5:].lstrip())
     if data:
-        frames.append(_json_frame(b"\n".join(data)))
+        end_event()
     return frames
 
 
@@ -291,8 +305,16 @@ class HttpRelay:
             connection.close()
             raise DaemonUnavailableError(f"Hive daemon unavailable at {self._endpoint()}") from exc
 
-    def forward(self, message: dict[str, Any]) -> list[dict[str, Any]]:
-        """Forward one client request/notification and return response frames."""
+    def forward(
+        self,
+        message: dict[str, Any],
+        emit: Callable[[dict[str, Any]], None] = _discard,
+    ) -> list[dict[str, Any]]:
+        """Forward one client request/notification and return response frames.
+
+        ``emit`` receives each frame as it arrives, so a long call's progress
+        reaches the host before its result does (#499).
+        """
         method = message.get("method")
         if method in ("initialize", "server/discover"):
             self._bootstrap_message = message.copy()
@@ -301,7 +323,7 @@ class HttpRelay:
         deadline = time.monotonic() + self._reconnect_window_s
         while True:
             try:
-                return self._forward(message, allow_reinitialize=True)
+                return self._forward(message, allow_reinitialize=True, emit=emit)
             except _RefusedBeforeSendError:
                 # Only a refusal before sending is retried: nothing reached the
                 # daemon, so the request cannot run twice. A 404 on the way
@@ -315,6 +337,7 @@ class HttpRelay:
         message: dict[str, Any],
         *,
         allow_reinitialize: bool,
+        emit: Callable[[dict[str, Any]], None] = _discard,
     ) -> list[dict[str, Any]]:
         connection, response = self._open("POST", message)
         try:
@@ -325,15 +348,16 @@ class HttpRelay:
             if response.status == 404 and allow_reinitialize and self._session_id:
                 response.read(_MAX_ERROR_BODY)
                 self._reinitialize()
-                return self._forward(message, allow_reinitialize=False)
+                return self._forward(message, allow_reinitialize=False, emit=emit)
             if response.status != 200:
                 response.read(_MAX_ERROR_BODY)
                 raise ClientError(f"Hive daemon rejected the request with HTTP {response.status}")
             content_type = response.getheader("Content-Type", "").lower()
             if "text/event-stream" in content_type:
-                frames = _sse_frames(response)
+                frames = _sse_frames(response, emit)
             elif "application/json" in content_type:
                 frames = [_json_frame(response.read())]
+                emit(frames[0])
             else:
                 raise ClientError(f"Hive daemon returned unsupported content type {content_type!r}")
             self._capture_protocol(message, frames)
@@ -399,6 +423,25 @@ def _write_frame(frame: dict[str, Any]) -> None:
     sys.stdout.flush()
 
 
+class _Answer:
+    """Writes one message's frames to stdout and tracks whether it was answered.
+
+    The host waits for an answer to every request it sends. A stream can end
+    before that answer, or break just after it, so the relay must know which
+    happened: owe an error in the first case, and never send a second answer
+    in the other.
+    """
+
+    def __init__(self, message: dict[str, Any]) -> None:
+        self._id = message.get("id")
+        self.owed = "id" in message and "method" in message
+
+    def __call__(self, frame: dict[str, Any]) -> None:
+        _write_frame(frame)
+        if frame.get("id") == self._id and ("result" in frame or "error" in frame):
+            self.owed = False
+
+
 def _error_frame(message: dict[str, Any], error: ClientError) -> dict[str, Any]:
     return {
         "jsonrpc": "2.0",
@@ -430,23 +473,30 @@ def run_client(host: str = DEFAULT_HOST) -> int:
         return 1
     try:
         for raw in sys.stdin.buffer:
+            answer: _Answer | None = None
             try:
                 message = json.loads(raw)
                 if not isinstance(message, dict):
                     raise ValueError("JSON-RPC message must be an object")
-                for frame in relay.forward(message):
-                    _write_frame(frame)
+                answer = _Answer(message)
+                # The frames go out through `answer` as they arrive; the
+                # returned list is the same frames again.
+                relay.forward(message, emit=answer)
+                if answer.owed:
+                    raise DaemonUnavailableError(
+                        "the Hive daemon ended the response without answering"
+                    )
             except (json.JSONDecodeError, ValueError) as exc:
                 print(f"hive client: invalid JSON-RPC input ({exc})", file=sys.stderr)
                 return 1
             except DaemonUnavailableError as exc:
                 # The harness never relaunches an exited stdio server, so stay
                 # up: the next request reconnects to the restarted daemon (#487).
-                if "id" in message:
+                if answer is not None and answer.owed:
                     _write_frame(_error_frame(message, exc))
                 print(f"hive client: {exc}", file=sys.stderr)
             except ClientError as exc:
-                if "id" in message:
+                if answer is not None and answer.owed:
                     _write_frame(_error_frame(message, exc))
                 print(f"hive client: {exc}", file=sys.stderr)
                 return 1
