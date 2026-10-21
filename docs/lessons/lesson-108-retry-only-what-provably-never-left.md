@@ -22,8 +22,8 @@ branch comes first. And a retry loop placed in `_connect` would also make
 `close()`, which runs in `run_client`'s `finally`, hang for the whole window.
 
 **Solution:** The exception type carries the safety fact.
-`_RefusedBeforeSendError` is raised only by the handshake's `OSError` branch,
-and only `forward()` retries it, on a fixed 1 s interval. The outage length is
+`_RefusedBeforeSendError` is raised only by the handshake's `OSError` branch
+and, since #513, its `ssl.SSLEOFError` branch. Only `forward()` retries it, on a fixed 1 s interval. The outage length is
 known, and exponential backoff would overshoot the daemon's return.
 Post-send failures raise the parent `DaemonUnavailableError`: answered,
 survived, not retried. A mutation that retries post-send turns the
@@ -34,3 +34,14 @@ duplicate-write test red.
 a *timeout* on macOS (measured). Both are pre-send. `ThreadingHTTPServer.shutdown()`
 blocks forever if `serve_forever()` never ran, so a red-phase fixture whose
 server never came back hangs teardown unless it guards that.
+
+**Follow-up (#513):** A listener that closes before presenting a certificate
+is a restart, not an impersonation: only a ClientHello left. If it closed
+after reading the ClientHello the client sees `SSLEOFError`, a subclass of
+`SSLError`, so it needs its own branch ahead of the impostor branch. If it
+closed with the ClientHello unread the kernel sends an RST, which surfaces as
+a plain `OSError` and was already retried. A test that closes without reading
+first therefore races between the two and can pass without the fix. Read the
+ClientHello, then close. A plaintext impostor gives `WRONG_VERSION_NUMBER` and
+a foreign certificate gives `CERTIFICATE_VERIFY_FAILED`. Both keep failing at
+once.

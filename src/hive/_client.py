@@ -254,6 +254,14 @@ class HttpRelay:
         )
         try:
             connection.connect()
+        except ssl.SSLEOFError as exc:
+            # The listener closed before the handshake completed, as a daemon
+            # does while it stops or starts. A certificate that fails the pin
+            # raises a verification error before this, and nothing but the
+            # handshake was sent, so this is as safe to retry as a refused
+            # connect (#513).
+            connection.close()
+            raise _RefusedBeforeSendError(f"Hive daemon unavailable at {self._endpoint()}") from exc
         except ssl.SSLError as exc:
             connection.close()
             if presented_expired_pin(exc):
