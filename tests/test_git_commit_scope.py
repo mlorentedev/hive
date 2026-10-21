@@ -65,3 +65,15 @@ def test_a_path_with_glob_characters_is_matched_literally(git_vault: Path) -> No
 
     assert _committed(git_vault) == {"a[1].md"}
     assert _staged(git_vault) == {"a1.md"}
+
+
+def test_staging_a_glob_named_path_leaves_its_glob_matches_alone(git_vault: Path) -> None:
+    # A non-literal `git add a[1].md` also stages an unstaged `a1.md`.
+    (git_vault / "a1.md").write_text("theirs, unstaged\n", encoding="utf-8")
+    (git_vault / "a[1].md").write_text("mine\n", encoding="utf-8")
+
+    assert _git_commit(git_vault, [Path("a[1].md")], "vault: write a[1].md")
+
+    assert _committed(git_vault) == {"a[1].md"}
+    assert _staged(git_vault) == set(), "a1.md must not have been staged"
+    assert "a1.md" in _git(git_vault, "ls-files", "--others")
