@@ -21,13 +21,13 @@ End-of-session review that extracts lessons and appends them to the vault.
 
 ## delegate
 
-Structured protocol for delegating tasks to cheaper models via hive-worker.
+Structured protocol for delegating tasks to the worker model.
 
 **Parameters**: `task` (string)
 
 **Protocol**:
 1. Assess task complexity against a suitability matrix
-2. Choose appropriate model tier
+2. Check that a worker is configured and reachable with `worker_status`
 3. Construct context-rich prompt
 4. Call `delegate_task` with the prepared prompt
 5. Validate the response before using it

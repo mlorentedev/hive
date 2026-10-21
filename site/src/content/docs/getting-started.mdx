@@ -9,9 +9,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 - An MCP-compatible client — [Claude Code](https://docs.anthropic.com/en/docs/build-with-claude/claude-code/overview), [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [GitHub Copilot](https://code.visualstudio.com/docs/copilot/chat/mcp-servers), [Cursor](https://cursor.com/), [Windsurf](https://windsurf.com/), or any other MCP host
 - An [Obsidian](https://obsidian.md/) vault (or any directory of Markdown files) — see [Vault Structure](/hive/guides/vault-structure/) for the expected layout
-- **Optional for worker delegation:**
-  - [Ollama](https://ollama.com/download) running locally — pull a model with `ollama pull qwen2.5-coder:7b`
-  - [OpenRouter](https://openrouter.ai/) account — create an API key at [openrouter.ai/keys](https://openrouter.ai/keys) (free tier available)
+- **Optional for worker delegation:** any OpenAI-compatible `/v1` endpoint — a hosted service or a runtime on your own machine. You need its base URL, a credential if it requires one, and a model id. Hive names no provider.
 
 ## Install
 
@@ -162,15 +160,16 @@ To point Hive to your vault:
 
 ## Configure Worker (Optional)
 
-To enable task delegation to cheaper models:
+To enable task delegation, point Hive at one OpenAI-compatible endpoint with `HIVE_WORKER_BASE_URL`, `HIVE_WORKER_API_KEY` and `HIVE_WORKER_MODEL`. Without a base URL the worker stays disabled and `delegate_task` tells the host to handle the task itself:
 
 <Tabs syncKey="client">
   <TabItem label="Claude Code">
     ```bash
     claude mcp add -s user hive \
       -e VAULT_PATH=/path/to/your/vault \
-      -e HIVE_OLLAMA_ENDPOINT=http://your-ollama:11434 \
-      -e OPENROUTER_API_KEY=sk-or-... \
+      -e HIVE_WORKER_BASE_URL=https://api.your-provider.example/v1 \
+      -e HIVE_WORKER_API_KEY=<your-key> \
+      -e HIVE_WORKER_MODEL=<model-id> \
       -- uvx --upgrade hive-vault
     ```
   </TabItem>
@@ -182,16 +181,18 @@ To enable task delegation to cheaper models:
 
     [mcp_servers.hive-vault.env]
     VAULT_PATH = "/path/to/your/vault"
-    HIVE_OLLAMA_ENDPOINT = "http://your-ollama:11434"
-    OPENROUTER_API_KEY = "sk-or-..."
+    HIVE_WORKER_BASE_URL = "https://api.your-provider.example/v1"
+    HIVE_WORKER_API_KEY = "<your-key>"
+    HIVE_WORKER_MODEL = "<model-id>"
     ```
   </TabItem>
   <TabItem label="Gemini CLI">
     ```bash
     gemini mcp add -s user \
       -e VAULT_PATH=/path/to/your/vault \
-      -e HIVE_OLLAMA_ENDPOINT=http://your-ollama:11434 \
-      -e OPENROUTER_API_KEY=sk-or-... \
+      -e HIVE_WORKER_BASE_URL=https://api.your-provider.example/v1 \
+      -e HIVE_WORKER_API_KEY=<your-key> \
+      -e HIVE_WORKER_MODEL=<model-id> \
       hive-vault uvx -- --upgrade hive-vault
     ```
   </TabItem>
@@ -204,8 +205,9 @@ To enable task delegation to cheaper models:
           "args": ["--upgrade", "hive-vault"],
           "env": {
             "VAULT_PATH": "/path/to/your/vault",
-            "HIVE_OLLAMA_ENDPOINT": "http://your-ollama:11434",
-            "OPENROUTER_API_KEY": "sk-or-..."
+            "HIVE_WORKER_BASE_URL": "https://api.your-provider.example/v1",
+            "HIVE_WORKER_API_KEY": "<your-key>",
+            "HIVE_WORKER_MODEL": "<model-id>"
           }
         }
       }
@@ -221,8 +223,9 @@ To enable task delegation to cheaper models:
           "command": ["uvx", "--upgrade", "hive-vault"],
           "environment": {
             "VAULT_PATH": "/path/to/your/vault",
-            "HIVE_OLLAMA_ENDPOINT": "http://your-ollama:11434",
-            "OPENROUTER_API_KEY": "sk-or-..."
+            "HIVE_WORKER_BASE_URL": "https://api.your-provider.example/v1",
+            "HIVE_WORKER_API_KEY": "<your-key>",
+            "HIVE_WORKER_MODEL": "<model-id>"
           },
           "enabled": true
         }
@@ -247,6 +250,6 @@ You should see project counts, file counts, and staleness metrics for each proje
 - [Use Cases](/hive/guides/use-cases/) — real-world workflows with Hive
 - [Configuration](/hive/configuration/) — full environment variable reference
 - [Vault Tools](/hive/tools/vault/) — all vault tools
-- [Worker Tools](/hive/tools/worker/) — task delegation and routing
+- [Worker Tools](/hive/tools/worker/) — task delegation and worker status
 - [Vault Structure](/hive/guides/vault-structure/) — how to organize your vault
 - [Troubleshooting](/hive/guides/troubleshooting/) — common issues and fixes

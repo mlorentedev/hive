@@ -118,7 +118,7 @@ capture_lesson(
 )
 ```
 
-This sends the text to a worker model (Ollama or OpenRouter) which identifies decisions, bug root causes, and pattern choices — then writes them to `90-lessons.md`. Your primary model saves tokens by not processing the raw text itself.
+This sends the text to the configured worker model, which identifies decisions, bug root causes, and pattern choices — then writes them to `90-lessons.md`. Your primary model saves tokens by not processing the raw text itself.
 
 **When to use inline vs batch:**
 - **Inline** (`capture_lesson` with title/problem/solution): You know the exact lesson — structured input, single lesson
@@ -126,7 +126,7 @@ This sends the text to a worker model (Ollama or OpenRouter) which identifies de
 
 ## Delegating Trivial Tasks
 
-Save tokens by routing simple tasks to cheaper models:
+Save tokens by handing simple tasks to the worker model:
 
 > "Delegate: explain this regex ^(?:[a-z0-9]+\.)*[a-z0-9]+$"
 
@@ -137,7 +137,7 @@ delegate_task(
 )
 ```
 
-Routes to Ollama (free, local) first. Falls back to OpenRouter if unavailable.
+Makes one attempt against the configured worker (`HIVE_WORKER_MODEL`). If the worker is unconfigured, unreachable or rate-limited, the call returns an error telling the host to handle the task itself — there is no fallback to another model.
 
 ## End-of-Session Retrospective
 
@@ -201,9 +201,9 @@ vault_search(since_days=7, project="my-project")
 
 Combines git history with frontmatter dates to surface all recent activity.
 
-## Checking Worker Budget
+## Checking Worker Status
 
-Monitor your OpenRouter spending:
+Check that the worker is configured and answering:
 
 > "Show worker status"
 
@@ -211,4 +211,4 @@ Monitor your OpenRouter spending:
 worker_status()
 ```
 
-Returns: monthly budget remaining, provider connectivity, request counts, and cost breakdown.
+Returns: whether a worker is configured, whether it is reachable (probed, not assumed), the model, this month's request and token counts, and the models the endpoint lists.

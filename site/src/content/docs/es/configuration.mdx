@@ -21,8 +21,8 @@ Hive se degrada de forma elegante — cada dependencia recomendada u opcional a�
   - El [plugin obsidian-git](https://github.com/Vinzent03/obsidian-git) con auto-commit configurado a **5–10 minutos**. La carga de git ya está fuera de la ruta sincrónica de la herramienta — las escrituras difieren su commit a un tick del reconciler por defecto — pero el plugin sigue mereciendo la pena; ver *Configuración recomendada* abajo.
 
 - **Opcional**
-  - [Ollama](https://ollama.com/) ejecutando `qwen2.5-coder:7b` (o compatible) para llamadas locales y gratuitas de `delegate_task` / `capture_lesson`.
-  - Una API key de OpenRouter (`OPENROUTER_API_KEY`) como worker de respaldo (tier gratuito y de pago).
+  - Cualquier **endpoint `/v1` compatible con OpenAI** como worker para `delegate_task` / `capture_lesson`, configurado con `HIVE_WORKER_BASE_URL`, `HIVE_WORKER_API_KEY` y `HIVE_WORKER_MODEL`. Un servicio alojado y un runtime local se configuran igual; Hive no nombra ningún proveedor.
+  - El extra `[semantic]` más un endpoint de embeddings compatible con OpenAI (`HIVE_EMBED_BASE_URL`) para habilitar `vault_ask`, Q&A semántico opcional. Deshabilitado hasta que se configura.
   - Un remote git de respaldo (por ejemplo, un repo privado en GitHub) para que el historial del vault sobreviva a una pérdida de disco.
 
 ### Configuración recomendada
@@ -44,18 +44,19 @@ Cuando una llamada a una herramienta se cancela a mitad de ejecución (worker le
 | Variable | Valor por defecto | Descripción |
 |---|---|---|
 | `HIVE_VAULT_PATH` | `~/Projects/knowledge` | Ruta a tu vault de Obsidian (nombre canónico; también se acepta el `VAULT_PATH` sin prefijo). Para clientes MCP basados en fichero de configuración (Hermes, Cursor, Windsurf, …), defínelo en el bloque `env` del servidor en lugar de con un flag de CLI. |
-| `HIVE_OLLAMA_ENDPOINT` | `http://localhost:11434` | Endpoint de la API de Ollama |
-| `HIVE_OLLAMA_MODEL` | `qwen2.5-coder:7b` | Modelo de Ollama por defecto |
-| `HIVE_OPENROUTER_API_KEY` | — | API key de OpenRouter |
-| `HIVE_OPENROUTER_MODEL` | `qwen/qwen3-coder:free` | Modelo de OpenRouter por defecto (tier gratuito) |
-| `HIVE_OPENROUTER_PAID_MODEL` | `qwen/qwen3-coder` | Modelo de pago para delegate_task |
-| `HIVE_OPENROUTER_BUDGET` | `1.0` | Presupuesto mensual máximo en USD |
-| `HIVE_DB_PATH` | `~/.local/share/hive/worker.db` | Base de datos SQLite para tracking de presupuesto/uso |
+| `HIVE_WORKER_BASE_URL` | — (worker deshabilitado) | URL base del endpoint compatible con OpenAI del worker (p. ej. `https://api.your-provider.example/v1`). Si no está definida, usa `HIVE_EMBED_BASE_URL`; sin ninguna de las dos, el worker queda deshabilitado. |
+| `HIVE_WORKER_API_KEY` | — | Credencial del endpoint del worker. Si no está definida, usa `HIVE_EMBED_API_KEY`. Nunca se muestra en la salida de estado. |
+| `HIVE_WORKER_MODEL` | — | Id del modelo que usa el worker cuando se llama a `delegate_task` sin `model`, tal como lo nombra tu endpoint. Si no está definido, usa `HIVE_EMBED_MODEL`. |
+| `HIVE_EMBED_BASE_URL` | — (`vault_ask` deshabilitado) | URL base de un endpoint de embeddings compatible con OpenAI. Habilita `vault_ask` (junto con el extra `[semantic]`). |
+| `HIVE_EMBED_MODEL` | — | Id del modelo de embeddings, tal como lo nombra tu endpoint. |
+| `HIVE_EMBED_API_KEY` | — | Credencial del endpoint de embeddings (también se usa para la síntesis). |
+| `HIVE_SYNTH_MODEL` | — | Modelo de chat que `vault_ask` usa para redactar una respuesta con citas a partir de las secciones recuperadas, servido por el mismo endpoint que los embeddings. Vacío = `vault_ask` devuelve las secciones recuperadas sin llamar a un LLM. |
+| `HIVE_DB_PATH` | `~/.local/share/hive/worker.db` | Base de datos SQLite para telemetría de uso del worker (peticiones, tokens, latencia). El índice de `vault_ask` se guarda en un directorio `index/` junto a ella |
 | `HIVE_RELEVANCE_DB_PATH` | `~/.local/share/hive/relevance.db` | Base de datos SQLite para puntuación adaptativa de contexto |
 | `HIVE_LESSON_DB_PATH` | `~/.local/share/hive/lesson_reinforcement.db` | Base de datos SQLite para contadores de refuerzo de lecciones + confianza decaída |
 | `HIVE_STALE_THRESHOLD_DAYS` | `180` | Días antes de que un archivo se marque como obsoleto |
-| `HIVE_HTTP_TIMEOUT` | `60.0` | Timeout HTTP (segundos) para Ollama y OpenRouter |
-| `HIVE_TOOL_TIMEOUT` | `60.0` | Timeout a nivel de herramienta (segundos) para tools async de worker (capture_lesson, delegate_task, worker_status) |
+| `HIVE_HTTP_TIMEOUT` | `60.0` | Timeout HTTP (segundos) para las llamadas al worker |
+| `HIVE_TOOL_TIMEOUT` | `60.0` | Timeout a nivel de herramienta (segundos) para tools async (capture_lesson, delegate_task, worker_status, vault_ask) |
 | `HIVE_LOCK_TIMEOUT_S` | `30` | Timeout de adquisición del filelock de git (segundos). Sube a 60-90 en vaults grandes o bajo fuerte contención con obsidian-git. Validado 1..600. |
 | `HIVE_WAL_CHECKPOINT_INTERVAL_S` | `30.0` | Intervalo entre ticks de `PRAGMA wal_checkpoint(PASSIVE)` por proceso hive. Menor = drenaje del WAL más agresivo. Validado >0..3600. |
 | `HIVE_OUTBOX_TICK_S` | `5.0` | Intervalo (segundos) entre ticks del reconciliador que drena el outbox de refuerzo de lecciones hacia SQLite. Menor = visibilidad cross-process más rápida, mayor contención SQLite. |
@@ -69,14 +70,15 @@ Cuando una llamada a una herramienta se cancela a mitad de ejecución (worker le
 | `HIVE_LOG_LEVEL` | `INFO` | Nivel del log persistente. Captura los loggers `hive`, `fastmcp` y `mcp`. `DEBUG` para diagnóstico a nivel de transporte; `WARNING` para silenciar eventos de ciclo de vida. |
 | `HIVE_LOG_RETENTION_DAYS` | `7` | Cuánto se conserva el log de depuración de cada proceso. Cada proceso escribe su propio `hive-<pid>.log` (limitado a 1MB), así que esto acota el *número* de ficheros, no su tamaño. Al arrancar, un log se borra solo si es más antiguo que este valor **y** su proceso propietario ya no existe — el log de un daemon inactivo nunca se recoge. Validado 1..365. |
 
-## Resolución de API Key
+## Credencial del Worker
 
-La API key de OpenRouter soporta dos nombres por conveniencia:
+La API key del worker tiene un único nombre: `HIVE_WORKER_API_KEY`. Si no está definida, Hive usa `HIVE_EMBED_API_KEY`, de modo que un despliegue que apunta ambos al mismo endpoint solo necesita la clave una vez. Hive no lee variables con nombre de proveedor: si tu lanzador resuelve la credencial bajo su propio nombre, mapéala a `HIVE_WORKER_API_KEY` cuando inyecte el entorno.
 
-- `HIVE_OPENROUTER_API_KEY` (con prefijo, estándar)
-- `OPENROUTER_API_KEY` (sin prefijo, para entornos que ya la exportan)
+El fallback es por campo — `HIVE_WORKER_BASE_URL`, `HIVE_WORKER_API_KEY` y `HIVE_WORKER_MODEL` heredan cada uno de su equivalente `HIVE_EMBED_*` de forma independiente, así que puedes sobrescribir solo el modelo y conservar el endpoint. Un valor `HIVE_WORKER_*` explícito siempre gana.
 
-Si ambas están definidas, la versión con prefijo `HIVE_` tiene prioridad.
+:::note[Migración desde 3.x]
+Los ajustes del worker por proveedor y el alias de clave de proveedor sin prefijo se eliminaron en 4.0.0 (los backends de Ollama y OpenRouter ya no existen). Define `HIVE_WORKER_*` en su lugar, como se indica arriba.
+:::
 
 ## Ejemplo: Configuración Completa
 
@@ -85,9 +87,9 @@ Si ambas están definidas, la versión con prefijo `HIVE_` tiene prioridad.
     ```bash
     claude mcp add -s user hive \
       -e VAULT_PATH=$HOME/mi-vault \
-      -e HIVE_OLLAMA_ENDPOINT=http://minipc.local:11434 \
-      -e OPENROUTER_API_KEY=sk-or-v1-abc123 \
-      -e HIVE_OPENROUTER_BUDGET=10.0 \
+      -e HIVE_WORKER_BASE_URL=https://api.your-provider.example/v1 \
+      -e HIVE_WORKER_API_KEY=<your-key> \
+      -e HIVE_WORKER_MODEL=<model-id> \
       -- uvx --upgrade hive-vault
     ```
   </TabItem>
@@ -100,18 +102,18 @@ Si ambas están definidas, la versión con prefijo `HIVE_` tiene prioridad.
 
     [mcp_servers.hive-vault.env]
     VAULT_PATH = "~/mi-vault"
-    HIVE_OLLAMA_ENDPOINT = "http://minipc.local:11434"
-    OPENROUTER_API_KEY = "sk-or-v1-abc123"
-    HIVE_OPENROUTER_BUDGET = "10.0"
+    HIVE_WORKER_BASE_URL = "https://api.your-provider.example/v1"
+    HIVE_WORKER_API_KEY = "<your-key>"
+    HIVE_WORKER_MODEL = "<model-id>"
     ```
   </TabItem>
   <TabItem label="Gemini CLI">
     ```bash
     gemini mcp add -s user \
       -e VAULT_PATH=$HOME/mi-vault \
-      -e HIVE_OLLAMA_ENDPOINT=http://minipc.local:11434 \
-      -e OPENROUTER_API_KEY=sk-or-v1-abc123 \
-      -e HIVE_OPENROUTER_BUDGET=10.0 \
+      -e HIVE_WORKER_BASE_URL=https://api.your-provider.example/v1 \
+      -e HIVE_WORKER_API_KEY=<your-key> \
+      -e HIVE_WORKER_MODEL=<model-id> \
       hive-vault uvx -- --upgrade hive-vault
     ```
   </TabItem>
@@ -125,9 +127,9 @@ Si ambas están definidas, la versión con prefijo `HIVE_` tiene prioridad.
           "args": ["--upgrade", "hive-vault"],
           "env": {
             "VAULT_PATH": "/home/tu-usuario/mi-vault",
-            "HIVE_OLLAMA_ENDPOINT": "http://minipc.local:11434",
-            "OPENROUTER_API_KEY": "sk-or-v1-abc123",
-            "HIVE_OPENROUTER_BUDGET": "10.0"
+            "HIVE_WORKER_BASE_URL": "https://api.your-provider.example/v1",
+            "HIVE_WORKER_API_KEY": "<your-key>",
+            "HIVE_WORKER_MODEL": "<model-id>"
           }
         }
       }
@@ -144,9 +146,9 @@ Si ambas están definidas, la versión con prefijo `HIVE_` tiene prioridad.
           "command": ["uvx", "--upgrade", "hive-vault"],
           "environment": {
             "VAULT_PATH": "/home/tu-usuario/mi-vault",
-            "HIVE_OLLAMA_ENDPOINT": "http://minipc.local:11434",
-            "OPENROUTER_API_KEY": "sk-or-v1-abc123",
-            "HIVE_OPENROUTER_BUDGET": "10.0"
+            "HIVE_WORKER_BASE_URL": "https://api.your-provider.example/v1",
+            "HIVE_WORKER_API_KEY": "<your-key>",
+            "HIVE_WORKER_MODEL": "<model-id>"
           },
           "enabled": true
         }
@@ -216,31 +218,35 @@ Si solo necesitas acceso al vault sin delegación de tareas:
   </TabItem>
 </Tabs>
 
-Las herramientas de worker seguirán disponibles pero devolverán "no hay proveedores disponibles" cuando se invoquen.
+Las herramientas de worker siguen registradas, pero `delegate_task` devuelve "worker not configured" y `worker_status` informa `Configured: no` hasta que se define `HIVE_WORKER_BASE_URL`.
 
-## Configurar Ollama
+## Configurar un Worker
 
-[Ollama](https://ollama.com/download) te permite ejecutar LLMs localmente de forma gratuita. Después de instalar:
+Sirve cualquier endpoint `/v1` compatible con OpenAI — un servicio alojado o un runtime en tu propia máquina. Necesitas tres valores:
+
+1. La URL base del endpoint, terminada en `/v1` → `HIVE_WORKER_BASE_URL`. Un runtime local escucha en una URL de loopback como `http://localhost:11434/v1`.
+2. Una credencial, si el endpoint la requiere → `HIVE_WORKER_API_KEY`
+3. El id del modelo exactamente como lo nombra el endpoint → `HIVE_WORKER_MODEL`
+
+Hive no recomienda ni usa por defecto ningún proveedor, y no valida el id del modelo contra ningún catálogo. Para comprobar la configuración, pide a tu asistente que llame a `worker_status`: deberías ver `Configured: yes` y `Reachable: yes (N models)`. "Configured" solo significa que hay una URL base definida; "Reachable" se sondea contra el endpoint. Consulta [Enrutamiento de Workers](/hive/es/guides/worker-routing/) para ver cómo se tratan un único intento y sus fallos.
+
+## Configurar Q&A Semántico (vault_ask)
+
+`vault_ask` responde preguntas en lenguaje natural a partir de tu vault, con citas de las fuentes. Es opcional y está desactivado por defecto. Para habilitarlo:
 
 ```bash
-# Descargar el modelo por defecto
-ollama pull qwen2.5-coder:7b
-
-# Verificar que está ejecutándose
-curl http://localhost:11434/api/tags
+pip install 'hive-vault[semantic]'
 ```
 
-Si Ollama se ejecuta en otra máquina (ej. un homelab), configura `HIVE_OLLAMA_ENDPOINT` con su dirección.
+Después configura un endpoint de embeddings compatible con OpenAI — igual que el worker, alojado o local:
 
-## Configurar OpenRouter
+```bash
+HIVE_EMBED_BASE_URL=https://api.your-provider.example/v1
+HIVE_EMBED_MODEL=<an embedding model the endpoint serves>
+HIVE_EMBED_API_KEY=<your-key>
+```
 
-[OpenRouter](https://openrouter.ai/) proporciona acceso a muchos modelos a través de una única API. Hay modelos de tier gratuito disponibles.
-
-1. Crea una cuenta en [openrouter.ai](https://openrouter.ai/)
-2. Genera una API key en [openrouter.ai/keys](https://openrouter.ai/keys)
-3. Pásala como `OPENROUTER_API_KEY` al registrar el servidor MCP
-
-El modelo por defecto (`qwen/qwen3-coder:free`) es gratuito. Los modelos de pago solo se usan cuando estableces explícitamente `max_cost_per_request > 0` en las llamadas a `delegate_task`, y están limitados por `HIVE_OPENROUTER_BUDGET`.
+Reinicia el servidor; el índice se construye de forma perezosa en el primer uso y se actualiza a medida que escribes en el vault. Define `HIVE_SYNTH_MODEL` con un modelo de chat del mismo endpoint para obtener una respuesta sintetizada y con citas en lugar de las secciones recuperadas en bruto. Ten en cuenta que un ajuste del worker sin definir usa su equivalente `HIVE_EMBED_*`: con solo estas variables, el worker hereda el endpoint y la clave de embeddings, pero también el id del modelo de embeddings, que no puede conversar — así que define `HIVE_WORKER_MODEL` explícitamente si también usas el worker. Consulta [`vault_ask`](/hive/es/tools/vault/#vault_ask).
 
 ## Activar Hive en tu Flujo de Trabajo
 

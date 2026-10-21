@@ -21,13 +21,13 @@ Revisión de fin de sesión que extrae lecciones y las agrega al vault.
 
 ## delegate
 
-Protocolo estructurado para delegar tareas a modelos más baratos vía hive-worker.
+Protocolo estructurado para delegar tareas al modelo worker.
 
 **Parámetros**: `task` (string)
 
 **Protocolo**:
 1. Evaluar complejidad de la tarea contra una matriz de idoneidad
-2. Elegir el tier de modelo apropiado
+2. Comprobar con `worker_status` que hay un worker configurado y alcanzable
 3. Construir prompt rico en contexto
 4. Llamar a `delegate_task` con el prompt preparado
 5. Validar la respuesta antes de usarla
