@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import http.client
 import json
 import os
 import queue
 import shutil
+import socket
 import statistics
+import struct
 import subprocess
 import sys
 import threading
@@ -843,6 +846,156 @@ def test_relay_never_retries_an_impostor(owner_identity: Identity) -> None:
     impostor.wait()
 
     assert time.monotonic() - started < 5.0, "an impostor must fail at once, not after the window"
+
+
+# ── #513: a restart that closes the connection before the handshake ends ──
+
+
+def _recv_exactly(conn: socket.socket, size: int) -> bytes:
+    data = b""
+    while len(data) < size:
+        chunk = conn.recv(size - len(data))
+        if not chunk:
+            break
+        data += chunk
+    return data
+
+
+def _close_before_handshake(conn: socket.socket, *, reset: bool) -> None:
+    # Read the ClientHello first: closing with it unread sends an RST, so the
+    # FIN case would race into the reset case.
+    conn.settimeout(5)
+    with contextlib.suppress(OSError):
+        # A TLS record header carries the length of the record behind it.
+        header = _recv_exactly(conn, 5)
+        if len(header) == 5:
+            _recv_exactly(conn, struct.unpack("!H", header[3:5])[0])
+    if reset:
+        # SO_LINGER 0 makes close() send an RST.
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+    conn.close()
+
+
+@pytest.fixture
+def closing_then_serving_daemon(
+    owner_identity: Identity,
+) -> Iterator[tuple[str, int, ThreadingHTTPServer]]:
+    """A daemon that listens, closes its first connection unanswered, then serves.
+
+    A daemon stopping or starting can accept a connection and close it before
+    TLS completes. The same listening socket then serves, so no other socket can
+    take the port in between.
+    """
+    _McpHandler.requests = []
+    _McpHandler.reject_session_once = False
+    _McpHandler.stale_session = ""
+    _McpHandler.next_session = "session-123"
+    _McpHandler.cert_pem = owner_identity.cert_path.read_text(encoding="ascii")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _McpHandler, bind_and_activate=False)
+    server.server_bind()
+    server.server_activate()
+    server.closed_unanswered = 0  # type: ignore[attr-defined]
+    serving = threading.Event()
+
+    def close_once_then_serve() -> None:
+        conn, _ = server.socket.accept()
+        _close_before_handshake(conn, reset=False)
+        server.closed_unanswered += 1  # type: ignore[attr-defined]
+        server.socket = server_context(owner_identity).wrap_socket(server.socket, server_side=True)
+        serving.set()
+        server.serve_forever()
+
+    threading.Thread(target=close_once_then_serve, daemon=True).start()
+    host, port = server.server_address
+    try:
+        yield str(host), int(port), server
+    finally:
+        # shutdown() waits for serve_forever() to return, so it hangs when a
+        # failing relay never got the server that far.
+        if serving.is_set():
+            server.shutdown()
+        server.server_close()
+
+
+def test_relay_waits_out_a_restart_that_closes_before_the_handshake(
+    closing_then_serving_daemon: tuple[str, int, ThreadingHTTPServer],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hive._client as client_module
+
+    host, port, server = closing_then_serving_daemon
+    monkeypatch.setattr(client_module, "_RECONNECT_INTERVAL_S", 0.1)
+    relay = client_module.HttpRelay(
+        host, port, "secret-token", _McpHandler.cert_pem, reconnect_window_s=10.0
+    )
+
+    frames = relay.forward(_TOOLS_LIST)
+
+    assert server.closed_unanswered == 1  # type: ignore[attr-defined]
+    assert frames[-1] == {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}
+    assert [r["message"]["method"] for r in _McpHandler.requests] == ["tools/list"]
+
+
+class _ClosingListener:
+    """Closes every connection before the TLS handshake, as a daemon that never comes back."""
+
+    def __init__(self, *, reset: bool) -> None:
+        self.listener = socket.create_server(("127.0.0.1", 0))
+        # Closing the socket does not wake a blocked accept() on Linux.
+        self.listener.settimeout(0.1)
+        self.port = int(self.listener.getsockname()[1])
+        self.closed = 0
+        self._reset = reset
+        self._stopping = threading.Event()
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        while not self._stopping.is_set():
+            try:
+                conn, _ = self.listener.accept()
+            except TimeoutError:
+                continue
+            except OSError:
+                return
+            _close_before_handshake(conn, reset=self._reset)
+            self.closed += 1
+
+    def stop(self) -> None:
+        self._stopping.set()
+        self._thread.join(timeout=5)
+        self.listener.close()
+
+
+@pytest.mark.parametrize("reset", [False, True], ids=["fin", "rst"])
+def test_relay_reports_a_listener_that_always_closes_as_unavailable(
+    owner_identity: Identity,
+    monkeypatch: pytest.MonkeyPatch,
+    reset: bool,
+) -> None:
+    """It presented no certificate, so it is not reported as an impersonation."""
+    import hive._client as client_module
+
+    listener = _ClosingListener(reset=reset)
+    monkeypatch.setattr(client_module, "_RECONNECT_INTERVAL_S", 0.1)
+    relay = client_module.HttpRelay(
+        "127.0.0.1",
+        listener.port,
+        "secret-token",
+        owner_identity.cert_path.read_text(encoding="ascii"),
+        reconnect_window_s=1.0,
+    )
+    started = time.monotonic()
+
+    try:
+        with pytest.raises(client_module.DaemonUnavailableError, match="daemon unavailable"):
+            relay.forward(_TOOLS_LIST)
+        elapsed = time.monotonic() - started
+    finally:
+        listener.stop()
+
+    assert listener.closed >= 2, "it must have retried within the window"
+    assert elapsed < 5.0
 
 
 def test_relay_never_retries_a_request_the_daemon_may_have_received(

@@ -27,6 +27,12 @@ before answering with an error. On a host whose initialize deadline is shorter
 the daemon, or set the window below that deadline for that host's
 registration.
 
+A restarting daemon can also accept the connection and close it before TLS
+completes. The client treats that like a refused connect and keeps waiting
+(#513). Any other TLS failure is reported as "possible impersonation": a
+certificate that does not match the pin, a listener that does not speak TLS,
+or a protocol or cipher negotiation that fails.
+
 ## Diagnosis
 
 Run the installed-entrypoint benchmark on the supported Windows Python 3.12
