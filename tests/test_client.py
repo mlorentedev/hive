@@ -923,24 +923,30 @@ class _ClosingListener:
 
     def __init__(self, *, reset: bool) -> None:
         self.listener = socket.create_server(("127.0.0.1", 0))
+        # Closing the socket does not wake a blocked accept() on Linux.
+        self.listener.settimeout(0.1)
         self.port = int(self.listener.getsockname()[1])
         self.closed = 0
         self._reset = reset
+        self._stopping = threading.Event()
         self._thread = threading.Thread(target=self._serve, daemon=True)
         self._thread.start()
 
     def _serve(self) -> None:
-        while True:
+        while not self._stopping.is_set():
             try:
                 conn, _ = self.listener.accept()
+            except TimeoutError:
+                continue
             except OSError:
                 return
             _close_before_handshake(conn, reset=self._reset)
             self.closed += 1
 
     def stop(self) -> None:
-        self.listener.close()
+        self._stopping.set()
         self._thread.join(timeout=5)
+        self.listener.close()
 
 
 @pytest.mark.parametrize("reset", [False, True], ids=["fin", "rst"])
@@ -966,11 +972,12 @@ def test_relay_reports_a_listener_that_always_closes_as_unavailable(
     try:
         with pytest.raises(client_module.DaemonUnavailableError, match="daemon unavailable"):
             relay.forward(_TOOLS_LIST)
+        elapsed = time.monotonic() - started
     finally:
         listener.stop()
 
     assert listener.closed >= 2, "it must have retried within the window"
-    assert time.monotonic() - started < 5.0
+    assert elapsed < 5.0
 
 
 def test_relay_never_retries_a_request_the_daemon_may_have_received(
