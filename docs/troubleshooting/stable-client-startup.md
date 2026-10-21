@@ -29,8 +29,9 @@ registration.
 
 A restarting daemon can also accept the connection and close it before TLS
 completes. The client treats that like a refused connect and keeps waiting
-(#513). It reports "possible impersonation" only when the listener presents a
-certificate that does not match the pin, or does not speak TLS at all.
+(#513). Any other TLS failure is reported as "possible impersonation": a
+certificate that does not match the pin, a listener that does not speak TLS,
+or a protocol or cipher negotiation that fails.
 
 ## Diagnosis
 

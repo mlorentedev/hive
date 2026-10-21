@@ -851,12 +851,25 @@ def test_relay_never_retries_an_impostor(owner_identity: Identity) -> None:
 # ── #513: a restart that closes the connection before the handshake ends ──
 
 
+def _recv_exactly(conn: socket.socket, size: int) -> bytes:
+    data = b""
+    while len(data) < size:
+        chunk = conn.recv(size - len(data))
+        if not chunk:
+            break
+        data += chunk
+    return data
+
+
 def _close_before_handshake(conn: socket.socket, *, reset: bool) -> None:
     # Read the ClientHello first: closing with it unread sends an RST, so the
     # FIN case would race into the reset case.
     conn.settimeout(5)
     with contextlib.suppress(OSError):
-        conn.recv(65536)
+        # A TLS record header carries the length of the record behind it.
+        header = _recv_exactly(conn, 5)
+        if len(header) == 5:
+            _recv_exactly(conn, struct.unpack("!H", header[3:5])[0])
     if reset:
         # SO_LINGER 0 makes close() send an RST.
         conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
@@ -882,12 +895,14 @@ def closing_then_serving_daemon(
     server.server_bind()
     server.server_activate()
     server.closed_unanswered = 0  # type: ignore[attr-defined]
+    serving = threading.Event()
 
     def close_once_then_serve() -> None:
         conn, _ = server.socket.accept()
         _close_before_handshake(conn, reset=False)
         server.closed_unanswered += 1  # type: ignore[attr-defined]
         server.socket = server_context(owner_identity).wrap_socket(server.socket, server_side=True)
+        serving.set()
         server.serve_forever()
 
     threading.Thread(target=close_once_then_serve, daemon=True).start()
@@ -895,7 +910,10 @@ def closing_then_serving_daemon(
     try:
         yield str(host), int(port), server
     finally:
-        server.shutdown()
+        # shutdown() waits for serve_forever() to return, so it hangs when a
+        # failing relay never got the server that far.
+        if serving.is_set():
+            server.shutdown()
         server.server_close()
 
 
