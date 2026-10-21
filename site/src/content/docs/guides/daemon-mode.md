@@ -74,6 +74,15 @@ from `uvx hive-vault` to `hive client`. The full per-machine procedure
 (verifying the daemon serves, the surgical `~/.claude.json` edit, and rollback)
 lives in the [Daemon Activation runbook](https://github.com/mlorentedev/hive/blob/master/docs/runbooks/daemon-activation.md).
 
+`hive client` survives a daemon restart. When it cannot connect, it retries
+every second for up to 45 seconds (longer than the service's restart delay),
+then answers that request with a JSON-RPC error and keeps running, so the next
+request reconnects. It never retries a request the daemon may already have
+received, and never retries an unverified listener. Set
+`HIVE_CLIENT_RECONNECT_WINDOW_S` (0–600, `0` disables the wait) to change the
+window; lower it for a host whose initialize deadline is shorter than 45
+seconds.
+
 For **GitHub Copilot CLI** on a trusted single-user host, register
 `copilot mcp add hive -- hive client` in user scope. Set `HIVE_DAEMON_PORT`
 for both the daemon and client if you override the default. Disable an old
