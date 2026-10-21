@@ -20,6 +20,13 @@ If the daemon was launched with `hive serve --port`, the client still derives
 its port independently: set the same `HIVE_DAEMON_PORT` in both environments
 or remove `--port` to use the default per-user endpoint.
 
+If the daemon is down when the client starts, the first `initialize` waits up
+to `HIVE_CLIENT_RECONNECT_WINDOW_S` (default 45 s, #487) for it to come back
+before answering with an error. On a host whose initialize deadline is shorter
+(Copilot CLI was measured at ~4.1 s), the host closes the client first. Start
+the daemon, or set the window below that deadline for that host's
+registration.
+
 ## Diagnosis
 
 Run the installed-entrypoint benchmark on the supported Windows Python 3.12

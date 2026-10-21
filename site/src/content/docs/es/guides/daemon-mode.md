@@ -77,6 +77,15 @@ El último paso es apuntar tu cliente MCP al daemon — cambia la entrada `hive`
 (verificar que el daemon sirve, la edición quirúrgica de `~/.claude.json`, y el
 rollback) está en el [runbook de Activación del Daemon](https://github.com/mlorentedev/hive/blob/master/docs/runbooks/daemon-activation.md).
 
+`hive client` sobrevive a un reinicio del daemon. Si no puede conectar, lo
+reintenta cada segundo durante un máximo de 45 segundos (más que el retardo de
+reinicio del servicio); después responde a esa petición con un error JSON-RPC
+y sigue en marcha, de modo que la siguiente petición vuelve a conectar. Nunca
+reintenta una petición que el daemon pueda haber recibido ya, ni un listener
+no verificado. Define `HIVE_CLIENT_RECONNECT_WINDOW_S` (0–600; `0` desactiva la
+espera) para cambiar la ventana; redúcela en un host cuyo plazo de initialize
+sea menor de 45 segundos.
+
 Para **GitHub Copilot CLI** en un equipo confiable de un solo usuario,
 registra `copilot mcp add hive -- hive client` a nivel de usuario. Si cambias
 el puerto, define `HIVE_DAEMON_PORT` tanto para el daemon como para el cliente.

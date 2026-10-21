@@ -6,8 +6,10 @@ import contextlib
 import http.client
 import json
 import math
+import os
 import ssl
 import sys
+import time
 from typing import TYPE_CHECKING, Any
 
 from hive._credential import _read_token
@@ -32,10 +34,47 @@ if TYPE_CHECKING:
 _CONNECT_TIMEOUT_S = 0.75
 _READ_TIMEOUT_S = 70.0
 _MAX_ERROR_BODY = 4096
+RECONNECT_WINDOW_ENV = "HIVE_CLIENT_RECONNECT_WINDOW_S"
+# Past systemd's RestartSec=30, so a request that lands mid-restart still
+# reaches the daemon that comes back (#487).
+_DEFAULT_RECONNECT_WINDOW_S = 45.0
+_MAX_RECONNECT_WINDOW_S = 600.0
+_RECONNECT_INTERVAL_S = 1.0
 
 
 class ClientError(RuntimeError):
     """A safe, actionable adapter failure that never contains credentials."""
+
+
+class DaemonUnavailableError(ClientError):
+    """The daemon could not be reached; the relay answers and keeps running."""
+
+
+class _RefusedBeforeSendError(DaemonUnavailableError):
+    """The connection failed before any byte was written, so a retry cannot
+    deliver the request twice."""
+
+
+def reconnect_window_s() -> float:
+    """How long a refused connect is retried, from ``HIVE_CLIENT_RECONNECT_WINDOW_S``.
+
+    Read with the stdlib, like ``configured_daemon_port``: the client must not
+    import ``hive.config``. ``0`` disables the wait.
+    """
+    raw = os.environ.get(RECONNECT_WINDOW_ENV, "").strip()
+    if not raw:
+        return _DEFAULT_RECONNECT_WINDOW_S
+    try:
+        window = float(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"{RECONNECT_WINDOW_ENV} must be a number of seconds, got {raw!r}"
+        ) from exc
+    if not math.isfinite(window) or not 0 <= window <= _MAX_RECONNECT_WINDOW_S:
+        raise ValueError(
+            f"{RECONNECT_WINDOW_ENV} must be between 0 and {_MAX_RECONNECT_WINDOW_S:g}, got {raw!r}"
+        )
+    return window
 
 
 def _metadata_protocol(message: dict[str, Any]) -> str:
@@ -135,10 +174,12 @@ class HttpRelay:
         cert_pem: str,
         *,
         reload: Callable[[], tuple[str, str]] | None = None,
+        reconnect_window_s: float = 0.0,
     ) -> None:
         self._host = host
         self._port = port
         self._reload = reload
+        self._reconnect_window_s = reconnect_window_s
         self._pin(token, cert_pem)
         self._session_id = ""
         self._protocol_version = ""
@@ -223,8 +264,10 @@ class HttpRelay:
                 ) from exc
             raise _UnverifiedListenerError from exc
         except OSError as exc:
+            # After the ssl.SSLError branch on purpose: SSLError is an OSError,
+            # and an impostor or an expired pin must never be retried.
             connection.close()
-            raise ClientError(f"Hive daemon unavailable at {self._endpoint()}") from exc
+            raise _RefusedBeforeSendError(f"Hive daemon unavailable at {self._endpoint()}") from exc
         sock = connection.sock
         if not isinstance(sock, ssl.SSLSocket) or not fingerprint_matches(sock, self._fingerprint):
             connection.close()
@@ -246,7 +289,7 @@ class HttpRelay:
             return connection, connection.getresponse()
         except (OSError, http.client.HTTPException) as exc:
             connection.close()
-            raise ClientError(f"Hive daemon unavailable at {self._endpoint()}") from exc
+            raise DaemonUnavailableError(f"Hive daemon unavailable at {self._endpoint()}") from exc
 
     def forward(self, message: dict[str, Any]) -> list[dict[str, Any]]:
         """Forward one client request/notification and return response frames."""
@@ -255,7 +298,17 @@ class HttpRelay:
             self._bootstrap_message = message.copy()
         elif method == "notifications/initialized":
             self._initialized_message = message.copy()
-        return self._forward(message, allow_reinitialize=True)
+        deadline = time.monotonic() + self._reconnect_window_s
+        while True:
+            try:
+                return self._forward(message, allow_reinitialize=True)
+            except _RefusedBeforeSendError:
+                # Only a refusal before sending is retried: nothing reached the
+                # daemon, so the request cannot run twice. A 404 on the way
+                # here meant the daemon had not run it either.
+                if time.monotonic() + _RECONNECT_INTERVAL_S > deadline:
+                    raise
+                time.sleep(_RECONNECT_INTERVAL_S)
 
     def _forward(
         self,
@@ -286,7 +339,7 @@ class HttpRelay:
             self._capture_protocol(message, frames)
             return frames
         except (OSError, http.client.HTTPException) as exc:
-            raise ClientError(f"Hive daemon unavailable at {self._endpoint()}") from exc
+            raise DaemonUnavailableError(f"Hive daemon unavailable at {self._endpoint()}") from exc
         finally:
             connection.close()
 
@@ -294,17 +347,25 @@ class HttpRelay:
         """Restore the backend session after a daemon restart."""
         if self._bootstrap_message is None:
             raise ClientError("Hive daemon lost the MCP session before discovery or initialize")
+        stale = (self._session_id, self._protocol_version)
         self._session_id = ""
         self._protocol_version = ""
-        self._forward(self._bootstrap_message, allow_reinitialize=False)
-        if self._bootstrap_message["method"] == "server/discover":
-            return
-        initialized = self._initialized_message or {
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized",
-            "params": {},
-        }
-        self._forward(initialized, allow_reinitialize=False)
+        try:
+            self._forward(self._bootstrap_message, allow_reinitialize=False)
+            if self._bootstrap_message["method"] == "server/discover":
+                return
+            initialized = self._initialized_message or {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {},
+            }
+            self._forward(initialized, allow_reinitialize=False)
+        except ClientError:
+            # Keep the stale session: the next attempt meets its 404 and
+            # re-initializes. An empty one would go out sessionless for good,
+            # because only a request that carries a session triggers this path.
+            self._session_id, self._protocol_version = stale
+            raise
 
     def _capture_protocol(
         self,
@@ -356,7 +417,14 @@ def run_client(host: str = DEFAULT_HOST) -> int:
     try:
         port = configured_daemon_port()
         token, cert_pem = _owner_credentials()
-        relay = HttpRelay(host, port, token, cert_pem, reload=_owner_credentials)
+        relay = HttpRelay(
+            host,
+            port,
+            token,
+            cert_pem,
+            reload=_owner_credentials,
+            reconnect_window_s=reconnect_window_s(),
+        )
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"hive client: {exc}", file=sys.stderr)
         return 1
@@ -371,6 +439,12 @@ def run_client(host: str = DEFAULT_HOST) -> int:
             except (json.JSONDecodeError, ValueError) as exc:
                 print(f"hive client: invalid JSON-RPC input ({exc})", file=sys.stderr)
                 return 1
+            except DaemonUnavailableError as exc:
+                # The harness never relaunches an exited stdio server, so stay
+                # up: the next request reconnects to the restarted daemon (#487).
+                if "id" in message:
+                    _write_frame(_error_frame(message, exc))
+                print(f"hive client: {exc}", file=sys.stderr)
             except ClientError as exc:
                 if "id" in message:
                     _write_frame(_error_frame(message, exc))
