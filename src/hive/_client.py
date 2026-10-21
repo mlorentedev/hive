@@ -347,17 +347,25 @@ class HttpRelay:
         """Restore the backend session after a daemon restart."""
         if self._bootstrap_message is None:
             raise ClientError("Hive daemon lost the MCP session before discovery or initialize")
+        stale = (self._session_id, self._protocol_version)
         self._session_id = ""
         self._protocol_version = ""
-        self._forward(self._bootstrap_message, allow_reinitialize=False)
-        if self._bootstrap_message["method"] == "server/discover":
-            return
-        initialized = self._initialized_message or {
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized",
-            "params": {},
-        }
-        self._forward(initialized, allow_reinitialize=False)
+        try:
+            self._forward(self._bootstrap_message, allow_reinitialize=False)
+            if self._bootstrap_message["method"] == "server/discover":
+                return
+            initialized = self._initialized_message or {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {},
+            }
+            self._forward(initialized, allow_reinitialize=False)
+        except ClientError:
+            # Keep the stale session: the next attempt meets its 404 and
+            # re-initializes. An empty one would go out sessionless for good,
+            # because only a request that carries a session triggers this path.
+            self._session_id, self._protocol_version = stale
+            raise
 
     def _capture_protocol(
         self,

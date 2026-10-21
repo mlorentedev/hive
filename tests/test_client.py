@@ -29,6 +29,9 @@ if TYPE_CHECKING:
 class _McpHandler(BaseHTTPRequestHandler):
     requests: list[dict[str, Any]] = []
     reject_session_once = False
+    # A session the restarted daemon no longer knows, and the one it hands out next.
+    stale_session = ""
+    next_session = "session-123"
     cert_pem = ""
 
     def do_POST(self) -> None:  # noqa: N802
@@ -51,7 +54,7 @@ class _McpHandler(BaseHTTPRequestHandler):
                         "serverInfo": {"name": "test", "version": "1"},
                     },
                 },
-                session_id="session-123",
+                session_id=self.next_session,
             )
             return
         if method == "server/discover":
@@ -66,6 +69,10 @@ class _McpHandler(BaseHTTPRequestHandler):
             return
         if self.reject_session_once and self.headers.get("Mcp-Session-Id"):
             type(self).reject_session_once = False
+            self.send_response(404)
+            self.end_headers()
+            return
+        if self.stale_session and self.headers.get("Mcp-Session-Id") == self.stale_session:
             self.send_response(404)
             self.end_headers()
             return
@@ -116,6 +123,8 @@ def owner_identity(tmp_path_factory: pytest.TempPathFactory) -> Identity:
 def mcp_http_server(owner_identity: Identity) -> Iterator[tuple[str, int, type[_McpHandler]]]:
     _McpHandler.requests = []
     _McpHandler.reject_session_once = False
+    _McpHandler.stale_session = ""
+    _McpHandler.next_session = "session-123"
     _McpHandler.cert_pem = owner_identity.cert_path.read_text(encoding="ascii")
     server = ThreadingHTTPServer(("127.0.0.1", 0), _McpHandler)
     server.socket = server_context(owner_identity).wrap_socket(server.socket, server_side=True)
@@ -712,6 +721,8 @@ def restarting_daemon(
     """
     _McpHandler.requests = []
     _McpHandler.reject_session_once = False
+    _McpHandler.stale_session = ""
+    _McpHandler.next_session = "session-123"
     _McpHandler.cert_pem = owner_identity.cert_path.read_text(encoding="ascii")
     server = ThreadingHTTPServer(("127.0.0.1", 0), _McpHandler, bind_and_activate=False)
     server.server_bind()
@@ -916,3 +927,140 @@ def test_reconnect_window_defaults_past_the_supervisors_restart_delay(
 
     monkeypatch.delenv("HIVE_CLIENT_RECONNECT_WINDOW_S", raising=False)
     assert reconnect_window_s() == 45.0
+
+
+def _calls(handler: type[_McpHandler]) -> list[tuple[str, str | None]]:
+    return [
+        (r["message"]["method"], r["headers"].get("Mcp-Session-Id"))
+        for r in handler.requests
+        if "message" in r
+    ]
+
+
+def _restart_daemon(handler: type[_McpHandler]) -> None:
+    """The old session is gone, and a new initialize hands out another."""
+    handler.stale_session = "session-123"
+    handler.next_session = "session-789"
+
+
+def test_relay_rebootstraps_when_the_restart_interrupts_reinitialize(
+    mcp_http_server: tuple[str, int, type[_McpHandler]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refusal between the 404 and the new initialize must not lose the bootstrap."""
+    import hive._client as client_module
+
+    host, port, handler = mcp_http_server
+    relay = client_module.HttpRelay(
+        host, port, "secret-token", handler.cert_pem, reconnect_window_s=10.0
+    )
+    relay.forward({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+    _restart_daemon(handler)
+    real_handshake = client_module.HttpRelay._handshake
+    connects: list[int] = []
+
+    def refuse_the_rebootstrap(self: client_module.HttpRelay) -> http.client.HTTPSConnection:
+        connects.append(1)
+        if len(connects) == 2:  # 1: tools/list -> 404; 2: the re-initialize
+            raise client_module._RefusedBeforeSendError("Hive daemon unavailable (test)")
+        return real_handshake(self)
+
+    monkeypatch.setattr(client_module.HttpRelay, "_handshake", refuse_the_rebootstrap)
+    monkeypatch.setattr(client_module, "_RECONNECT_INTERVAL_S", 0.05)
+
+    frames = relay.forward({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+
+    assert frames[-1] == {"jsonrpc": "2.0", "id": 2, "result": {"tools": []}}
+    assert _calls(handler)[-3:] == [
+        ("initialize", None),
+        ("notifications/initialized", "session-789"),
+        ("tools/list", "session-789"),
+    ], "the request must go out on a re-initialized session, never sessionless"
+
+
+def test_relay_recovers_after_a_failed_reinitialize(
+    mcp_http_server: tuple[str, int, type[_McpHandler]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A re-initialize lost after sending is answered; the next request retries it."""
+    from hive._client import DaemonUnavailableError, HttpRelay
+
+    host, port, handler = mcp_http_server
+    relay = HttpRelay(host, port, "secret-token", handler.cert_pem, reconnect_window_s=10.0)
+    relay.forward({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+    _restart_daemon(handler)
+    original_getresponse = http.client.HTTPConnection.getresponse
+    responses: list[int] = []
+
+    def drop_the_reinitialize(connection: http.client.HTTPConnection) -> http.client.HTTPResponse:
+        responses.append(1)
+        response = original_getresponse(connection)
+        if len(responses) == 2:  # 1: tools/list -> 404; 2: the re-initialize
+            response.read()
+            raise ConnectionResetError("daemon went away mid-response")
+        return response
+
+    monkeypatch.setattr(http.client.HTTPConnection, "getresponse", drop_the_reinitialize)
+    with pytest.raises(DaemonUnavailableError):
+        relay.forward({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+
+    frames = relay.forward({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
+
+    assert frames[-1] == {"jsonrpc": "2.0", "id": 3, "result": {"tools": []}}
+    assert _calls(handler)[-3:] == [
+        ("initialize", None),
+        ("notifications/initialized", "session-789"),
+        ("tools/list", "session-789"),
+    ], "a failed re-initialize must not leave the relay sessionless for good"
+
+
+def test_relay_never_retries_an_expired_pin(tmp_path: Path) -> None:
+    import datetime as dt
+
+    from hive._client import ClientError, DaemonUnavailableError, HttpRelay
+    from hive._identity import create_identity
+
+    long_ago = dt.datetime.now(dt.UTC) - dt.timedelta(days=500)
+    expired = create_identity(tmp_path / "daemon.key", tmp_path / "daemon.crt", now=long_ago)
+    listener = Impostor(expired)
+    relay = HttpRelay(
+        "127.0.0.1",
+        listener.port,
+        "secret-token",
+        expired.cert_path.read_text(encoding="ascii"),
+        reconnect_window_s=30.0,
+    )
+    started = time.monotonic()
+
+    with pytest.raises(ClientError, match="expired certificate") as excinfo:
+        relay.forward(_TOOLS_LIST)
+    listener.wait()
+
+    assert not isinstance(excinfo.value, DaemonUnavailableError), "an expired pin must exit"
+    assert time.monotonic() - started < 5.0
+
+
+def test_relay_never_retries_a_failed_event_stream(
+    mcp_http_server: tuple[str, int, type[_McpHandler]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The daemon received the request before its stream broke; a retry could run it twice."""
+    import hive._client as client_module
+
+    host, port, handler = mcp_http_server
+
+    def broken_stream(response: http.client.HTTPResponse) -> list[dict[str, Any]]:
+        response.read()
+        raise ConnectionResetError("daemon went away mid-stream")
+
+    monkeypatch.setattr(client_module, "_sse_frames", broken_stream)
+    relay = client_module.HttpRelay(
+        host, port, "secret-token", handler.cert_pem, reconnect_window_s=30.0
+    )
+    started = time.monotonic()
+
+    with pytest.raises(client_module.DaemonUnavailableError):
+        relay.forward(_TOOLS_LIST)
+
+    assert time.monotonic() - started < 5.0
+    assert len(handler.requests) == 1, "the request must have been sent exactly once"
