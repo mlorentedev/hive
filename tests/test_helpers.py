@@ -737,7 +737,15 @@ class TestGitCommitCoalesce:
         commit_calls = [c for c in calls if c[:2] == ["git", "commit"]]
         assert len(add_calls) == 1, f"expected 1 add, got {len(add_calls)}: {calls}"
         assert len(commit_calls) == 1, f"expected 1 commit, got {len(commit_calls)}: {calls}"
-        assert add_calls[0] == ["git", "add", "a.md", "b.md", "c.md"]
+        assert add_calls[0] == [
+            "git",
+            "add",
+            "--",
+            ":(literal)a.md",
+            ":(literal)b.md",
+            ":(literal)c.md",
+        ]
+        assert commit_calls[0][-4:] == ["--", ":(literal)a.md", ":(literal)b.md", ":(literal)c.md"]
 
     def test_noop_on_empty_paths(
         self,
@@ -812,7 +820,16 @@ class TestGitCommitNoVerify:
         _git_commit(tmp_path, [_Path("a.md")], "msg")
 
         [commit] = [c for c in calls if c[:2] == ["git", "commit"]]
-        assert commit == ["git", "commit", "--no-verify", "-m", "msg"]
+        assert commit == [
+            "git",
+            "commit",
+            "--no-verify",
+            "-m",
+            "msg",
+            "--only",
+            "--",
+            ":(literal)a.md",
+        ]
 
     def test_git_commit_omits_no_verify_when_disabled(
         self,
@@ -829,7 +846,7 @@ class TestGitCommitNoVerify:
         _git_commit(tmp_path, [_Path("a.md")], "msg")
 
         [commit] = [c for c in calls if c[:2] == ["git", "commit"]]
-        assert commit == ["git", "commit", "-m", "msg"]
+        assert commit == ["git", "commit", "-m", "msg", "--only", "--", ":(literal)a.md"]
         assert "--no-verify" not in commit
 
     def test_git_commit_all_includes_no_verify_by_default(

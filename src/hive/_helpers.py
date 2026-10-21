@@ -1339,8 +1339,12 @@ def _post_kill_drain() -> float:
     return settings.post_kill_drain_s
 
 
-def _commit_args(message: str) -> list[str]:
+def _commit_args(message: str, pathspecs: list[str] | None = None) -> list[str]:
     """Build the ``git commit`` argv, gated on ``git_commit_no_verify``.
+
+    With ``pathspecs``, the commit records only those paths (``--only``) and
+    leaves the rest of the index staged: several sessions share one vault, and
+    a bare ``git commit`` would sweep another session's staged work (#470).
 
     Lazy read of ``settings.git_commit_no_verify`` (default True) so tests
     can monkeypatch the settings object after import — same idiom as
@@ -1354,6 +1358,8 @@ def _commit_args(message: str) -> list[str]:
     args = ["commit", "-m", message]
     if settings.git_commit_no_verify:
         args.insert(1, "--no-verify")
+    if pathspecs is not None:
+        args += ["--only", "--", *pathspecs]
     return args
 
 
@@ -1960,7 +1966,10 @@ def _git_commit(
     rel_paths: list[Path],
     message: str,
 ) -> bool:
-    """Stage one or more files and commit them in a single git invocation.
+    """Stage one or more files and commit only those, in one git invocation.
+
+    Anything else in the index (another session's staged work) stays staged
+    and out of the commit (#470).
 
     Returns ``True`` when a commit was created, ``False`` on any failure
     (lock timeout, git error, external termination). The boolean is what
@@ -1999,6 +2008,8 @@ def _git_commit(
         return False
     safe_msg = message.replace("\n", " ").replace("\r", " ")
     path_strs = [str(p) for p in rel_paths]
+    # Literal, so `a[1].md` names that file and not also the glob match `a1.md`.
+    pathspecs = [f":(literal){p.as_posix()}" for p in rel_paths]
     if not _acquire_with_telemetry(_GIT_LOCK, "_GIT_LOCK"):
         _log.warning(
             "git commit skipped for %s: thread lock timeout (%ds)",
@@ -2009,7 +2020,7 @@ def _git_commit(
     try:
         try:
             with _filelock_with_telemetry(_git_filelock(vault_path), "_git_filelock"):
-                rc, _, err = _run_git(["add", *path_strs], vault_path)
+                rc, _, err = _run_git(["add", "--", *pathspecs], vault_path)
                 if rc != 0:
                     cause = "external_termination" if rc == RC_EXTERNAL_TERMINATION else "git_error"
                     _log.warning(
@@ -2020,7 +2031,7 @@ def _git_commit(
                         err.strip(),
                     )
                     return False
-                rc, _, err = _run_git(_commit_args(safe_msg), vault_path)
+                rc, _, err = _run_git(_commit_args(safe_msg, pathspecs), vault_path)
                 if rc != 0:
                     cause = "external_termination" if rc == RC_EXTERNAL_TERMINATION else "git_error"
                     _log.warning(
