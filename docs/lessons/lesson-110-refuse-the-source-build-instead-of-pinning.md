@@ -17,14 +17,19 @@ tags: [hive, lesson, packaging, uv, windows, arm64, BUG-012]
 or not it has a wheel for the platform. When it has none, the installer builds
 from source, and a clean machine has no compiler. A platform marker
 (`cryptography<47` on Arm64) would fix it for every installer, but it would
-keep Arm64 on 46.x after upstream ships Arm64 wheels again, and someone would
-have to watch its security fixes by hand.
+keep Arm64 on 46.x after upstream ships Arm64 wheels again.
 
 **Solution:** Refuse the source build for that one package: `--only-binary
 cryptography` in `uv pip install`, `--no-build-package cryptography` for
 `uvx` and `uv tool install`. The resolver backtracks to the newest release
 that has a wheel, and moves forward again on its own once a newer one does.
 On platforms that always get a wheel, nothing changes.
+
+The flag does not avoid the stale version; it avoids locking it in. Today
+Arm64 lands on 46.0.3, which has four high-severity advisories fixed in
+later releases. A downgrade like that has to be written down where the
+installer is documented, with the advisories it carries and the event that
+ends it, or nobody notices it.
 
 **Limit:** A flag only reaches the installs that pass it. hive passes it in
 `hive self-upgrade`. The `uvx` that launches `hive self-upgrade`, and every

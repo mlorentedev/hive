@@ -42,14 +42,45 @@ uvx --no-build-package cryptography --from hive-vault hive self-upgrade <version
 ```
 
 For an MCP registration that runs `uvx hive-vault`, add the same flag to its
-arguments: `uvx --no-build-package cryptography hive-vault`.
-`UV_NO_BUILD_PACKAGE=cryptography` works too, but it must be set in the
-environment of the process that runs `uv`.
+arguments: `uvx --no-build-package cryptography hive-vault`. Setting the
+environment variable works too, in the environment of the process that runs
+`uv`:
+
+```powershell
+$env:UV_NO_BUILD_PACKAGE = "cryptography"
+```
 
 `hive self-upgrade` needs no flag of its own: it builds each version with
 `uv pip install --only-binary cryptography` (`_runtime.build_version`). The
 `uvx` that starts it still needs the flag, because uvx installs hive-vault
 before `hive` runs.
+
+## Security caveat
+
+The cryptography that Arm64 gets is not the current one. On 2026-10-22 the
+flag resolves 46.0.3, and 46.0.3 is inside the affected range of these
+advisories:
+
+| Advisory | Severity | Fixed in | Affects |
+|---|---|---|---|
+| GHSA-r6ph-v2qm-q3c2 | high | 46.0.5 | EC public keys on SECT curves |
+| GHSA-537c-gmf6-5ccf | high | 48.0.1 | the OpenSSL bundled in every wheel |
+| GHSA-jwv3-5hgf-82ww | high | 49.0.0 | X.509 path building |
+| GHSA-g6cj-pr64-35w5 | high | 50.0.0 | PKCS#7 EnvelopedData decryption |
+| GHSA-m2h6-j472-rp4c | medium | 49.0.0 | X.509 verifier name constraints |
+| GHSA-p423-j2cm-9vmq | medium | 46.0.7 | APIs given non-contiguous buffers |
+
+hive itself calls cryptography only to generate and load its own P-256
+self-signed certificate (`_identity.py`), and none of the API-specific
+advisories touch those calls. The bundled-OpenSSL one applies to every
+wheel below 48.0.1, and hive cannot rule it out. Other packages in the same
+environment also use cryptography: authlib, joserfc and pyjwt, through
+fastmcp. The daemon authenticates with a static bearer token
+(`StaticTokenVerifier`), not with OAuth or JWT signatures, so those code paths
+are not on by default.
+
+The upgrade trigger is the first `win_arm64` wheel at or above 50.0.0 on
+PyPI. The flag picks it up with no change in hive.
 
 ## Verification
 
