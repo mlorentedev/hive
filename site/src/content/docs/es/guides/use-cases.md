@@ -118,7 +118,7 @@ capture_lesson(
 )
 ```
 
-Esto envía el texto a un modelo worker (Ollama u OpenRouter) que identifica decisiones, causas raíz de bugs y elecciones de patrones — y luego los escribe en `90-lessons.md`. Tu modelo primario ahorra tokens al no procesar el texto en bruto.
+Esto envía el texto al modelo worker configurado, que identifica decisiones, causas raíz de bugs y elecciones de patrones — y luego los escribe en `90-lessons.md`. Tu modelo primario ahorra tokens al no procesar el texto en bruto.
 
 **Cuándo usar inline vs lotes:**
 - **Inline** (`capture_lesson` con title/problem/solution): Conoces la lección exacta — entrada estructurada, una lección
@@ -126,7 +126,7 @@ Esto envía el texto a un modelo worker (Ollama u OpenRouter) que identifica dec
 
 ## Delegar Tareas Triviales
 
-Ahorra tokens enrutando tareas simples a modelos más baratos:
+Ahorra tokens entregando tareas simples al modelo worker:
 
 > "Delega: explica esta regex ^(?:[a-z0-9]+\.)*[a-z0-9]+$"
 
@@ -137,7 +137,7 @@ delegate_task(
 )
 ```
 
-Enruta a Ollama (gratuito, local) primero. Si no está disponible, usa OpenRouter como fallback.
+Hace un intento contra el worker configurado (`HIVE_WORKER_MODEL`). Si el worker no está configurado, es inalcanzable o tiene límite de tasa, la llamada devuelve un error que indica al host que gestione la tarea por sí mismo — no hay fallback a otro modelo.
 
 ## Retrospectiva de Fin de Sesión
 
@@ -201,9 +201,9 @@ vault_search(since_days=7, project="mi-proyecto")
 
 Combina historial git con fechas de frontmatter para mostrar toda la actividad reciente.
 
-## Comprobar Presupuesto de Workers
+## Comprobar el Estado del Worker
 
-Monitoriza tu gasto en OpenRouter:
+Comprueba que el worker está configurado y responde:
 
 > "Muestra estado de workers"
 
@@ -211,4 +211,4 @@ Monitoriza tu gasto en OpenRouter:
 worker_status()
 ```
 
-Devuelve: presupuesto mensual restante, conectividad de proveedores, recuento de peticiones y desglose de costes.
+Devuelve: si hay un worker configurado, si es alcanzable (sondeado, no supuesto), el modelo, el número de peticiones y tokens de este mes, y los modelos que lista el endpoint.

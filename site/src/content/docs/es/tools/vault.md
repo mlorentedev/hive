@@ -106,6 +106,59 @@ vault_search(query="timeout", rank_by="hybrid")          # α=0.7 BM25 + 0.3 con
 
 **Modo rank-de-lecciones** (`rank_by != "bm25"`): Filtra coincidencias a `90-lessons.md` únicamente y rankea por la señal de uso elegida — cada lección surfaceada se incrementa una vez por llamada. `hybrid` mezcla BM25 (α=0.7) con confianza (1−α=0.3). Valores `rank_by` desconocidos devuelven un error claro en lugar de caer silenciosamente a BM25.
 
+## vault_ask
+
+Haz una pregunta en lenguaje natural y obtén una respuesta basada en tu vault, con citas de las fuentes. **Opcional — deshabilitada hasta que se configura un backend semántico.** Para búsquedas por palabra clave o regex, usa [`vault_search`](#vault_search).
+
+```python
+vault_ask(question="¿Por qué elegimos PostgreSQL en lugar de MySQL?")
+```
+
+`question` es el único parámetro. Usa `question`, no `query` ni `prompt`.
+
+**Cómo habilitarla:** instala el extra `[semantic]` (`pip install 'hive-vault[semantic]'`) y define `HIVE_EMBED_BASE_URL` y `HIVE_EMBED_MODEL` (más `HIVE_EMBED_API_KEY` si el endpoint la necesita) apuntando a un endpoint de embeddings compatible con OpenAI. Un servicio alojado y un runtime local se configuran igual; Hive no nombra ningún proveedor. Consulta [Configuración → Configurar Q&A Semántico](/hive/es/configuration/#configurar-qa-semántico-vault_ask).
+
+**Comportamiento según el estado:**
+
+- **Sin `HIVE_EMBED_BASE_URL`:** devuelve un mensaje breve con cómo habilitarla y nunca falla. Las instalaciones base no se ven afectadas ni pagan coste alguno — no se construye ningún índice ni se generan embeddings al escribir.
+- **Endpoint definido pero falta el extra `[semantic]`:** devuelve la instrucción de instalación.
+- **Habilitada, `HIVE_SYNTH_MODEL` vacío:** genera el embedding de la pregunta, busca en el índice y devuelve las 5 secciones del vault más relevantes con su archivo de origen, encabezado y puntuación de similitud. No se hace ninguna llamada a un LLM.
+- **Habilitada, `HIVE_SYNTH_MODEL` definido:** envía esas secciones al modelo de chat (mismo endpoint y clave que los embeddings) y devuelve una respuesta sintetizada que cita `[source: path/to/file.md]` para cada afirmación. Al modelo se le indica que responda solo a partir de las secciones recuperadas y que lo diga cuando la respuesta no esté ahí. Si la llamada de síntesis falla por cualquier motivo, `vault_ask` recurre a las secciones recuperadas en lugar de fallar.
+
+```text
+# vault_ask: '¿Por qué elegimos PostgreSQL en lugar de MySQL?'
+
+### 1. 30-architecture/adr-005.md — 'Context'  (score: 0.82)
+> Evaluamos PostgreSQL y MySQL para el almacén principal...
+```
+
+**El índice:** se construye de forma perezosa en la primera llamada, se persiste en un directorio `index/` junto a `HIVE_DB_PATH` y se actualiza de forma incremental cuando `vault_write` o `vault_patch` modifican un archivo. Cambiar `HIVE_EMBED_MODEL` provoca una reconstrucción. Una `question` vacía devuelve `vault_ask: provide a non-empty question.`
+
+## session_briefing
+
+Carga el contexto de trabajo de un proyecto en una sola llamada — la herramienta que se ejecuta al inicio de una sesión.
+
+```python
+# Listar los proyectos disponibles
+session_briefing()
+
+# Cargar un proyecto
+session_briefing(project="my-project")
+```
+
+`project` es el único parámetro; no existe un argumento `days` — la ventana del briefing es fija.
+
+Sin `project`, devuelve la lista de proyectos disponibles con una pista para pasar `project=<slug>`. Con `project`, ensambla una sola respuesta (sustituye a tres o cuatro llamadas manuales):
+
+- `## Active Tasks` — el archivo de tareas del proyecto, truncado a 50 líneas
+- `## Recent Lessons` — las últimas 30 líneas de su archivo de lecciones
+- `## Recent Vault Activity` — los últimos 5 commits de git del vault
+- `## Project Health` — número de archivos y, si los hay, el número de archivos obsoletos (anteriores a `HIVE_STALE_THRESHOLD_DAYS`)
+
+**Orden adaptativo:** `Active Tasks` y `Recent Lessons` se ordenan según la frecuencia con la que has leído cada sección en briefings anteriores, ajustada con `HIVE_RELEVANCE_ALPHA`, `HIVE_RELEVANCE_DECAY` y `HIVE_RELEVANCE_EPSILON`; sin historial, las tareas van primero. La actividad y la salud van siempre al final. Si el seguimiento de relevancia agota su timeout, el briefing se devuelve igualmente con una nota indicando que muestra el orden de secciones por defecto.
+
+Un proyecto desconocido devuelve un mensaje de no encontrado en lugar de un briefing vacío.
+
 ## vault_health
 
 Identidad del servidor, métricas de salud, detección de drift y estadísticas de uso.
@@ -120,7 +173,7 @@ vault_health(project="mi-proyecto", checks=["frontmatter", "stale", "links"], ma
 # Incluir estadísticas de uso
 vault_health(include_usage=True, usage_days=30)
 
-# Incluir metadatos de runtime (uptime, tools registrados, presupuesto OpenRouter)
+# Incluir metadatos de runtime (uptime, tools registrados, uso del worker)
 vault_health(include_runtime=True)
 ```
 
@@ -131,11 +184,11 @@ vault_health(include_runtime=True)
 - version: 1.15.0
 - python: 3.12.10
 - vault_path: /home/me/Projects/knowledge
-- backends: {"ollama": true, "openrouter": false}
+- backends: {"worker": true, "worker_reachable": "unprobed"}
 - started_at: 2026-05-21T20:33:20+00:00
 ```
 
-Los backends se reportan como booleanos de presencia únicamente — **las API keys nunca se embeben**. `ollama` refleja la probe de disponibilidad cacheada; `openrouter` es true cuando se configuró una API key al arrancar.
+Los backends se reportan como booleanos de presencia únicamente — **las API keys nunca se embeben**. `worker` es true cuando hay un endpoint de worker configurado (hay una URL base definida). Eso no dice nada sobre si responde: aquí `worker_reachable` es siempre `"unprobed"`, así que llama a [`worker_status`](/hive/es/tools/worker/#worker_status) para sondearlo.
 
 **Reporte de salud** (por defecto): Recuento de archivos por proyecto, total de líneas, archivos obsoletos (>180 días, configurable vía `HIVE_STALE_THRESHOLD_DAYS`), cobertura de secciones. También detecta **nombres de directorio duplicados** en scopes jerárquicos y advierte qué ruta resolverá BFS.
 
@@ -148,7 +201,7 @@ Los problemas se categorizan como `[error]` o `[warning]` con ruta del archivo y
 
 **Estadísticas de uso** (`include_usage=True`): Recuento de llamadas a herramientas por herramienta y proyecto, con ahorro estimado de tokens.
 
-**Bloque de runtime** (`include_runtime=True`, opt-in): Diagnósticos dinámicos al final del reporte — uptime en segundos, número + nombres de tools MCP registrados (sanity check de que ningún módulo falló al registrarse), y snapshot del presupuesto OpenRouter (`spent_usd`, `cap_usd`, `period`). Independiente de `include_usage`; ambos pueden combinarse en una sola llamada.
+**Bloque de runtime** (`include_runtime=True`, opt-in): Diagnósticos dinámicos al final del reporte — uptime en segundos, número + nombres de tools MCP registrados (sanity check de que ningún módulo falló al registrarse), y snapshot del uso del worker (`request_count`, `total_tokens`, `period`). Independiente de `include_usage`; ambos pueden combinarse en una sola llamada.
 
 `git_repo` informa de si el vault es siquiera un repositorio git. Es lo que hace legibles los dos bloques siguientes: sin repositorio, `uncommitted` es permanentemente `null` y una profundidad de `commit_queue` que nunca baja es el estado esperado, no un reconciler atascado. El servidor también avisa de esto al arrancar.
 

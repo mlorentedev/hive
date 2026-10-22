@@ -106,6 +106,59 @@ vault_search(query="timeout", rank_by="hybrid")          # α=0.7 BM25 + 0.3 con
 
 **Lesson-rank mode** (`rank_by != "bm25"`): Filters matches to `90-lessons.md` only and ranks by the chosen usage signal — every surfaced lesson is incremented once per call. `hybrid` blends BM25 (α=0.7) with confidence (1−α=0.3). Unknown `rank_by` values return a clear error rather than silently falling back to BM25.
 
+## vault_ask
+
+Ask a natural-language question and get an answer grounded in your vault, with source citations. **Optional — disabled until a semantic backend is configured.** For keyword or regex lookups, use [`vault_search`](#vault_search) instead.
+
+```python
+vault_ask(question="Why did we choose PostgreSQL over MySQL?")
+```
+
+`question` is the only parameter. Use `question`, not `query` or `prompt`.
+
+**Enabling it:** install the `[semantic]` extra (`pip install 'hive-vault[semantic]'`) and set `HIVE_EMBED_BASE_URL` and `HIVE_EMBED_MODEL` (plus `HIVE_EMBED_API_KEY` if the endpoint needs one) to an OpenAI-compatible embeddings endpoint. A hosted service and a local runtime are configured the same way; Hive names no provider. See [Configuration → Setting Up Semantic Q&A](/hive/configuration/#setting-up-semantic-qa-vault_ask).
+
+**Behaviour by state:**
+
+- **No `HIVE_EMBED_BASE_URL`:** returns a short how-to-enable message and never errors. Base installs are unaffected and pay no cost — no index is built and nothing is embedded on write.
+- **Endpoint set but the `[semantic]` extra is missing:** returns the install instruction.
+- **Enabled, `HIVE_SYNTH_MODEL` empty:** embeds the question, searches the index, and returns the top 5 most relevant vault sections with their source file, heading and similarity score. No LLM call is made.
+- **Enabled, `HIVE_SYNTH_MODEL` set:** sends those sections to the chat model (same endpoint and key as the embeddings) and returns a synthesized answer that cites `[source: path/to/file.md]` for each claim. The model is instructed to answer only from the retrieved sections and to say so when the answer is not there. If the synthesis call fails for any reason, `vault_ask` falls back to the retrieved sections instead of erroring.
+
+```text
+# vault_ask: 'Why did we choose PostgreSQL over MySQL?'
+
+### 1. 30-architecture/adr-005.md — 'Context'  (score: 0.82)
+> We evaluated PostgreSQL and MySQL for the primary store...
+```
+
+**The index:** built lazily on the first call, persisted in an `index/` directory next to `HIVE_DB_PATH`, and updated incrementally when `vault_write` or `vault_patch` changes a file. Changing `HIVE_EMBED_MODEL` triggers a rebuild. An empty `question` returns `vault_ask: provide a non-empty question.`
+
+## session_briefing
+
+Load a project's working context in one call — the tool to run at the start of a session.
+
+```python
+# List the available projects
+session_briefing()
+
+# Load one project
+session_briefing(project="my-project")
+```
+
+`project` is the only parameter; there is no `days` argument — the briefing window is fixed.
+
+Without `project`, returns the list of available projects with a hint to pass `project=<slug>`. With `project`, assembles one response (replacing three or four manual calls):
+
+- `## Active Tasks` — the project's tasks file, truncated to 50 lines
+- `## Recent Lessons` — the last 30 lines of its lessons file
+- `## Recent Vault Activity` — the last 5 git commits in the vault
+- `## Project Health` — file count and, when any, the number of stale files (older than `HIVE_STALE_THRESHOLD_DAYS`)
+
+**Adaptive ordering:** `Active Tasks` and `Recent Lessons` are ordered by how often you have read each section in earlier briefings, tuned by `HIVE_RELEVANCE_ALPHA`, `HIVE_RELEVANCE_DECAY` and `HIVE_RELEVANCE_EPSILON`; with no history, tasks come first. Activity and health always come last. If relevance tracking times out, the briefing still returns with a note that it is showing the default section order.
+
+An unknown project returns a not-found message rather than an empty briefing.
+
 ## vault_health
 
 Server identity, health metrics, drift detection, and usage statistics.
@@ -120,7 +173,7 @@ vault_health(project="my-project", checks=["frontmatter", "stale", "links"], max
 # Include usage statistics
 vault_health(include_usage=True, usage_days=30)
 
-# Include runtime metadata (uptime, registered tools, OpenRouter budget)
+# Include runtime metadata (uptime, registered tools, worker usage)
 vault_health(include_runtime=True)
 ```
 
@@ -131,11 +184,11 @@ vault_health(include_runtime=True)
 - version: 1.15.0
 - python: 3.12.10
 - vault_path: /home/me/Projects/knowledge
-- backends: {"ollama": true, "openrouter": false}
+- backends: {"worker": true, "worker_reachable": "unprobed"}
 - started_at: 2026-05-21T20:33:20+00:00
 ```
 
-Backends are reported as presence booleans only — **API keys are never embedded**. `ollama` reflects the cached availability probe; `openrouter` is true when an API key was configured at startup.
+Backends are reported as presence booleans only — **API keys are never embedded**. `worker` is true when a worker endpoint is configured (a base URL is set). That says nothing about whether it answers: `worker_reachable` is always `"unprobed"` here, so call [`worker_status`](/hive/tools/worker/#worker_status) to probe it.
 
 **Health report** (default): Per-project file count, total lines, stale files (>180 days, configurable via `HIVE_STALE_THRESHOLD_DAYS`), section coverage. Also detects **duplicate directory names** within hierarchical scopes and warns which path BFS will resolve to.
 
@@ -148,7 +201,7 @@ Issues are categorized as `[error]` or `[warning]` with file path and descriptio
 
 **Usage stats** (`include_usage=True`): Tool call counts by tool and project, with estimated token savings.
 
-**Runtime block** (`include_runtime=True`, opt-in): Dynamic diagnostics layered after the report — uptime in seconds, count + names of MCP tools currently registered (sanity check that no module failed to register), and the OpenRouter budget snapshot (`spent_usd`, `cap_usd`, `period`). Independent of `include_usage`; both can stack in one call.
+**Runtime block** (`include_runtime=True`, opt-in): Dynamic diagnostics layered after the report — uptime in seconds, count + names of MCP tools currently registered (sanity check that no module failed to register), and the worker usage snapshot (`request_count`, `total_tokens`, `period`). Independent of `include_usage`; both can stack in one call.
 
 `git_repo` reports whether the vault is a git repository at all. It is what makes the two blocks below it readable: without a repository `uncommitted` is permanently `null` and a `commit_queue` depth that never falls is the expected state rather than a stalled reconciler. The server also warns about this at startup.
 

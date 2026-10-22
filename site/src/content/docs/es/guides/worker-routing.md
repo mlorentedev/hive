@@ -1,43 +1,69 @@
 ---
 title: Enrutamiento de Workers
-description: Cómo Hive enruta tareas al modelo más barato capaz.
+description: Cómo gestiona Hive su único worker las tareas delegadas, y dónde viven las decisiones de enrutamiento.
 ---
 
-El sistema de workers de Hive delega tareas a modelos más baratos, reservando tu modelo primario para razonamiento de alto valor.
+El worker de Hive se encarga de las tareas delegadas, reservando tu modelo principal para el razonamiento de mayor valor. Desde 4.0.0 hay exactamente **un** worker: un único endpoint compatible con OpenAI. Hive hace un intento contra él e informa de lo ocurrido. Elegir *a qué* pool va una tarea es trabajo del llamador, no de Hive.
 
-## Flujo de Enrutamiento
+## Un Worker, Un Intento
+
+El worker se configura con tres variables:
+
+| Variable | Si no está definida, usa |
+|---|---|
+| `HIVE_WORKER_BASE_URL` | `HIVE_EMBED_BASE_URL` |
+| `HIVE_WORKER_API_KEY` | `HIVE_EMBED_API_KEY` |
+| `HIVE_WORKER_MODEL` | `HIVE_EMBED_MODEL` |
+
+El fallback es por campo, así que un despliegue puede sobrescribir solo el modelo y heredar el endpoint. Sin URL base definida (y sin `HIVE_EMBED_BASE_URL` que heredar), el worker queda **deshabilitado**: Hive nunca adivina un endpoint por defecto, porque un worker que apunta en silencio a algún sitio es peor que uno que dice que no está configurado.
+
+Hive no nombra ningún proveedor. Cualquier servicio o runtime local que sirva un `/v1` compatible con OpenAI es un worker válido, y estas tres variables son la única forma de elegir uno. Los ajustes por proveedor y los alias de modelo de versiones anteriores se eliminaron en 4.0.0; define `HIVE_WORKER_*` en su lugar.
+
+## Flujo
 
 ```
-delegate_task(prompt, context, max_cost_per_request)
+delegate_task(prompt, context, model)
     │
-    ├─ Modelo explicito? ─── Si ──→ Enrutar directamente a ese proveedor
+    ├─ ¿Alias retirado en `model`? ──→ Rechazado, nombra el reemplazo
     │
-    └─ Auto-enrutar:
+    ├─ ¿Worker no configurado? ──→ pool_unavailable ──→ el host gestiona la tarea
+    │
+    └─ Una petición al endpoint configurado
         │
-        ├─ 1. Ollama disponible? ─── Si ──→ Inferencia local (gratuito)
-        │
-        ├─ 2. OpenRouter configurado? ── Si ──→ Modelo tier gratuito
-        │
-        ├─ 3. max_cost > 0 Y presupuesto permite? ── Si ──→ Modelo de pago
-        │
-        └─ 4. Rechazar ──→ Error devuelto, el host lo gestiona
+        ├─ Respondió ──→ ok
+        ├─ Inalcanzable / timeout HTTP / 429 / credencial rechazada ──→ pool_unavailable
+        ├─ Respondió pero inutilizable: 5xx, otros 4xx, fallo desconocido ──→ task_failed
+        └─ Venció el deadline ──→ timeout
 ```
 
-## Tabla de Costes
+No hay ningún paso que pruebe un segundo modelo. El argumento `model` elige un modelo en el *mismo* endpoint; un valor vacío usa `HIVE_WORKER_MODEL`.
 
-| Nivel | Proveedor | Modelo | Coste |
-|---|---|---|---|
-| 1 | Ollama (local) | qwen2.5-coder:7b | Gratuito |
-| 2 | OpenRouter | qwen/qwen3-coder:free | Gratuito |
-| 3 | OpenRouter | qwen/qwen3-coder | $0.22/1M entrada, $1.00/1M salida |
-| 4 | Rechazar | — | — |
+## Clases de Fallo
 
-## Controles de Presupuesto
+Los fallos se clasifican, no se colapsan en un único error:
 
-- **Tope mensual**: `HIVE_OPENROUTER_BUDGET` (por defecto: $1.00)
-- **Tope por petición**: parámetro `max_cost_per_request` en `delegate_task`
-- **Modelo de pago**: `HIVE_OPENROUTER_PAID_MODEL` (por defecto: `qwen/qwen3-coder`)
-- El tracking de presupuesto usa SQLite con modo WAL y locking thread-safe para acceso concurrente
+- **`pool_unavailable`** — el endpoint no atendió la petición: era inalcanzable o su petición HTTP agotó el tiempo, aplicó un límite de tasa (429), rechazó la credencial (401/403), o no hay worker configurado. Un llamador que tenga otro pool puede reintentar la tarea allí.
+- **`task_failed`** — el endpoint respondió y la respuesta es inutilizable (un 5xx, o un 4xx sobre la propia petición, como un id de modelo desconocido), o la petición en sí era incorrecta. Reintentar en otro sitio ocultaría un fallo real, así que un llamador no debe hacerlo. Los fallos desconocidos también acaban aquí: la dirección fail-closed es la que no reintenta.
+
+`delegate_task(structured=True)` devuelve la clase como valor de `status` en un registro JSON (consulta [Herramientas de Worker](/hive/es/tools/worker/#modo-estructurado)). La clase viaja como dato y no como tipo de excepción porque los tipos de excepción no sobreviven a la frontera JSON-RPC entre un daemon y sus clientes.
+
+## El Enrutamiento Pertenece al Llamador
+
+Un backend que hace fallback por su cuenta se convierte en una segunda autoridad de enrutamiento, y su respuesta ya no puede atribuirse a un modelo. Por eso Hive deliberadamente no tiene cadena de fallback interna. Un dispatcher que mantiene un mapa de enrutamiento lo recorre por sí mismo — avanzando con `pool_unavailable`, deteniéndose con `task_failed` — y siempre sabe qué modelo produjo cada respuesta.
+
+`hive delegate` es el verbo de línea de comandos pensado para ese dispatcher. Ejecuta una tarea contra el worker configurado e imprime un registro JSON por stdout. `--model`, `--timeout` y `--prompt` son obligatorios, de modo que un dispatcher nunca cree haber elegido un modelo o fijado un deadline por defecto. El código de salida lleva la clase:
+
+| Código de salida | Significado |
+|---|---|
+| `0` | `ok` |
+| `1` | `task_failed` — no reintentar |
+| `2` | Error de uso |
+| `3` | `pool_unavailable` — probar la siguiente entrada |
+| `4` | `timeout` |
+
+## Sin Tope de Gasto
+
+Hive no registra ni limita el gasto. En un endpoint de tarifa plana o local la restricción que importa es la concurrencia, no el coste, así que un tope en dólares mediría la magnitud equivocada. Lo que Hive registra es telemetría de uso — número de peticiones, tokens y latencia por modelo — que informan [`worker_status`](/hive/es/tools/worker/#worker_status) y `vault_health(include_runtime=True)`. Si tu endpoint factura por token, aplica los límites en el lado del proveedor.
 
 ## Cuándo Delegar
 
@@ -56,48 +82,7 @@ Mantener en tu modelo primario:
 - Revisión de código sensible a seguridad
 - Tareas que requieren comprensión profunda del codebase
 
-## ¿Por Qué Estos Modelos?
 
-Los modelos por defecto de Hive fueron seleccionados en base a coste, calidad de código y disponibilidad:
+## Elegir un Modelo
 
-### Ollama: qwen2.5-coder:7b
-
-- **¿Por qué 7B?** Funciona en hardware mínimo (8GB RAM, solo CPU). Mini PCs Intel N95, portátiles viejos y dispositivos NAS pueden ejecutarlo. Modelos más grandes (14B, 32B) necesitan GPUs o 32GB+ RAM.
-- **¿Por qué Qwen?** Mejores benchmarks de código en la clase 7B. Supera a CodeLlama 7B, DeepSeek Coder 6.7B y StarCoder2 7B en HumanEval y MBPP.
-- **Ideal para:** Explicaciones de regex, boilerplate, Q&A simple. No apto para razonamiento complejo multi-archivo.
-- **Override:** Configura `HIVE_OLLAMA_MODEL` con cualquier modelo que hayas descargado con `ollama pull`.
-
-### OpenRouter gratuito: qwen/qwen3-coder:free
-
-- **¿Por qué Qwen3 Coder?** Modelo MoE de 480B (solo 30B parámetros activos). Mejor modelo de código gratuito disponible en OpenRouter. Competitivo con GPT-4 en tareas de código.
-- **¿Por qué tier gratuito?** Coste cero para el 80% de tareas delegadas que no necesitan calidad de tier de pago. Con rate limit pero suficiente para la mayoría de flujos de trabajo.
-- **Override:** Configura `HIVE_OPENROUTER_MODEL` con cualquier modelo gratuito en OpenRouter (ej. `deepseek/deepseek-coder-v2:free`).
-
-### OpenRouter de pago: qwen/qwen3-coder
-
-- **¿Por qué de pago?** Mismo modelo, sin rate limits, mayor prioridad. Solo se usa cuando lo permites explícitamente vía `max_cost_per_request > 0`.
-- **Coste:** ~$0.22/M tokens de entrada, ~$1.00/M tokens de salida. Con el presupuesto por defecto de $1/mes, eso son aproximadamente 1M tokens de salida o ~500 llamadas a delegate_task.
-- **Override:** Configura `HIVE_OPENROUTER_PAID_MODEL` con cualquier modelo en OpenRouter.
-
-### Cómo funciona la decisión de enrutamiento
-
-```
-delegate_task(prompt, max_cost_per_request=0)
-    │
-    │  Modelo explicito especificado? (ej. "ollama:llama3")
-    │  └─ Si → Enviar directamente a ese proveedor. Saltar enrutamiento.
-    │
-    │  Intentar Ollama (ping HTTP al endpoint):
-    │  └─ Alcanzable → Enviar a HIVE_OLLAMA_MODEL. Hecho.
-    │
-    │  Intentar OpenRouter tier gratuito:
-    │  └─ API key configurada → Enviar a HIVE_OPENROUTER_MODEL. Hecho.
-    │
-    │  Intentar OpenRouter tier de pago:
-    │  └─ max_cost_per_request > 0 Y presupuesto mensual permite?
-    │     └─ Si → Enviar a HIVE_OPENROUTER_PAID_MODEL. Hecho.
-    │
-    └─ Todos los niveles agotados → Devolver error. El modelo host lo gestiona.
-```
-
-El enrutamiento es fail-fast: si Ollama no es alcanzable (timeout HTTP), inmediatamente pasa a OpenRouter. Sin reintentos, sin esperas. Un fallthrough típico toma <100ms.
+Hive no incluye un modelo por defecto. Define `HIVE_WORKER_MODEL` con el id que tu endpoint asigna al modelo que quieres, o pasa `model=` en cada llamada. Un modelo pequeño y rápido encaja con las tareas anteriores. Un modelo lento se nota directamente como latencia, y un endpoint con límite de tasa se nota como `pool_unavailable`. Sube `HIVE_HTTP_TIMEOUT` y `HIVE_TOOL_TIMEOUT` (o pasa `timeout_s`) para modelos lentos.

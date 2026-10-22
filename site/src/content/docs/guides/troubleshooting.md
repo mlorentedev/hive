@@ -43,35 +43,48 @@ After re-registering, restart your AI assistant session. Hive will now appear in
 
 **Why user scope matters:** Hive connects to a single knowledge vault that stores context for *all* your projects. Project-scope registration defeats this — you'd need to register Hive separately in every project, and they'd all point to the same vault anyway.
 
-## Ollama Shows "offline" in worker_status
+## worker_status Says "Configured: no"
 
-**Symptom:** `worker_status` reports Ollama as offline, but `curl http://your-ollama:11434/api/tags` works.
+**Symptom:** `worker_status` reports `Configured: no — set HIVE_WORKER_BASE_URL`, and `delegate_task` returns "worker not configured".
 
-**Cause:** The `HIVE_OLLAMA_ENDPOINT` environment variable is not set in your MCP server registration.
+**Cause:** No worker endpoint is set in your MCP server registration. With neither `HIVE_WORKER_BASE_URL` nor `HIVE_EMBED_BASE_URL` set, the worker is disabled — Hive never guesses a default endpoint.
 
-**Fix:** Re-register the MCP server with the endpoint explicitly set:
+**Fix:** Re-register the MCP server with the worker endpoint, key and model set explicitly:
 
 ```bash
 # Claude Code
+# Export HIVE_WORKER_API_KEY from your secret store first.
 claude mcp add -s user hive \
-  -e HIVE_OLLAMA_ENDPOINT=http://your-ollama:11434 \
+  -e HIVE_WORKER_BASE_URL=https://api.your-provider.example/v1 \
+  -e HIVE_WORKER_API_KEY="$HIVE_WORKER_API_KEY" \
+  -e HIVE_WORKER_MODEL=<model-id> \
   -- uvx --upgrade hive-vault
 
 # Gemini CLI
+# Export HIVE_WORKER_API_KEY from your secret store first.
 gemini mcp add -s user \
-  -e HIVE_OLLAMA_ENDPOINT=http://your-ollama:11434 \
+  -e HIVE_WORKER_BASE_URL=https://api.your-provider.example/v1 \
+  -e HIVE_WORKER_API_KEY="$HIVE_WORKER_API_KEY" \
+  -e HIVE_WORKER_MODEL=<model-id> \
   hive-vault uvx -- --upgrade hive-vault
 ```
 
 MCP servers do **not** inherit your shell's environment variables. Every env var must be passed explicitly at registration time.
 
-## OpenRouter Returns 429 (Rate Limit)
+**Coming from 3.x?** The per-provider worker settings were removed in 4.0.0 and are silently ignored now; only `HIVE_WORKER_*` selects a worker.
 
-**Symptom:** `delegate_task` fails with a rate limit error on the free tier.
+## worker_status Says "Reachable: NO" or delegate_task Returns pool_unavailable
 
-**Cause:** OpenRouter free tier models have per-minute rate limits. This is normal under heavy usage.
+**Symptom:** `worker_status` shows `Configured: yes` but `Reachable: NO — <reason>`, or `delegate_task(structured=True)` returns `"status": "pool_unavailable"`.
 
-**Fix:** Wait 60 seconds and retry. For sustained workloads, set `max_cost_per_request=0.01` to use the paid tier (capped by `HIVE_OPENROUTER_BUDGET`).
+**Cause:** The endpoint did not serve the request. The reason in the message tells which: the endpoint is unreachable or timed out (wrong URL, runtime not running, network), it rate-limited the call (429), or it rejected the credential (401/403). "Configured" only means a base URL is set; reachability is probed separately.
+
+**Fix:**
+- Unreachable: check `HIVE_WORKER_BASE_URL` (it must end in `/v1` for an OpenAI-compatible endpoint) and that the service answers from the machine running Hive.
+- 429: wait and retry, or lower the rate of calls. Hive makes one attempt and does not fall back to another model, so a rate-limited endpoint stays rate-limited until the limit resets.
+- 401/403: check `HIVE_WORKER_API_KEY` (or the `HIVE_EMBED_API_KEY` it falls back to).
+
+A `task_failed` status is different: the endpoint answered and the answer was unusable, so retrying the same task elsewhere would hide a real failure. See [Worker Routing](/hive/guides/worker-routing/#failure-classes).
 
 ## Changes to MCP Config Don't Take Effect
 
@@ -158,10 +171,10 @@ Or use `operation="append"` to add content without replacing frontmatter.
 **Symptom:** SQLite files at `~/.local/share/hive/` are growing.
 
 **Expected sizes:**
-- `worker.db` — Budget/usage tracking. Grows ~1KB per delegate_task call. Typical: 10-50KB.
+- `worker.db` — Worker usage telemetry. Grows ~1KB per delegate_task call. Typical: 10-50KB.
 - `relevance.db` — Adaptive context scoring. Grows ~0.5KB per session_briefing call. Typical: 5-20KB.
 
-Both use WAL mode for performance. If sizes seem excessive, you can safely delete them — Hive recreates them automatically. Budget tracking resets on deletion.
+Both use WAL mode for performance. If sizes seem excessive, you can safely delete them — Hive recreates them automatically. Usage telemetry resets on deletion.
 
 ## Checking the Debug Log
 
@@ -185,13 +198,13 @@ claude mcp add -s user hive \
 
 **Symptom:** MCP tool calls freeze with no response, or return "Tool timed out after 60s".
 
-**Cause:** Worker tools (`capture_lesson`, `delegate_task`) call external APIs (Ollama/OpenRouter) that may be slow or unresponsive. Write tools (`vault_write`, `vault_patch`) may stall if another operation holds the write lock.
+**Cause:** Worker tools (`capture_lesson`, `delegate_task`) call the configured worker endpoint, which may be slow or unresponsive. Write tools (`vault_write`, `vault_patch`) may stall if another operation holds the write lock.
 
 **Fix:**
-1. Check worker connectivity: `worker_status` — if Ollama is offline, fix the connection first
+1. Check worker connectivity: `worker_status` — if it reports `Reachable: NO`, fix the connection first
 2. If timeouts are too aggressive, increase them:
    - `HIVE_TOOL_TIMEOUT=120` — per-tool timeout for async worker tools (default: 60s)
-   - `HIVE_HTTP_TIMEOUT=120` — HTTP timeout for Ollama/OpenRouter calls (default: 60s)
+   - `HIVE_HTTP_TIMEOUT=120` — HTTP timeout for worker calls (default: 60s)
 3. Check `~/.local/share/hive/hive.log` for timeout warnings with tool names and elapsed times
 4. If write tools return "Server busy", retry shortly — a previous write operation is finishing
 
@@ -382,8 +395,8 @@ The `cause=external_termination` tag is one-grep-able and tells you the supervis
 
 If your issue isn't listed here:
 
-1. Run `vault_health` to check vault connectivity and file counts — the `## server` identity block at the top reports the running version, python, vault path, and backend presence so you can include them verbatim in a bug report (no API keys are exposed). Add `include_runtime=True` for uptime, registered tool names, multi-session contention metrics, and the OpenRouter budget snapshot.
-2. Run `worker_status` to check provider connectivity and budget
+1. Run `vault_health` to check vault connectivity and file counts — the `## server` identity block at the top reports the running version, python, vault path, and backend presence so you can include them verbatim in a bug report (no API keys are exposed). Add `include_runtime=True` for uptime, registered tool names, multi-session contention metrics, and the worker usage snapshot.
+2. Run `worker_status` to check worker configuration, reachability and usage
 3. Check `~/.local/share/hive/hive.log` for error details
 4. Check the [Configuration](/hive/configuration/) page for all environment variables
 5. Open an issue at [github.com/mlorentedev/hive](https://github.com/mlorentedev/hive/issues)
