@@ -1397,3 +1397,21 @@ def test_client_answers_with_an_error_when_the_stream_ends_before_the_answer(
     assert answers[0]["id"] == 2
     assert answers[0]["error"]["code"] == -32000
     assert rc == 0
+
+
+def test_a_second_answer_to_the_same_request_is_not_relayed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hive._client as client_module
+
+    written: list[dict[str, Any]] = []
+    monkeypatch.setattr(client_module, "_write_frame", written.append)
+    answer = client_module._Answer({"jsonrpc": "2.0", "id": 7, "method": "tools/call"})
+    progress = {"jsonrpc": "2.0", "method": "notifications/progress", "params": {}}
+
+    answer({"jsonrpc": "2.0", "id": 7, "result": {"first": True}})
+    answer({"jsonrpc": "2.0", "id": 7, "error": {"code": -32603, "message": "late"}})
+    answer(progress)
+
+    assert written == [{"jsonrpc": "2.0", "id": 7, "result": {"first": True}}, progress]
+    assert not answer.owed

@@ -443,10 +443,17 @@ class _Answer:
     def __init__(self, message: dict[str, Any]) -> None:
         self._id = message.get("id")
         self.owed = "id" in message and "method" in message
+        self._answered = False
 
     def __call__(self, frame: dict[str, Any]) -> None:
+        answers = frame.get("id") == self._id and ("result" in frame or "error" in frame)
+        if answers and self._answered:
+            # A request gets one response; a daemon that sends two must not
+            # make the host see two.
+            return
         _write_frame(frame)
-        if frame.get("id") == self._id and ("result" in frame or "error" in frame):
+        if answers:
+            self._answered = True
             self.owed = False
 
 
