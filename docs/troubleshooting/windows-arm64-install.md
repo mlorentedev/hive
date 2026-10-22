@@ -61,14 +61,18 @@ The cryptography that Arm64 gets is not the current one. On 2026-10-22 the
 flag resolves 46.0.3, and 46.0.3 is inside the affected range of these
 advisories:
 
-| Advisory | Severity | Fixed in | Affects |
+| Advisory | Severity (GitHub database / upstream) | Fixed in | Affects |
 |---|---|---|---|
-| GHSA-r6ph-v2qm-q3c2 | high | 46.0.5 | EC public keys on SECT curves |
-| GHSA-537c-gmf6-5ccf | high | 48.0.1 | the OpenSSL bundled in every wheel |
-| GHSA-jwv3-5hgf-82ww | high | 49.0.0 | X.509 path building |
-| GHSA-g6cj-pr64-35w5 | high | 50.0.0 | PKCS#7 EnvelopedData decryption |
-| GHSA-m2h6-j472-rp4c | medium | 49.0.0 | X.509 verifier name constraints |
-| GHSA-p423-j2cm-9vmq | medium | 46.0.7 | APIs given non-contiguous buffers |
+| GHSA-r6ph-v2qm-q3c2 | high / high | 46.0.5 | EC public keys on SECT curves |
+| GHSA-537c-gmf6-5ccf | high / medium | 48.0.1 | the OpenSSL bundled in every wheel |
+| GHSA-jwv3-5hgf-82ww | high / low | 49.0.0 | X.509 path building |
+| GHSA-g6cj-pr64-35w5 | high / medium | 50.0.0 | PKCS#7 EnvelopedData decryption |
+| GHSA-m2h6-j472-rp4c | medium / low | 49.0.0 | X.509 verifier name constraints |
+| GHSA-p423-j2cm-9vmq | medium / medium | 46.0.7 | APIs given non-contiguous buffers |
+
+The two ratings disagree: the GitHub Advisory Database rates four of these
+high, and pyca rates one high in its own advisories (both checked
+2026-10-22).
 
 hive itself calls cryptography only to generate and load its own P-256
 self-signed certificate (`_identity.py`), and none of the API-specific

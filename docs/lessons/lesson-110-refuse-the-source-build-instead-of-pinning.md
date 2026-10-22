@@ -26,8 +26,8 @@ that has a wheel, and moves forward again on its own once a newer one does.
 On platforms that always get a wheel, nothing changes.
 
 The flag does not avoid the stale version; it avoids locking it in. Today
-Arm64 lands on 46.0.3, which has four high-severity advisories fixed in
-later releases. A downgrade like that has to be written down where the
+Arm64 lands on 46.0.3, which has six advisories fixed in later releases
+(four rated high by the GitHub Advisory Database, one by pyca itself). A downgrade like that has to be written down where the
 installer is documented, with the advisories it carries and the event that
 ends it, or nobody notices it.
 
