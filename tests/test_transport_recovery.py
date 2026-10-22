@@ -148,8 +148,11 @@ class TestSubprocessTransportRecovery:
     """Drive a real hive subprocess via JSON-RPC and verify cancellation tolerance."""
 
     async def _spawn(self, vault: Path) -> asyncio.subprocess.Process:
-        env = os.environ.copy()
-        env["VAULT_PATH"] = str(vault)
+        # A developer's own HIVE_VAULT_PATH outranks VAULT_PATH (#344).
+        env = {
+            k: v for k, v in os.environ.items() if not k.startswith("HIVE_") and k != "VAULT_PATH"
+        }
+        env["HIVE_VAULT_PATH"] = str(vault)
         env["HIVE_LOG_PATH"] = str(vault / "hive.log")
         env["HIVE_DB_PATH"] = str(vault / "worker.db")
         env["HIVE_RELEVANCE_DB_PATH"] = str(vault / "relevance.db")
