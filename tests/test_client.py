@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import http.client
+import io
 import json
 import os
 import queue
@@ -24,7 +25,7 @@ import pytest
 from tests.impostor import Impostor, server_context
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from hive._identity import Identity
 
@@ -36,6 +37,15 @@ class _McpHandler(BaseHTTPRequestHandler):
     stale_session = ""
     next_session = "session-123"
     cert_pem = ""
+    # #499: set by the test once the client has relayed the first frame. The
+    # handler holds the response back until then, and records whether it came.
+    first_frame_relayed: threading.Event | None = None
+    relayed_before_last: bool | None = None
+    # #499: end the stream after the progress frame ("progress-close", a clean
+    # end, or "progress-reset"), or reset it after the response frame
+    # ("response"), the latter once the test has seen the client relay it.
+    drop_after = ""
+    response_relayed: threading.Event | None = None
 
     def do_POST(self) -> None:  # noqa: N802
         size = int(self.headers.get("Content-Length", "0"))
@@ -84,6 +94,14 @@ class _McpHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"event: message\n")
         self.wfile.write(b'data: {"jsonrpc":"2.0","method":"notifications/progress"}\n\n')
+        if self.first_frame_relayed is not None:
+            type(self).relayed_before_last = self.first_frame_relayed.wait(3.0)
+        drop_after, type(self).drop_after = self.drop_after, ""
+        if drop_after == "progress-reset":
+            self._reset_connection()
+            return
+        if drop_after == "progress-close":
+            return
         self.wfile.write(b"event: message\n")
         self.wfile.write(
             b"data: "
@@ -93,6 +111,21 @@ class _McpHandler(BaseHTTPRequestHandler):
             ).encode()
             + b"\n\n",
         )
+        if drop_after == "response":
+            assert self.response_relayed is not None
+            self.response_relayed.wait(3.0)
+            self._reset_connection()
+
+    def _reset_connection(self) -> None:
+        # SO_LINGER 0 makes close() send an RST instead of ending the stream.
+        # The file objects hold the socket open, and the server's own teardown
+        # would send a FIN first, so they are closed before it.
+        self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        self.rfile.close()
+        self.wfile.close()
+        self.connection.close()
+        # The server's teardown still flushes and closes these.
+        self.rfile, self.wfile = io.BytesIO(), io.BytesIO()
 
     def do_DELETE(self) -> None:  # noqa: N802
         self.requests.append({"delete": True, "headers": dict(self.headers)})
@@ -128,6 +161,10 @@ def mcp_http_server(owner_identity: Identity) -> Iterator[tuple[str, int, type[_
     _McpHandler.reject_session_once = False
     _McpHandler.stale_session = ""
     _McpHandler.next_session = "session-123"
+    _McpHandler.first_frame_relayed = None
+    _McpHandler.relayed_before_last = None
+    _McpHandler.drop_after = ""
+    _McpHandler.response_relayed = None
     _McpHandler.cert_pem = owner_identity.cert_path.read_text(encoding="ascii")
     server = ThreadingHTTPServer(("127.0.0.1", 0), _McpHandler)
     server.socket = server_context(owner_identity).wrap_socket(server.socket, server_side=True)
@@ -309,7 +346,10 @@ def test_relay_reports_timeout_while_reading_sse(
 
     host, port, _handler = mcp_http_server
 
-    def stalled_stream(response: http.client.HTTPResponse) -> list[dict[str, Any]]:
+    def stalled_stream(
+        response: http.client.HTTPResponse,
+        emit: Callable[[dict[str, Any]], None],
+    ) -> list[dict[str, Any]]:
         response.read()
         raise TimeoutError("daemon stopped sending events")
 
@@ -726,6 +766,10 @@ def restarting_daemon(
     _McpHandler.reject_session_once = False
     _McpHandler.stale_session = ""
     _McpHandler.next_session = "session-123"
+    _McpHandler.first_frame_relayed = None
+    _McpHandler.relayed_before_last = None
+    _McpHandler.drop_after = ""
+    _McpHandler.response_relayed = None
     _McpHandler.cert_pem = owner_identity.cert_path.read_text(encoding="ascii")
     server = ThreadingHTTPServer(("127.0.0.1", 0), _McpHandler, bind_and_activate=False)
     server.server_bind()
@@ -1202,7 +1246,10 @@ def test_relay_never_retries_a_failed_event_stream(
 
     host, port, handler = mcp_http_server
 
-    def broken_stream(response: http.client.HTTPResponse) -> list[dict[str, Any]]:
+    def broken_stream(
+        response: http.client.HTTPResponse,
+        emit: Callable[[dict[str, Any]], None],
+    ) -> list[dict[str, Any]]:
         response.read()
         raise ConnectionResetError("daemon went away mid-stream")
 
@@ -1217,3 +1264,154 @@ def test_relay_never_retries_a_failed_event_stream(
 
     assert time.monotonic() - started < 5.0
     assert len(handler.requests) == 1, "the request must have been sent exactly once"
+
+
+# ── #499: SSE frames leave as they arrive ─────────────────────────────────
+
+
+def test_relay_emits_each_sse_frame_as_it_arrives(
+    mcp_http_server: tuple[str, int, type[_McpHandler]],
+) -> None:
+    from hive._client import HttpRelay
+
+    host, port, handler = mcp_http_server
+    handler.first_frame_relayed = threading.Event()
+    relay = HttpRelay(host, port, "secret-token", handler.cert_pem)
+    emitted: list[dict[str, Any]] = []
+
+    def sink(frame: dict[str, Any]) -> None:
+        emitted.append(frame)
+        assert handler.first_frame_relayed is not None
+        handler.first_frame_relayed.set()
+
+    frames = relay.forward(_TOOLS_LIST, emit=sink)
+
+    assert handler.relayed_before_last is True, "the first frame waited for the whole stream"
+    assert emitted == frames
+    assert frames[-1] == {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}
+
+
+def test_relay_emits_nothing_from_a_reinitialize(
+    mcp_http_server: tuple[str, int, type[_McpHandler]],
+) -> None:
+    """The host never asked for the initialize a restarted daemon needs."""
+    from hive._client import HttpRelay
+
+    host, port, handler = mcp_http_server
+    relay = HttpRelay(host, port, "secret-token", handler.cert_pem)
+    relay.forward({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+    handler.reject_session_once = True
+    emitted: list[dict[str, Any]] = []
+
+    relay.forward({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, emit=emitted.append)
+
+    assert emitted == [
+        {"jsonrpc": "2.0", "method": "notifications/progress"},
+        {"jsonrpc": "2.0", "id": 2, "result": {"tools": []}},
+    ]
+
+
+def _run_client_in_process(
+    monkeypatch: pytest.MonkeyPatch,
+    host: str,
+    port: int,
+    cert_pem: str,
+    requests: list[dict[str, Any]],
+    *,
+    on_write: Callable[[dict[str, Any]], None] = lambda frame: None,
+) -> tuple[int, list[dict[str, Any]]]:
+    import hive._client as client_module
+
+    monkeypatch.setattr(client_module, "configured_daemon_port", lambda: port)
+    monkeypatch.setattr(client_module, "_owner_credentials", lambda: ("secret-token", cert_pem))
+    monkeypatch.setenv(client_module.RECONNECT_WINDOW_ENV, "0")
+    lines = "".join(json.dumps(r) + "\n" for r in requests)
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(lines.encode())))
+    out = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    real_write = client_module._write_frame
+
+    def write(frame: dict[str, Any]) -> None:
+        real_write(frame)
+        on_write(frame)
+
+    monkeypatch.setattr(client_module, "_write_frame", write)
+
+    rc = client_module.run_client(host)
+
+    return rc, [json.loads(line) for line in out.getvalue().splitlines()]
+
+
+def test_client_does_not_answer_twice_when_the_stream_drops_after_the_answer(
+    mcp_http_server: tuple[str, int, type[_McpHandler]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host, port, handler = mcp_http_server
+    handler.drop_after = "response"
+    handler.response_relayed = threading.Event()
+
+    def on_write(frame: dict[str, Any]) -> None:
+        if frame.get("id") == 2 and handler.response_relayed is not None:
+            handler.response_relayed.set()
+
+    rc, frames = _run_client_in_process(
+        monkeypatch,
+        host,
+        port,
+        handler.cert_pem,
+        [
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/list"},
+        ],
+        on_write=on_write,
+    )
+
+    answers = [f for f in frames if "id" in f]
+    assert answers == [
+        {"jsonrpc": "2.0", "id": 2, "result": {"tools": []}},
+        {"jsonrpc": "2.0", "id": 3, "result": {"tools": []}},
+    ], "one answer per request, and the client stays up"
+    assert rc == 0
+
+
+@pytest.mark.parametrize("ending", ["progress-close", "progress-reset"])
+def test_client_answers_with_an_error_when_the_stream_ends_before_the_answer(
+    mcp_http_server: tuple[str, int, type[_McpHandler]],
+    monkeypatch: pytest.MonkeyPatch,
+    ending: str,
+) -> None:
+    """The host waits for an answer to every request, so the relay gives one."""
+    host, port, handler = mcp_http_server
+    handler.drop_after = ending
+
+    rc, frames = _run_client_in_process(
+        monkeypatch,
+        host,
+        port,
+        handler.cert_pem,
+        [{"jsonrpc": "2.0", "id": 2, "method": "tools/list"}],
+    )
+
+    answers = [f for f in frames if "id" in f]
+    assert len(answers) == 1, frames
+    assert answers[0]["id"] == 2
+    assert answers[0]["error"]["code"] == -32000
+    assert rc == 0
+
+
+def test_a_second_answer_to_the_same_request_is_not_relayed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hive._client as client_module
+
+    written: list[dict[str, Any]] = []
+    monkeypatch.setattr(client_module, "_write_frame", written.append)
+    answer = client_module._Answer({"jsonrpc": "2.0", "id": 7, "method": "tools/call"})
+    progress = {"jsonrpc": "2.0", "method": "notifications/progress", "params": {}}
+
+    answer({"jsonrpc": "2.0", "id": 7, "result": {"first": True}})
+    answer({"jsonrpc": "2.0", "id": 7, "error": {"code": -32603, "message": "late"}})
+    answer(progress)
+
+    assert written == [{"jsonrpc": "2.0", "id": 7, "result": {"first": True}}, progress]
+    assert not answer.owed
