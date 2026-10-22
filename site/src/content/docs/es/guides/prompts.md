@@ -21,16 +21,18 @@ Revisión de fin de sesión que extrae lecciones y las agrega al vault.
 
 ## delegate
 
-Protocolo estructurado para delegar tareas al modelo worker.
+Protocolo estructurado para delegar tareas a modelos más baratos mediante hive-worker.
 
 **Parámetros**: `task` (string)
 
-**Protocolo**:
-1. Evaluar complejidad de la tarea contra una matriz de idoneidad
-2. Comprobar con `worker_status` que hay un worker configurado y alcanzable
-3. Construir prompt rico en contexto
-4. Llamar a `delegate_task` con el prompt preparado
-5. Validar la respuesta antes de usarla
+**Protocolo** (tal como lo enuncia hoy el prompt):
+1. Comprobación de idoneidad contra una matriz de tareas delegables y no delegables
+2. Comprobación de presupuesto: `worker_status` para el presupuesto restante y los modelos disponibles
+3. Compresión de contexto: resumir los archivos relevantes del vault y reducir la tarea a su instrucción esencial
+4. Delegar: elegir un nivel con `worker_status` y llamar a `delegate_task`, una tarea por llamada
+5. Evaluar el resultado y, si es pobre, resolver la tarea directamente
+
+El worker ya no tiene presupuesto ni niveles de modelo; el texto del prompt se corrige en [#520](https://github.com/mlorentedev/hive/issues/520), y esta página cambia con él.
 
 **Uso**: Pide a tu asistente que "delegue esta tarea: explica esta regex"
 

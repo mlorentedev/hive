@@ -53,17 +53,19 @@ Después de re-registrar, reinicia la sesión de tu asistente de IA. Hive aparec
 
 ```bash
 # Claude Code
+# Exporta antes HIVE_WORKER_API_KEY desde tu gestor de secretos.
 claude mcp add -s user hive \
   -e HIVE_WORKER_BASE_URL=https://api.your-provider.example/v1 \
-  -e HIVE_WORKER_API_KEY=<your-key> \
-  -e HIVE_WORKER_MODEL=<model-id> \
+  -e HIVE_WORKER_API_KEY="$HIVE_WORKER_API_KEY" \
+  -e HIVE_WORKER_MODEL=<id-del-modelo> \
   -- uvx --upgrade hive-vault
 
 # Gemini CLI
+# Exporta antes HIVE_WORKER_API_KEY desde tu gestor de secretos.
 gemini mcp add -s user \
   -e HIVE_WORKER_BASE_URL=https://api.your-provider.example/v1 \
-  -e HIVE_WORKER_API_KEY=<your-key> \
-  -e HIVE_WORKER_MODEL=<model-id> \
+  -e HIVE_WORKER_API_KEY="$HIVE_WORKER_API_KEY" \
+  -e HIVE_WORKER_MODEL=<id-del-modelo> \
   hive-vault uvx -- --upgrade hive-vault
 ```
 

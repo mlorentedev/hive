@@ -53,16 +53,18 @@ After re-registering, restart your AI assistant session. Hive will now appear in
 
 ```bash
 # Claude Code
+# Export HIVE_WORKER_API_KEY from your secret store first.
 claude mcp add -s user hive \
   -e HIVE_WORKER_BASE_URL=https://api.your-provider.example/v1 \
-  -e HIVE_WORKER_API_KEY=<your-key> \
+  -e HIVE_WORKER_API_KEY="$HIVE_WORKER_API_KEY" \
   -e HIVE_WORKER_MODEL=<model-id> \
   -- uvx --upgrade hive-vault
 
 # Gemini CLI
+# Export HIVE_WORKER_API_KEY from your secret store first.
 gemini mcp add -s user \
   -e HIVE_WORKER_BASE_URL=https://api.your-provider.example/v1 \
-  -e HIVE_WORKER_API_KEY=<your-key> \
+  -e HIVE_WORKER_API_KEY="$HIVE_WORKER_API_KEY" \
   -e HIVE_WORKER_MODEL=<model-id> \
   hive-vault uvx -- --upgrade hive-vault
 ```

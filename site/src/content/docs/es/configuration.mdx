@@ -85,11 +85,12 @@ Los ajustes del worker por proveedor y el alias de clave de proveedor sin prefij
 <Tabs syncKey="client">
   <TabItem label="Claude Code">
     ```bash
+    # Exporta antes HIVE_WORKER_API_KEY desde tu gestor de secretos.
     claude mcp add -s user hive \
       -e VAULT_PATH=$HOME/mi-vault \
       -e HIVE_WORKER_BASE_URL=https://api.your-provider.example/v1 \
-      -e HIVE_WORKER_API_KEY=<your-key> \
-      -e HIVE_WORKER_MODEL=<model-id> \
+      -e HIVE_WORKER_API_KEY="$HIVE_WORKER_API_KEY" \
+      -e HIVE_WORKER_MODEL=<id-del-modelo> \
       -- uvx --upgrade hive-vault
     ```
   </TabItem>
@@ -103,17 +104,18 @@ Los ajustes del worker por proveedor y el alias de clave de proveedor sin prefij
     [mcp_servers.hive-vault.env]
     VAULT_PATH = "~/mi-vault"
     HIVE_WORKER_BASE_URL = "https://api.your-provider.example/v1"
-    HIVE_WORKER_API_KEY = "<your-key>"
-    HIVE_WORKER_MODEL = "<model-id>"
+    HIVE_WORKER_API_KEY = "<tu-clave>"
+    HIVE_WORKER_MODEL = "<id-del-modelo>"
     ```
   </TabItem>
   <TabItem label="Gemini CLI">
     ```bash
+    # Exporta antes HIVE_WORKER_API_KEY desde tu gestor de secretos.
     gemini mcp add -s user \
       -e VAULT_PATH=$HOME/mi-vault \
       -e HIVE_WORKER_BASE_URL=https://api.your-provider.example/v1 \
-      -e HIVE_WORKER_API_KEY=<your-key> \
-      -e HIVE_WORKER_MODEL=<model-id> \
+      -e HIVE_WORKER_API_KEY="$HIVE_WORKER_API_KEY" \
+      -e HIVE_WORKER_MODEL=<id-del-modelo> \
       hive-vault uvx -- --upgrade hive-vault
     ```
   </TabItem>
@@ -128,8 +130,8 @@ Los ajustes del worker por proveedor y el alias de clave de proveedor sin prefij
           "env": {
             "VAULT_PATH": "/home/tu-usuario/mi-vault",
             "HIVE_WORKER_BASE_URL": "https://api.your-provider.example/v1",
-            "HIVE_WORKER_API_KEY": "<your-key>",
-            "HIVE_WORKER_MODEL": "<model-id>"
+            "HIVE_WORKER_API_KEY": "<tu-clave>",
+            "HIVE_WORKER_MODEL": "<id-del-modelo>"
           }
         }
       }
@@ -147,8 +149,8 @@ Los ajustes del worker por proveedor y el alias de clave de proveedor sin prefij
           "environment": {
             "VAULT_PATH": "/home/tu-usuario/mi-vault",
             "HIVE_WORKER_BASE_URL": "https://api.your-provider.example/v1",
-            "HIVE_WORKER_API_KEY": "<your-key>",
-            "HIVE_WORKER_MODEL": "<model-id>"
+            "HIVE_WORKER_API_KEY": "<tu-clave>",
+            "HIVE_WORKER_MODEL": "<id-del-modelo>"
           },
           "enabled": true
         }
@@ -243,7 +245,7 @@ Después configura un endpoint de embeddings compatible con OpenAI — igual que
 ```bash
 HIVE_EMBED_BASE_URL=https://api.your-provider.example/v1
 HIVE_EMBED_MODEL=<an embedding model the endpoint serves>
-HIVE_EMBED_API_KEY=<your-key>
+HIVE_EMBED_API_KEY=<tu-clave>
 ```
 
 Reinicia el servidor; el índice se construye de forma perezosa en el primer uso y se actualiza a medida que escribes en el vault. Define `HIVE_SYNTH_MODEL` con un modelo de chat del mismo endpoint para obtener una respuesta sintetizada y con citas en lugar de las secciones recuperadas en bruto. Ten en cuenta que un ajuste del worker sin definir usa su equivalente `HIVE_EMBED_*`: con solo estas variables, el worker hereda el endpoint y la clave de embeddings, pero también el id del modelo de embeddings, que no puede conversar — así que define `HIVE_WORKER_MODEL` explícitamente si también usas el worker. Consulta [`vault_ask`](/hive/es/tools/vault/#vault_ask).

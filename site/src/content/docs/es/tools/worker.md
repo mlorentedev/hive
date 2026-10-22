@@ -48,7 +48,7 @@ Cuando se proporciona `project`, lee un archivo del vault:
 `structured=True` devuelve un registro JSON de una línea en lugar de prosa, para llamadores que necesitan ramificar según el resultado en vez de analizar texto:
 
 ```json
-{"status": "ok", "model": "<model-id>", "output": "...", "tokens": 412, "duration_ms": 2100, "detail": ""}
+{"status": "ok", "model": "<id-del-modelo>", "output": "...", "tokens": 412, "duration_ms": 2100, "detail": ""}
 ```
 
 Todos los campos están siempre presentes, también en caso de fallo. `status` es uno de:
@@ -67,7 +67,7 @@ Todos los campos están siempre presentes, también en caso de fallo. `status` e
 Las respuestas en prosa empiezan con una cabecera que indica el modelo, el número de tokens, el coste y la latencia:
 
 ```
-## Worker Response (model: <model-id>, 412 tokens, $0.00, 2.1s)
+## Worker Response (model: <id-del-modelo>, 412 tokens, $0.00, 2.1s)
 
 <la respuesta del worker>
 ```

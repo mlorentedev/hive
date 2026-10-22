@@ -167,11 +167,12 @@ Para habilitar la delegación de tareas, apunta Hive a un único endpoint compat
 <Tabs syncKey="client">
   <TabItem label="Claude Code">
     ```bash
+    # Exporta antes HIVE_WORKER_API_KEY desde tu gestor de secretos.
     claude mcp add -s user hive \
       -e VAULT_PATH=/ruta/a/tu/vault \
       -e HIVE_WORKER_BASE_URL=https://api.your-provider.example/v1 \
-      -e HIVE_WORKER_API_KEY=<your-key> \
-      -e HIVE_WORKER_MODEL=<model-id> \
+      -e HIVE_WORKER_API_KEY="$HIVE_WORKER_API_KEY" \
+      -e HIVE_WORKER_MODEL=<id-del-modelo> \
       -- uvx --upgrade hive-vault
     ```
   </TabItem>
@@ -184,17 +185,18 @@ Para habilitar la delegación de tareas, apunta Hive a un único endpoint compat
     [mcp_servers.hive-vault.env]
     VAULT_PATH = "/ruta/a/tu/vault"
     HIVE_WORKER_BASE_URL = "https://api.your-provider.example/v1"
-    HIVE_WORKER_API_KEY = "<your-key>"
-    HIVE_WORKER_MODEL = "<model-id>"
+    HIVE_WORKER_API_KEY = "<tu-clave>"
+    HIVE_WORKER_MODEL = "<id-del-modelo>"
     ```
   </TabItem>
   <TabItem label="Gemini CLI">
     ```bash
+    # Exporta antes HIVE_WORKER_API_KEY desde tu gestor de secretos.
     gemini mcp add -s user \
       -e VAULT_PATH=/ruta/a/tu/vault \
       -e HIVE_WORKER_BASE_URL=https://api.your-provider.example/v1 \
-      -e HIVE_WORKER_API_KEY=<your-key> \
-      -e HIVE_WORKER_MODEL=<model-id> \
+      -e HIVE_WORKER_API_KEY="$HIVE_WORKER_API_KEY" \
+      -e HIVE_WORKER_MODEL=<id-del-modelo> \
       hive-vault uvx -- --upgrade hive-vault
     ```
   </TabItem>
@@ -208,8 +210,8 @@ Para habilitar la delegación de tareas, apunta Hive a un único endpoint compat
           "env": {
             "VAULT_PATH": "/ruta/a/tu/vault",
             "HIVE_WORKER_BASE_URL": "https://api.your-provider.example/v1",
-            "HIVE_WORKER_API_KEY": "<your-key>",
-            "HIVE_WORKER_MODEL": "<model-id>"
+            "HIVE_WORKER_API_KEY": "<tu-clave>",
+            "HIVE_WORKER_MODEL": "<id-del-modelo>"
           }
         }
       }
@@ -226,8 +228,8 @@ Para habilitar la delegación de tareas, apunta Hive a un único endpoint compat
           "environment": {
             "VAULT_PATH": "/ruta/a/tu/vault",
             "HIVE_WORKER_BASE_URL": "https://api.your-provider.example/v1",
-            "HIVE_WORKER_API_KEY": "<your-key>",
-            "HIVE_WORKER_MODEL": "<model-id>"
+            "HIVE_WORKER_API_KEY": "<tu-clave>",
+            "HIVE_WORKER_MODEL": "<id-del-modelo>"
           },
           "enabled": true
         }
