@@ -173,24 +173,42 @@ def test_build_version_runs_uv_venv_then_a_pinned_pip_install(
     assert "hive-vault==1.41.6" in calls[1]
 
 
-def test_build_version_refuses_to_build_cryptography_from_source(
+@pytest.mark.parametrize(
+    ("platform", "machine", "binary_only"),
+    [
+        ("win32", "ARM64", True),
+        ("win32", "AMD64", False),
+        ("darwin", "x86_64", False),
+        ("linux", "riscv64", False),
+    ],
+)
+def test_build_version_refuses_a_cryptography_source_build_only_on_windows_arm64(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
+    platform: str,
+    machine: str,
+    binary_only: bool,
 ) -> None:
-    """cryptography has no wheel for every platform in every release, and a
-    fresh machine has no compiler. A source build fails there, so the install
-    must take the newest release that has a wheel instead (#515)."""
+    """cryptography stopped shipping win_arm64 wheels, and a clean Windows Arm64
+    machine has no linker, so there the install must take the newest release
+    that has a wheel (#515). Elsewhere a source build may be the only way in
+    (no wheel for riscv64 or Intel macOS), so nothing changes."""
     monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
     from hive import _runtime
 
+    monkeypatch.setattr(_runtime.sys, "platform", platform)
+    monkeypatch.setattr(_runtime.platform, "machine", lambda: machine)
     calls: list[list[str]] = []
     monkeypatch.setattr(_runtime, "_run_uv", lambda args: calls.append(args))
+    monkeypatch.setattr(_runtime, "_venv_python", lambda target: target / "python")
 
     _runtime.build_version("1.41.6")
 
     install = calls[1]
-    flag = install.index("--only-binary")
-    assert install[flag + 1] == "cryptography"
+    if binary_only:
+        assert install[install.index("--only-binary") + 1] == "cryptography"
+    else:
+        assert "--only-binary" not in install
 
 
 def test_build_version_cleans_up_a_partial_dir_on_failure(

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -249,6 +250,18 @@ def _run_uv(args: list[str]) -> None:
         )
 
 
+def _install_flags() -> list[str]:
+    """Extra ``uv pip install`` flags for this platform.
+
+    cryptography ships no win_arm64 wheel after 46.0.3, and a clean Windows
+    Arm64 machine has no linker to build one, so there uv must take the newest
+    release that has a wheel (#515). Other platforms keep the default: where
+    no wheel exists (Intel macOS, riscv64), a source build is the only way in."""
+    if sys.platform == "win32" and platform.machine().lower() == "arm64":
+        return ["--only-binary", "cryptography"]
+    return []
+
+
 def build_version(version: str, *, package: str = "hive-vault") -> Path:
     """Build *version* into its own dir under ``versions/``, never touching the
     in-use install; return the new version dir.
@@ -256,12 +269,10 @@ def build_version(version: str, *, package: str = "hive-vault") -> Path:
     Uses uv as the manual path would — ``uv venv <dir>`` then
     ``uv pip install --python <dir> <package>==<version>`` — so uv/pip do the
     heavy lifting and hive only owns *where* the version lands. One difference:
-    cryptography is never built from source. Some releases ship no wheel for
-    some platforms (Windows Arm64, #515), and a machine without a compiler
-    cannot build one, so the resolver takes the newest release that has a
-    wheel. A build that fails part-way is cleaned up: a half-built dir must
-    never survive to be repointed-at (that corrupt-dir state is the #267
-    failure mode)."""
+    on Windows Arm64, cryptography is never built from source (see
+    ``_install_flags``). A build that fails part-way is cleaned up: a
+    half-built dir must never survive to be repointed-at (that corrupt-dir
+    state is the #267 failure mode)."""
     target = version_path(version)
     if target.exists():
         raise RuntimeError(
@@ -277,8 +288,7 @@ def build_version(version: str, *, package: str = "hive-vault") -> Path:
                 "install",
                 "--python",
                 str(_venv_python(target)),
-                "--only-binary",
-                "cryptography",
+                *_install_flags(),
                 f"{package}=={version}",
             ],
         )

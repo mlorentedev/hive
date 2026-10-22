@@ -50,8 +50,9 @@ environment variable works too, in the environment of the process that runs
 $env:UV_NO_BUILD_PACKAGE = "cryptography"
 ```
 
-`hive self-upgrade` needs no flag of its own: it builds each version with
-`uv pip install --only-binary cryptography` (`_runtime.build_version`). The
+`hive self-upgrade` needs no flag of its own: on Windows Arm64 it builds each
+version with `uv pip install --only-binary cryptography`
+(`_runtime.build_version`), and on other platforms it leaves uv's default. The
 `uvx` that starts it still needs the flag, because uvx installs hive-vault
 before `hive` runs.
 

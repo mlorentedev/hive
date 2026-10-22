@@ -23,7 +23,11 @@ keep Arm64 on 46.x after upstream ships Arm64 wheels again.
 cryptography` in `uv pip install`, `--no-build-package cryptography` for
 `uvx` and `uv tool install`. The resolver backtracks to the newest release
 that has a wheel, and moves forward again on its own once a newer one does.
-On platforms that always get a wheel, nothing changes.
+hive passes the flag only on Windows Arm64. cryptography ships no wheel at
+all for some platforms (Intel macOS, riscv64, 32-bit Windows in 50.0.2), and
+there refusing the source build turns a working build into a resolution
+failure, or quietly moves the version back. A flag scoped to the package
+still has to be scoped to the platform where the build is known to fail.
 
 The flag does not avoid the stale version; it avoids locking it in. Today
 Arm64 lands on 46.0.3, which has six advisories fixed in later releases
