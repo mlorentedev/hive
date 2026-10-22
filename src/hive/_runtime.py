@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -249,15 +250,29 @@ def _run_uv(args: list[str]) -> None:
         )
 
 
+def _install_flags() -> list[str]:
+    """Extra ``uv pip install`` flags for this platform.
+
+    cryptography ships no win_arm64 wheel after 46.0.3, and a clean Windows
+    Arm64 machine has no linker to build one, so there uv must take the newest
+    release that has a wheel (#515). Other platforms keep the default: where
+    no wheel exists (Intel macOS, riscv64), a source build is the only way in."""
+    if sys.platform == "win32" and platform.machine().lower() == "arm64":
+        return ["--only-binary", "cryptography"]
+    return []
+
+
 def build_version(version: str, *, package: str = "hive-vault") -> Path:
     """Build *version* into its own dir under ``versions/``, never touching the
     in-use install; return the new version dir.
 
-    Uses uv exactly as the manual path would — ``uv venv <dir>`` then
+    Uses uv as the manual path would — ``uv venv <dir>`` then
     ``uv pip install --python <dir> <package>==<version>`` — so uv/pip do the
-    heavy lifting and hive only owns *where* the version lands. A build that
-    fails part-way is cleaned up: a half-built dir must never survive to be
-    repointed-at (that corrupt-dir state is the #267 failure mode)."""
+    heavy lifting and hive only owns *where* the version lands. One difference:
+    on Windows Arm64, cryptography is never built from source (see
+    ``_install_flags``). A build that fails part-way is cleaned up: a
+    half-built dir must never survive to be repointed-at (that corrupt-dir
+    state is the #267 failure mode)."""
     target = version_path(version)
     if target.exists():
         raise RuntimeError(
@@ -267,7 +282,16 @@ def build_version(version: str, *, package: str = "hive-vault") -> Path:
     versions_dir().mkdir(parents=True, exist_ok=True)
     try:
         _run_uv(["venv", str(target)])
-        _run_uv(["pip", "install", "--python", str(_venv_python(target)), f"{package}=={version}"])
+        _run_uv(
+            [
+                "pip",
+                "install",
+                "--python",
+                str(_venv_python(target)),
+                *_install_flags(),
+                f"{package}=={version}",
+            ],
+        )
     except RuntimeError as exc:
         shutil.rmtree(target, ignore_errors=True)
         raise RuntimeError(
