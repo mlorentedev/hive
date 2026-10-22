@@ -1,5 +1,23 @@
 # Changelog
 
+## [4.4.2](https://github.com/mlorentedev/hive/compare/v4.4.1...v4.4.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* **ci:** build the docs site on pull requests that touch it ([#509](https://github.com/mlorentedev/hive/issues/509)) ([66758c7](https://github.com/mlorentedev/hive/commit/66758c704eadf0b4d63663e3b2fba2b4fb97a8d1))
+* **ci:** review one pull request at a time instead of racing the model pool ([#504](https://github.com/mlorentedev/hive/issues/504)) ([6fde979](https://github.com/mlorentedev/hive/commit/6fde9790622b651ff19dedf34ab052dadcd992c2))
+* **client:** relay each SSE frame as it arrives ([#522](https://github.com/mlorentedev/hive/issues/522)) ([9930638](https://github.com/mlorentedev/hive/commit/993063806d92e8b7f355cd87533d29870f56480a))
+* **client:** retry a daemon that closes before the TLS handshake ends ([#516](https://github.com/mlorentedev/hive/issues/516)) ([4c86150](https://github.com/mlorentedev/hive/commit/4c86150831065216206be7216b77d52012977777))
+* **client:** survive a daemon restart instead of exiting ([#512](https://github.com/mlorentedev/hive/issues/512)) ([5728895](https://github.com/mlorentedev/hive/commit/5728895f22c6850494b3623b66e51db4fef5f1e1))
+* **runtime:** never build cryptography from source during self-upgrade ([#523](https://github.com/mlorentedev/hive/issues/523)) ([63bb021](https://github.com/mlorentedev/hive/commit/63bb0218f1f32ea82b0d0f01133287ffdc777a82))
+* **vault:** commit only the paths a write was asked to commit ([#511](https://github.com/mlorentedev/hive/issues/511)) ([f2f9873](https://github.com/mlorentedev/hive/commit/f2f9873c23b9b2bf052d571771a7ad481fdbadff))
+
+
+### Documentation
+
+* **site:** describe the single OpenAI-compatible worker and document vault_ask ([#521](https://github.com/mlorentedev/hive/issues/521)) ([4f7ae06](https://github.com/mlorentedev/hive/commit/4f7ae06b858f2bbd9e78f80017d9a940aa70eb3a))
+
 ## [4.4.1](https://github.com/mlorentedev/hive/compare/v4.4.0...v4.4.1) (2026-10-14)
 
 
