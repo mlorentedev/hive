@@ -20,9 +20,9 @@ description: System architecture and module map.
 │  ┌─────────────┐  ┌────────────┐  ┌──────────┐  │
 │  │ Vault+Session│  │Worker Tools│  │Resources │  │
 │  │ _vault_read  │  │ _workers   │  │(5 URIs)  │  │
-│  │ _vault_write │  │ (2 tools)  │  └──────────┘  │
+│  │ _vault_write │  │ (3 tools)  │  └──────────┘  │
 │  │ _vault_health│  └─────┬──────┘                │
-│  │ (8 tools)    │        │                       │
+│  │ (10 tools)   │        │                       │
 │  └──────┬──────┘  ┌─────▼──────┐                 │
 │         │         │  clients   │                 │
 │  ┌──────▼──────┐  │  budget    │                 │
@@ -33,8 +33,8 @@ description: System architecture and module map.
 └──────────────────────────────────────────────────┘
          │                    │
     ┌────▼────┐    ┌─────────▼──────────┐
-    │ Obsidian │    │   Ollama (local)    │
-    │  Vault   │    │   OpenRouter (cloud)│
+    │ Obsidian │    │  OpenAI-compatible  │
+    │  Vault   │    │  endpoint (/v1)     │
     └─────────┘    └────────────────────┘
 ```
 
@@ -47,12 +47,14 @@ description: System architecture and module map.
 | `_helpers.py` | Pure functions — path resolution, formatting, git ops, tracking |
 | `_vault_read.py` | Read tools — `vault_list`, `vault_query`, `vault_search`, `session_briefing` |
 | `_vault_write.py` | Write tools — `vault_write`, `vault_patch` |
+| `_vault_ask.py` | Semantic Q&A tool — `vault_ask` (optional; disabled until an embeddings endpoint is configured) |
+| `_semantic.py` | Chunking and persisted embedding index behind `vault_ask` (needs the `[semantic]` extra) |
 | `_vault_health.py` | Health tools — `vault_health`, health report builder |
 | `_workers.py` | Worker tools — `capture_lesson`, `delegate_task`, `worker_status` |
 | `config.py` | pydantic-settings configuration with `HIVE_` env prefix |
 | `frontmatter.py` | YAML frontmatter parsing, validation, and generation |
-| `clients.py` | Async HTTP clients for Ollama and OpenRouter |
-| `budget.py` | SQLite budget tracker with WAL mode ($1/mo default cap) |
+| `clients.py` | Async HTTP client for OpenAI-compatible endpoints (worker, embeddings, synthesis) |
+| `budget.py` | SQLite usage telemetry for worker requests (requests, tokens, latency) with WAL mode. The name is historical: the spend cap it once enforced was removed in 4.0.0 |
 | `relevance.py` | EMA-based section relevance scoring for adaptive context |
 | `usage.py` | Tool call analytics and token estimation |
 
@@ -72,6 +74,6 @@ All vault writes reach git, which is what gives full history and lets `vault_sea
 
 Bulk flows need no special handling any more — batching is what the queue does by default. `commit=True` forces a synchronous commit for callers that need it confirmed, and `vault_commit(message=...)` still flushes the working tree in one shot. `vault_delete` stays synchronous and out of the queue, so a delete and a recreate cannot collapse into one tick. When the obsidian-git plugin is detected in the vault (via `.obsidian/plugins/obsidian-git/data.json`), `vault_health` surfaces an `external_committer` block and the reconciler hands off to it at drain time instead of committing.
 
-### Budget Controls
+### One Worker, Classified Failures
 
-Worker delegation uses a SQLite database with WAL mode and explicit `threading.Lock` for thread-safe concurrent access. Monthly caps and per-request limits prevent cost overruns.
+Worker delegation makes one attempt against a single OpenAI-compatible endpoint; there is no internal fallback chain, because a backend that falls back on its own is a second routing authority. Failures are classified as `pool_unavailable` (the endpoint did not serve the request) or `task_failed` (it answered and the answer is unusable), so the caller that owns a routing map can decide whether to retry elsewhere. Usage telemetry — requests, tokens and latency per model — is recorded in a SQLite database with WAL mode and an explicit `threading.Lock` for thread-safe concurrent access. There is no spend cap.

@@ -20,9 +20,9 @@ description: Arquitectura del sistema y mapa de módulos.
 │  ┌─────────────┐  ┌────────────┐  ┌──────────┐  │
 │  │ Vault+Session│  │Worker Tools│  │Recursos  │  │
 │  │ _vault_read  │  │ _workers   │  │(5 URIs)  │  │
-│  │ _vault_write │  │ (2 tools)  │  └──────────┘  │
+│  │ _vault_write │  │ (3 tools)  │  └──────────┘  │
 │  │ _vault_health│  └─────┬──────┘                │
-│  │ (8 tools)    │        │                       │
+│  │ (10 tools)   │        │                       │
 │  └──────┬──────┘  ┌─────▼──────┐                 │
 │         │         │  clients   │                 │
 │  ┌──────▼──────┐  │  budget    │                 │
@@ -33,8 +33,8 @@ description: Arquitectura del sistema y mapa de módulos.
 └──────────────────────────────────────────────────┘
          │                    │
     ┌────▼────┐    ┌─────────▼──────────┐
-    │ Obsidian │    │   Ollama (local)    │
-    │  Vault   │    │   OpenRouter (cloud)│
+    │ Obsidian │    │  OpenAI-compatible  │
+    │  Vault   │    │  endpoint (/v1)     │
     └─────────┘    └────────────────────┘
 ```
 
@@ -47,12 +47,14 @@ description: Arquitectura del sistema y mapa de módulos.
 | `_helpers.py` | Funciones puras — resolución de rutas, formateo, ops git, tracking |
 | `_vault_read.py` | Herramientas de lectura — `vault_list`, `vault_query`, `vault_search`, `session_briefing` |
 | `_vault_write.py` | Herramientas de escritura — `vault_write`, `vault_patch` |
+| `_vault_ask.py` | Herramienta de Q&A semántico — `vault_ask` (opcional; deshabilitada hasta que se configura un endpoint de embeddings) |
+| `_semantic.py` | Chunking e índice de embeddings persistido detrás de `vault_ask` (requiere el extra `[semantic]`) |
 | `_vault_health.py` | Herramientas de salud — `vault_health`, constructor de reportes de salud |
 | `_workers.py` | Herramientas de worker — `capture_lesson`, `delegate_task`, `worker_status` |
 | `config.py` | Configuración pydantic-settings con prefijo `HIVE_` |
 | `frontmatter.py` | Parsing, validación y generación de frontmatter YAML |
-| `clients.py` | Clientes HTTP async para Ollama y OpenRouter |
-| `budget.py` | Tracker de presupuesto SQLite con modo WAL (tope $1/mes por defecto) |
+| `clients.py` | Cliente HTTP async para endpoints compatibles con OpenAI (worker, embeddings, síntesis) |
+| `budget.py` | Telemetría de uso SQLite para las peticiones del worker (peticiones, tokens, latencia) con modo WAL. El nombre es histórico: el tope de gasto que aplicaba se eliminó en 4.0.0 |
 | `relevance.py` | Puntuación de relevancia basada en EMA para contexto adaptativo |
 | `usage.py` | Analíticas de llamadas a herramientas y estimación de tokens |
 
@@ -72,6 +74,6 @@ Todas las escrituras al vault llegan a git, que es lo que da historial completo 
 
 Los flujos masivos ya no necesitan tratamiento especial — agrupar es lo que la cola hace por defecto. `commit=True` fuerza un commit síncrono para quien necesite confirmarlo, y `vault_commit(message=...)` sigue haciendo flush del working tree en una sola operación. `vault_delete` se mantiene síncrono y fuera de la cola, así que un borrado y una recreación no pueden colapsar en un mismo tick. Cuando se detecta el plugin obsidian-git en el vault (vía `.obsidian/plugins/obsidian-git/data.json`), `vault_health` expone un bloque `external_committer` y el reconciler le cede el commit en el momento del drain en vez de commitear él.
 
-### Controles de Presupuesto
+### Un Worker, Fallos Clasificados
 
-La delegación de workers usa una base de datos SQLite con modo WAL y `threading.Lock` explícito para acceso concurrente thread-safe. Los topes mensuales y límites por petición previenen sobrecostes.
+La delegación de workers hace un intento contra un único endpoint compatible con OpenAI; no hay cadena de fallback interna, porque un backend que hace fallback por su cuenta es una segunda autoridad de enrutamiento. Los fallos se clasifican como `pool_unavailable` (el endpoint no atendió la petición) o `task_failed` (respondió y la respuesta es inutilizable), de modo que el llamador que mantiene un mapa de enrutamiento puede decidir si reintentar en otro sitio. La telemetría de uso — peticiones, tokens y latencia por modelo — se registra en una base de datos SQLite con modo WAL y un `threading.Lock` explícito para acceso concurrente thread-safe. No hay tope de gasto.
