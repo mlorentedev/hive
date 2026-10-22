@@ -9,9 +9,7 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 - Un cliente compatible con MCP — [Claude Code](https://docs.anthropic.com/en/docs/build-with-claude/claude-code/overview), [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [GitHub Copilot](https://code.visualstudio.com/docs/copilot/chat/mcp-servers), [Cursor](https://cursor.com/), [Windsurf](https://windsurf.com/), o cualquier otro host MCP
 - Un vault de [Obsidian](https://obsidian.md/) (o cualquier directorio de archivos Markdown) — consulta [Estructura del Vault](/hive/es/guides/vault-structure/) para ver el layout esperado
-- **Opcional para delegación de tareas:**
-  - [Ollama](https://ollama.com/download) ejecutándose localmente — descarga un modelo con `ollama pull qwen2.5-coder:7b`
-  - Cuenta en [OpenRouter](https://openrouter.ai/) — crea una API key en [openrouter.ai/keys](https://openrouter.ai/keys) (tier gratuito disponible)
+- **Opcional para delegación de tareas:** cualquier endpoint `/v1` compatible con OpenAI — un servicio alojado o un runtime en tu propia máquina. Necesitas su URL base, una credencial si la requiere y un id de modelo. Hive no nombra ningún proveedor.
 
 ## Instalación
 
@@ -164,15 +162,17 @@ Para apuntar Hive a tu vault:
 
 ## Configurar Worker (Opcional)
 
-Para habilitar la delegación de tareas a modelos más baratos:
+Para habilitar la delegación de tareas, apunta Hive a un único endpoint compatible con OpenAI con `HIVE_WORKER_BASE_URL`, `HIVE_WORKER_API_KEY` y `HIVE_WORKER_MODEL`. Sin URL base el worker queda deshabilitado y `delegate_task` indica al host que gestione la tarea por sí mismo:
 
 <Tabs syncKey="client">
   <TabItem label="Claude Code">
     ```bash
+    # Exporta antes HIVE_WORKER_API_KEY desde tu gestor de secretos.
     claude mcp add -s user hive \
       -e VAULT_PATH=/ruta/a/tu/vault \
-      -e HIVE_OLLAMA_ENDPOINT=http://tu-ollama:11434 \
-      -e OPENROUTER_API_KEY=sk-or-... \
+      -e HIVE_WORKER_BASE_URL=https://api.your-provider.example/v1 \
+      -e HIVE_WORKER_API_KEY="$HIVE_WORKER_API_KEY" \
+      -e HIVE_WORKER_MODEL=<id-del-modelo> \
       -- uvx --upgrade hive-vault
     ```
   </TabItem>
@@ -184,16 +184,19 @@ Para habilitar la delegación de tareas a modelos más baratos:
 
     [mcp_servers.hive-vault.env]
     VAULT_PATH = "/ruta/a/tu/vault"
-    HIVE_OLLAMA_ENDPOINT = "http://tu-ollama:11434"
-    OPENROUTER_API_KEY = "sk-or-..."
+    HIVE_WORKER_BASE_URL = "https://api.your-provider.example/v1"
+    HIVE_WORKER_API_KEY = "<tu-clave>"
+    HIVE_WORKER_MODEL = "<id-del-modelo>"
     ```
   </TabItem>
   <TabItem label="Gemini CLI">
     ```bash
+    # Exporta antes HIVE_WORKER_API_KEY desde tu gestor de secretos.
     gemini mcp add -s user \
       -e VAULT_PATH=/ruta/a/tu/vault \
-      -e HIVE_OLLAMA_ENDPOINT=http://tu-ollama:11434 \
-      -e OPENROUTER_API_KEY=sk-or-... \
+      -e HIVE_WORKER_BASE_URL=https://api.your-provider.example/v1 \
+      -e HIVE_WORKER_API_KEY="$HIVE_WORKER_API_KEY" \
+      -e HIVE_WORKER_MODEL=<id-del-modelo> \
       hive-vault uvx -- --upgrade hive-vault
     ```
   </TabItem>
@@ -206,8 +209,9 @@ Para habilitar la delegación de tareas a modelos más baratos:
           "args": ["--upgrade", "hive-vault"],
           "env": {
             "VAULT_PATH": "/ruta/a/tu/vault",
-            "HIVE_OLLAMA_ENDPOINT": "http://tu-ollama:11434",
-            "OPENROUTER_API_KEY": "sk-or-..."
+            "HIVE_WORKER_BASE_URL": "https://api.your-provider.example/v1",
+            "HIVE_WORKER_API_KEY": "<tu-clave>",
+            "HIVE_WORKER_MODEL": "<id-del-modelo>"
           }
         }
       }
@@ -223,8 +227,9 @@ Para habilitar la delegación de tareas a modelos más baratos:
           "command": ["uvx", "--upgrade", "hive-vault"],
           "environment": {
             "VAULT_PATH": "/ruta/a/tu/vault",
-            "HIVE_OLLAMA_ENDPOINT": "http://tu-ollama:11434",
-            "OPENROUTER_API_KEY": "sk-or-..."
+            "HIVE_WORKER_BASE_URL": "https://api.your-provider.example/v1",
+            "HIVE_WORKER_API_KEY": "<tu-clave>",
+            "HIVE_WORKER_MODEL": "<id-del-modelo>"
           },
           "enabled": true
         }
@@ -249,6 +254,6 @@ Deberías ver recuentos de proyectos, archivos y métricas de obsolescencia para
 - [Casos de Uso](/hive/es/guides/use-cases/) — flujos de trabajo reales con Hive
 - [Configuración](/hive/es/configuration/) — referencia completa de variables de entorno
 - [Herramientas de Vault](/hive/es/tools/vault/) — todas las herramientas de vault
-- [Herramientas de Worker](/hive/es/tools/worker/) — delegación de tareas y enrutamiento
+- [Herramientas de Worker](/hive/es/tools/worker/) — delegación de tareas y estado del worker
 - [Estructura del Vault](/hive/es/guides/vault-structure/) — cómo organizar tu vault
 - [Solución de Problemas](/hive/es/guides/troubleshooting/) — problemas comunes y soluciones

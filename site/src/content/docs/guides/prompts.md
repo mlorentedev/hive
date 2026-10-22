@@ -25,12 +25,14 @@ Structured protocol for delegating tasks to cheaper models via hive-worker.
 
 **Parameters**: `task` (string)
 
-**Protocol**:
-1. Assess task complexity against a suitability matrix
-2. Choose appropriate model tier
-3. Construct context-rich prompt
-4. Call `delegate_task` with the prepared prompt
-5. Validate the response before using it
+**Protocol** (as the prompt states it today):
+1. Suitability check against a delegatable / not-delegatable matrix
+2. Budget check: `worker_status` for remaining budget and model availability
+3. Context compression: summarize relevant vault files and strip the task to its essential instruction
+4. Delegate: pick a tier with `worker_status`, then call `delegate_task`, one task per call
+5. Evaluate the result, and handle the task directly if it is poor
+
+The worker has no budget or model tiers any more; the prompt's wording catches up in [#520](https://github.com/mlorentedev/hive/issues/520), and this page changes with it.
 
 **Usage**: Ask your assistant to "delegate this task: explain this regex"
 
