@@ -47,6 +47,9 @@ hive service --help          # confirm the subcommand exists (>= 1.32.0)
 The `hive` console script must resolve to the upgraded tool (`which hive` /
 `where hive`).
 
+On Windows Arm64, add `--no-build-package cryptography` to the install; see
+[windows-arm64-install](../troubleshooting/windows-arm64-install.md).
+
 On Windows, this bootstraps the managed installation. Use `hive self-upgrade
 [version]` for later upgrades; the version is optional and defaults to the
 latest PyPI release. It creates a versioned runtime and atomically switches the

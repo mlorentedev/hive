@@ -173,6 +173,26 @@ def test_build_version_runs_uv_venv_then_a_pinned_pip_install(
     assert "hive-vault==1.41.6" in calls[1]
 
 
+def test_build_version_refuses_to_build_cryptography_from_source(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """cryptography has no wheel for every platform in every release, and a
+    fresh machine has no compiler. A source build fails there, so the install
+    must take the newest release that has a wheel instead (#515)."""
+    monkeypatch.setenv("HIVE_RUNTIME_ROOT", str(tmp_path))
+    from hive import _runtime
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(_runtime, "_run_uv", lambda args: calls.append(args))
+
+    _runtime.build_version("1.41.6")
+
+    install = calls[1]
+    flag = install.index("--only-binary")
+    assert install[flag + 1] == "cryptography"
+
+
 def test_build_version_cleans_up_a_partial_dir_on_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,

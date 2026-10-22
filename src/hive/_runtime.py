@@ -253,11 +253,15 @@ def build_version(version: str, *, package: str = "hive-vault") -> Path:
     """Build *version* into its own dir under ``versions/``, never touching the
     in-use install; return the new version dir.
 
-    Uses uv exactly as the manual path would — ``uv venv <dir>`` then
+    Uses uv as the manual path would — ``uv venv <dir>`` then
     ``uv pip install --python <dir> <package>==<version>`` — so uv/pip do the
-    heavy lifting and hive only owns *where* the version lands. A build that
-    fails part-way is cleaned up: a half-built dir must never survive to be
-    repointed-at (that corrupt-dir state is the #267 failure mode)."""
+    heavy lifting and hive only owns *where* the version lands. One difference:
+    cryptography is never built from source. Some releases ship no wheel for
+    some platforms (Windows Arm64, #515), and a machine without a compiler
+    cannot build one, so the resolver takes the newest release that has a
+    wheel. A build that fails part-way is cleaned up: a half-built dir must
+    never survive to be repointed-at (that corrupt-dir state is the #267
+    failure mode)."""
     target = version_path(version)
     if target.exists():
         raise RuntimeError(
@@ -267,7 +271,17 @@ def build_version(version: str, *, package: str = "hive-vault") -> Path:
     versions_dir().mkdir(parents=True, exist_ok=True)
     try:
         _run_uv(["venv", str(target)])
-        _run_uv(["pip", "install", "--python", str(_venv_python(target)), f"{package}=={version}"])
+        _run_uv(
+            [
+                "pip",
+                "install",
+                "--python",
+                str(_venv_python(target)),
+                "--only-binary",
+                "cryptography",
+                f"{package}=={version}",
+            ],
+        )
     except RuntimeError as exc:
         shutil.rmtree(target, ignore_errors=True)
         raise RuntimeError(
