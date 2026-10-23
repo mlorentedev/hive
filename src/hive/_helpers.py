@@ -1616,7 +1616,7 @@ async def tool_span(
     one Popen was killed, sleep ``HIVE_POST_KILL_DRAIN_S`` (default 5.0s,
     capped 0.5..30) and evict the cached ``.git/hive.lock`` filelock so
     sibling workers can acquire freshly. Drain order matters: SIGTERM →
-    grace → SIGKILL → stdio drain (in _terminate_registry) → telemetry
+    grace → SIGKILL → reap (in _terminate_registry) → telemetry
     → **post_kill_drain → evict_filelock** → raise. The post-kill drain
     is what lets the worker thread escape ``_filelock_with_telemetry``'s
     ``__exit__`` naturally on the happy path; eviction is the safety net
