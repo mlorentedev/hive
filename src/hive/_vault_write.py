@@ -99,6 +99,28 @@ def _notify_index_update(ctx: ServerContext, filepath: Path) -> None:
             logging.getLogger("hive.fts").warning("FTS index update failed: %s", exc)
 
 
+_LEFT_OUT_SHOWN = 10
+
+
+def _left_out_note(left_out: list[str]) -> str:
+    """Name the staged paths ``vault_commit`` left alone, for the human to judge.
+
+    One of them may be hive's own orphan, a write killed between ``git add``
+    and ``git commit``, so a count alone would hide the one path worth
+    rescuing (#510).
+    """
+    if not left_out:
+        return ""
+    shown = ", ".join(left_out[:_LEFT_OUT_SHOWN])
+    more = len(left_out) - _LEFT_OUT_SHOWN
+    if more > 0:
+        shown += f" (+{more} more)"
+    return (
+        f" Left {len(left_out)} staged path(s) out: {shown}. They belong to whoever "
+        "staged them; commit one deliberately with `git commit -- <path>`."
+    )
+
+
 def _commit_status_suffix(
     requested_commit: bool,
     deferred: bool,
@@ -653,12 +675,17 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
     @mcp.tool(annotations=_WRITE)
     @wrap_sync_tool(ctx, "vault_commit")
     def vault_commit(message: str = "") -> str:
-        """Stage everything in the vault and create one commit.
+        """Commit every unstaged and untracked change in the vault, in one commit.
 
         Companion to ``vault_write(commit=False)`` and
         ``vault_patch(commit=False)``: callers that opt out of per-write
         commits batch many writes and then flush with a single
         ``vault_commit`` call.
+
+        It also sweeps edits made outside hive. A path that already has a
+        staged change is left out and named in the result: it belongs to
+        whoever staged it, often another session sharing the vault. Commit
+        one deliberately with ``git commit -- <path>``.
 
         Returns the new commit SHA on success, a clean-tree notice when
         there is nothing to commit, or a human-readable error.
@@ -674,7 +701,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
         try:
             with vault_write_lock(ctx.vault):
-                status, detail = _git_commit_all(ctx.vault, message)
+                status, detail, left_out = _git_commit_all(ctx.vault, message)
         except WriteLockTimeout as exc:
             return track(
                 ctx,
@@ -682,8 +709,11 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 f"Server busy — {exc.reason}. Retry shortly.",
             )
 
+        note = _left_out_note(left_out)
         if status == "committed":
-            return track(ctx, "vault_commit", f"Committed {detail}.")
+            return track(ctx, "vault_commit", f"Committed {detail}.{note}")
+        if status == "clean" and left_out:
+            return track(ctx, "vault_commit", f"Nothing to commit outside the index.{note}")
         if status == "clean":
             return track(
                 ctx,

@@ -2060,48 +2060,84 @@ def _git_commit(
     return False
 
 
+def _unstaged_paths(porcelain_z: str) -> tuple[list[str], list[str]]:
+    """Split ``git status --porcelain -z`` into what ``vault_commit`` may take.
+
+    Returns the untracked and unstaged-only paths, and the paths left out
+    because they already have a staged change. A path staged and
+    then edited again (``MM``) is left out too: committing it would carry
+    the staged half with it.
+    """
+    paths: list[str] = []
+    staged: list[str] = []
+    entries = iter(porcelain_z.split("\0"))
+    for entry in entries:
+        if len(entry) < 4:
+            continue
+        x, y, path = entry[0], entry[1], entry[3:]
+        if x in "RC":
+            next(entries, None)  # -z puts a rename's source in its own field
+        if x == "?" or (x == " " and y != " "):
+            paths.append(path)
+        else:
+            staged.append(path)
+    return paths, staged
+
+
 def _git_commit_all(
     vault_path: Path,
     message: str,
-) -> tuple[str, str]:
-    """Stage every change in the vault and create one commit.
+) -> tuple[str, str, list[str]]:
+    """Commit every unstaged and untracked change in the vault, in one commit.
 
-    Returns ``(status, detail)`` where ``status`` is one of:
+    Returns ``(status, detail, left_out)`` where ``status`` is one of:
     - ``"committed"`` — a new commit was created; ``detail`` is the SHA.
     - ``"clean"`` — nothing to commit; ``detail`` is an empty string.
     - ``"error"`` — git failed; ``detail`` is the human-readable reason.
 
+    ``left_out`` names the staged paths the commit did not take. One of them
+    can be hive's own: a write killed between ``git add`` and ``git commit``
+    stays staged, and git cannot tell it from another session's work. Naming
+    them keeps that orphan recoverable by hand.
+
     Used by the ``vault_commit`` MCP tool to flush the working tree
-    accumulated by ``commit=False`` writes (HIVE-104 Fase B1).
+    accumulated by ``commit=False`` writes (HIVE-104 Fase B1). It still
+    sweeps edits hive never wrote (ADR-018 §3, AC10), but a path that
+    already has a staged change is left alone: several sessions share one
+    vault, and staged work belongs to whoever staged it (#510, as #470 for
+    ``_git_commit``).
     """
     safe_msg = message.replace("\n", " ").replace("\r", " ") or "vault: batch update"
     if not _acquire_with_telemetry(_GIT_LOCK, "_GIT_LOCK"):
-        return "error", "thread lock timeout"
+        return "error", "thread lock timeout", []
     try:
         try:
             with _filelock_with_telemetry(_git_filelock(vault_path), "_git_filelock"):
                 rc, porcelain_out, porcelain_err = _run_git(
-                    ["status", "--porcelain"],
+                    ["status", "--porcelain", "-z", "--untracked-files=all"],
                     vault_path,
                 )
                 if rc != 0:
-                    return "error", (f"git status rc={rc}: {porcelain_err.strip() or '<empty>'}")
-                if not porcelain_out.strip():
-                    return "clean", ""
-                rc, _, err = _run_git(["add", "-A"], vault_path)
+                    return "error", f"git status rc={rc}: {porcelain_err.strip() or '<empty>'}", []
+                paths, left_out = _unstaged_paths(porcelain_out)
+                if not paths:
+                    return "clean", "", left_out
+                # Literal, so a glob-named file cannot pull in its matches.
+                pathspecs = [f":(literal){p}" for p in paths]
+                rc, _, err = _run_git(["add", "--", *pathspecs], vault_path)
                 if rc != 0:
-                    return "error", f"git add -A rc={rc}: {err.strip() or '<empty>'}"
-                rc, _, err = _run_git(_commit_args(safe_msg), vault_path)
+                    return "error", f"git add rc={rc}: {err.strip() or '<empty>'}", left_out
+                rc, _, err = _run_git(_commit_args(safe_msg, pathspecs), vault_path)
                 if rc != 0:
-                    return "error", f"git commit rc={rc}: {err.strip() or '<empty>'}"
+                    return "error", f"git commit rc={rc}: {err.strip() or '<empty>'}", left_out
                 rc, rev_out, err = _run_git(["rev-parse", "HEAD"], vault_path)
                 if rc != 0:
-                    return "error", f"git rev-parse rc={rc}: {err.strip() or '<empty>'}"
-                return "committed", rev_out.strip()
+                    return "error", f"git rev-parse rc={rc}: {err.strip() or '<empty>'}", left_out
+                return "committed", rev_out.strip(), left_out
         except filelock.Timeout:
-            return "error", "inter-process lock timeout"
+            return "error", "inter-process lock timeout", []
         except Exception as exc:
-            return "error", f"unexpected: {type(exc).__name__}: {exc}"
+            return "error", f"unexpected: {type(exc).__name__}: {exc}", []
     finally:
         _GIT_LOCK.release()
 
