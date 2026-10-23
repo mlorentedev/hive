@@ -90,3 +90,17 @@ def test_a_pull_request_cannot_cancel_a_deploy() -> None:
     assert "github.event.pull_request.number" in group, "PR runs key on their own number"
     assert "'pages'" in group, "deploys keep the original `pages` group"
     assert concurrency["cancel-in-progress"] is True
+
+
+def test_the_build_fails_on_a_broken_internal_link() -> None:
+    # Starlight ships `](/configuration/)` unrewritten, so a link missing the
+    # /hive base builds green and 404s on Pages (#519). The check must run on
+    # every build, PR or deploy, and before the artifact is uploaded.
+    steps = _job("build")["steps"]
+    commands = [s.get("run") for s in steps]
+    assert "npm run check:links" in commands, "the build must scan dist/ for broken links"
+    check = commands.index("npm run check:links")
+    assert check > commands.index("npm run build"), "the scan reads dist/, so it runs after build"
+    assert "if" not in steps[check], "a gated link check lets a PR or a deploy skip it"
+    upload = next(i for i, s in enumerate(steps) if "upload-pages-artifact" in s.get("uses", ""))
+    assert check < upload, "a broken link must stop the deploy before the artifact is uploaded"

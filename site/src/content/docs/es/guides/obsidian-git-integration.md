@@ -92,6 +92,6 @@ La consistencia cross-process es eventual dentro de `~2 × HIVE_OUTBOX_TICK_S`. 
 
 ## Ver también
 
-- [Variables de entorno de Configuration](/es/configuration/) — referencia `HIVE_*` completa.
-- [Troubleshooting — Contención multi-sesión](/es/guides/troubleshooting/#contención-multi-sesión) — técnicas hermanas para N=3-5 procesos hive contra el mismo vault.
+- [Variables de entorno de Configuration](/hive/es/configuration/) — referencia `HIVE_*` completa.
+- [Troubleshooting — Contención multi-sesión](/hive/es/guides/troubleshooting/#contención-multi-sesión) — técnicas hermanas para N=3-5 procesos hive contra el mismo vault.
 - ADR-010 (en el vault del maintainer) — racional de diseño del patrón cooperate-don't-compete.
