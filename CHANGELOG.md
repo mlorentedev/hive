@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.4.3](https://github.com/mlorentedev/hive/compare/v4.4.2...v4.4.3) (2026-10-23)
+
+
+### Bug Fixes
+
+* **deadline:** reap terminated processes instead of draining their pipes ([#525](https://github.com/mlorentedev/hive/issues/525)) ([17fef03](https://github.com/mlorentedev/hive/commit/17fef03ae58d694ada61e2ac4ba88f55c2ca0362)), closes [#517](https://github.com/mlorentedev/hive/issues/517)
+
 ## [4.4.2](https://github.com/mlorentedev/hive/compare/v4.4.1...v4.4.2) (2026-10-22)
 
 
