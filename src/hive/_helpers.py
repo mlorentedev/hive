@@ -2075,10 +2075,13 @@ def _unstaged_paths(porcelain_z: str) -> tuple[list[str], list[str]]:
         if len(entry) < 4:
             continue
         x, y, path = entry[0], entry[1], entry[3:]
-        if x in "RC":
-            next(entries, None)  # -z puts a rename's source in its own field
+        # -z puts a rename's or copy's source in a field of its own, whether
+        # the rename is staged (`R `) or only in the worktree (` R`).
+        source = next(entries, "") if x in "RC" or y in "RC" else ""
         if x == "?" or (x == " " and y != " "):
             paths.append(path)
+            if y == "R":
+                paths.append(source)  # the rename's other half: a deletion
         else:
             staged.append(path)
     return paths, staged

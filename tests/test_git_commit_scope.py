@@ -169,3 +169,24 @@ async def test_vault_commit_says_so_when_only_staged_work_remains(git_vault: Pat
     assert "staged path(s) out: theirs.md." in text, text
     assert "clean" not in text.lower(), "a dirty index must not read as a clean tree"
     ctx.reconciler.close()
+
+
+def test_vault_commit_flush_reads_a_worktree_rename_as_two_paths(git_vault: Path) -> None:
+    # Porcelain v1 `-z` gives a worktree rename (` R`, after `git add -N`) a
+    # second field for its source, as it does a staged one. Read as an entry
+    # of its own, `old.md` became a staged path called `.md`.
+    from hive._helpers import _git_commit_all
+
+    (git_vault / "old.md").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    _git(git_vault, "add", "old.md")
+    _git(git_vault, "commit", "-m", "add old.md")
+    (git_vault / "old.md").rename(git_vault / "new.md")
+    _git(git_vault, "add", "-N", "new.md")
+
+    status, _, left_out = _git_commit_all(git_vault, "vault: flush")
+
+    assert status == "committed"
+    assert left_out == []
+    shown = _git(git_vault, "show", "--name-only", "--no-renames", "--format=", "HEAD")
+    assert set(shown.split()) == {"old.md", "new.md"}
+    assert _git(git_vault, "status", "--porcelain") == ""
