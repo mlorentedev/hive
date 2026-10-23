@@ -4,7 +4,7 @@ type: lesson
 status: active
 created: "2026-10-22"
 owner: manu
-tags: [hive, lesson, git, concurrency, BUG-008]
+tags: [hive, lesson, git, concurrency, HIVE-510]
 ---
 
 # A sweep cannot tell whose change it is
