@@ -92,6 +92,6 @@ Cross-process consistency is eventual within `~2 × HIVE_OUTBOX_TICK_S`. Accepta
 
 ## See also
 
-- [Configuration env vars](/configuration/) — full `HIVE_*` reference.
-- [Troubleshooting — Multi-session contention](/guides/troubleshooting/#multi-session-contention) — sibling techniques for N=3-5 hive processes against the same vault.
+- [Configuration env vars](/hive/configuration/) — full `HIVE_*` reference.
+- [Troubleshooting — Multi-session contention](/hive/guides/troubleshooting/#multi-session-contention) — sibling techniques for N=3-5 hive processes against the same vault.
 - ADR-010 (in the maintainer's vault) — design rationale for the cooperate-don't-compete pattern.
