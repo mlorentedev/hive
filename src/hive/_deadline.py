@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 
 _DEFAULT_GRACE_S = 2.0
-_DRAIN_TIMEOUT_S = 0.5
+_REAP_TIMEOUT_S = 0.5
 
 
 # ── Cross-OS Popen creation helpers ─────────────────────────────────────
@@ -127,8 +127,17 @@ async def _terminate_registry(
     """Terminate every Popen in ``registry``; return PIDs we signalled.
 
     Iteration sequence: SIGTERM → ``await asyncio.sleep(grace_s)`` → SIGKILL
-    survivors → drain stdio best-effort. Returns PIDs that received a
+    survivors → reap best-effort. Returns PIDs that received a
     termination signal (matches ADR-008 §1 step 6 structured payload).
+
+    The terminator reaps; it never reads the pipes. Every registered Popen
+    has an owner — the thread inside ``_run_git``, blocked in
+    ``communicate()`` — and that thread drains them once the kill gives it
+    EOF. A second ``communicate()`` on the same Popen races the owner for
+    the pipes: whichever reads EOF first closes them, the other gets
+    ``EBADF``, or, on macOS, sleeps for good in a ``poll()`` on the
+    descriptor that was closed under it (#517). ``wait()`` takes the
+    Popen's own waitpid lock, so it is safe beside the owner.
     """
     signalled: list[int] = []
     for proc in list(registry):
@@ -140,16 +149,13 @@ async def _terminate_registry(
     for proc in list(registry):
         if proc.poll() is None:
             _send_kill(proc)
-    # Drain stdio in a thread so a blocked pipe cannot stall the supervisor.
+    # Reap in a thread so a slow exit cannot stall the event loop. The
+    # timeout is wait()'s own, so a process that outlives it leaves no
+    # thread behind.
     for proc in list(registry):
         try:
-            await asyncio.wait_for(
-                asyncio.to_thread(proc.communicate),
-                timeout=_DRAIN_TIMEOUT_S,
-            )
-        except (TimeoutError, OSError, ValueError):
-            # ValueError fires when communicate is called twice on the
-            # same Popen; we accept best-effort drain failure.
+            await asyncio.to_thread(proc.wait, _REAP_TIMEOUT_S)
+        except (subprocess.SubprocessError, OSError):
             continue
     return signalled
 
@@ -161,9 +167,10 @@ def terminate_registry_sync(
     """Synchronous twin of :py:func:`_terminate_registry`; same sequence.
 
     SIGTERM -> ``time.sleep(grace_s)`` -> SIGKILL survivors -> best-effort
-    stdio drain. Returns the PIDs that received a termination signal, which
-    is what :py:func:`_cleanup_index_lock` needs to decide whether a lock
-    file is ours to remove.
+    reap, never a pipe read (see the async version for why). Returns the
+    PIDs that received a termination signal, which is what
+    :py:func:`_cleanup_index_lock` needs to decide whether a lock file is
+    ours to remove.
 
     This exists because the ADR-018 reconciler runs in a plain daemon
     thread with no event loop, so it cannot await the async version. Only
@@ -182,10 +189,8 @@ def terminate_registry_sync(
         if proc.poll() is None:
             _send_kill(proc)
     for proc in list(registry):
-        # ValueError fires when communicate() is called twice on the same
-        # Popen; like the async path we accept a best-effort drain.
-        with contextlib.suppress(subprocess.SubprocessError, OSError, ValueError):
-            proc.communicate(timeout=_DRAIN_TIMEOUT_S)
+        with contextlib.suppress(subprocess.SubprocessError, OSError):
+            proc.wait(timeout=_REAP_TIMEOUT_S)
     return signalled
 
 
@@ -258,7 +263,7 @@ async def bounded_call[T](
        SIGTERM (POSIX) or TerminateProcess (Windows).
     3. After ``grace_s`` of cooperative shutdown, survivors receive
        SIGKILL (POSIX) or a second TerminateProcess (Windows).
-    4. Stdio is drained best-effort.
+    4. Each process is reaped best-effort; its owner drains the pipes.
     5. If ``vault_for_index_cleanup`` is set, ``_cleanup_index_lock``
        removes our own ``.git/index.lock`` (PID-matched).
     6. ``GHOST_RESPONSES.record(source="deadline")`` for operator

@@ -119,6 +119,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# A test still running after 90s dumps every thread's stack, so a hang shows
+# where it is instead of a silent CI job (#517).
+faulthandler_timeout = 90
 markers = [
     "smoke: end-to-end tests against a real OpenAI-compatible worker endpoint (needs HIVE_WORKER_API_KEY; skip in CI)",
     "cross_worker: multi-process integration tests and benchmarks (excluded from default run; the HIVE-116 lock tests also require a fake-git PATH fixture)",
