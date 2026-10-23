@@ -18,6 +18,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import threading
 import time
 from typing import TYPE_CHECKING
 
@@ -118,6 +119,64 @@ async def test_subprocess_terminated() -> None:
     # whose returncode is non-None.
     for proc in registry:
         assert proc.poll() is not None, "Popen still running after bounded_call"
+
+
+# ── #517 — the terminator never shares a Popen with its owner ───────────
+
+# Every registered Popen already has an owner: the thread inside _run_git,
+# blocked in communicate(). Two communicate() calls on one Popen race on
+# its pipes: whichever reads EOF first closes them, and on macOS a poll()
+# blocked on a descriptor another thread closed is never woken, so the
+# owner hangs for good. The race lands within a few hundred rounds, often
+# the first, which is why one test runs many.
+_OWNER_ROUNDS = 200
+
+
+class _Owner(threading.Thread):
+    """A long sleep whose pipes this thread drains, as _run_git does."""
+
+    def __init__(self) -> None:
+        super().__init__(daemon=True)
+        self.proc = subprocess.Popen(  # noqa: S603, S607
+            ["sleep", "60"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        self.error: BaseException | None = None
+        self.start()
+
+    def run(self) -> None:
+        try:
+            self.proc.communicate()
+        except BaseException as exc:  # noqa: BLE001 — the test asserts on it
+            self.error = exc
+
+    def assert_drained(self, round_: int) -> None:
+        self.join(timeout=5)
+        assert not self.is_alive(), f"owner stuck in communicate() at round {round_}"
+        assert self.error is None, f"owner's communicate() raised at round {round_}: {self.error!r}"
+
+
+@_POSIX_ONLY
+def test_sync_terminator_never_strands_the_owning_thread() -> None:
+    from hive._deadline import terminate_registry_sync
+
+    for round_ in range(_OWNER_ROUNDS):
+        owner = _Owner()
+        terminate_registry_sync([owner.proc], grace_s=0.0)
+        owner.assert_drained(round_)
+
+
+@_POSIX_ONLY
+@pytest.mark.asyncio
+async def test_async_terminator_never_strands_the_owning_thread() -> None:
+    from hive._deadline import _terminate_registry
+
+    for round_ in range(_OWNER_ROUNDS):
+        owner = _Owner()
+        await _terminate_registry([owner.proc], grace_s=0.0)
+        owner.assert_drained(round_)
 
 
 # ── T3.4 — index lock PID ownership ─────────────────────────────────────
