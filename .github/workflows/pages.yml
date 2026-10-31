@@ -32,6 +32,9 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
+          # Newest 22.x, not the image's cached patch: astro raises its Node floor
+          # within a major, and 22.23.3 failed astro 7.4.2's >=22.23.4 (#532).
+          check-latest: true
           cache: npm
           cache-dependency-path: site/package-lock.json
 
