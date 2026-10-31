@@ -209,6 +209,12 @@ def test_vault_commit_flush_names_both_halves_of_a_staged_rename(git_vault: Path
 
     assert status == "committed"
     assert sorted(left_out) == ["new.md", "old.md"]
+    assert _committed(git_vault) == {"dropped-in-by-hand.md"}
+    head_tree = set(_git(git_vault, "ls-tree", "--name-only", "-r", "HEAD").split())
+    assert "old.md" in head_tree
+    assert "new.md" not in head_tree
+    staged = _git(git_vault, "diff", "--cached", "--name-status", "--no-renames")
+    assert set(staged.splitlines()) == {"A\tnew.md", "D\told.md"}
 
 
 def test_vault_commit_flush_works_when_the_vault_is_a_repo_subdirectory(tmp_path: Path) -> None:
