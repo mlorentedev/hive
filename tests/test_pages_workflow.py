@@ -92,7 +92,7 @@ def test_a_pull_request_cannot_cancel_a_deploy() -> None:
     assert concurrency["cancel-in-progress"] is True
 
 
-def test_the_build_fails_on_a_broken_internal_link() -> None:
+def test_the_link_check_is_wired_after_build_and_before_upload() -> None:
     # Starlight ships `](/configuration/)` unrewritten, so a link missing the
     # /hive base builds green and 404s on Pages (#519). The check must run on
     # every build, PR or deploy, and before the artifact is uploaded.

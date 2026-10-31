@@ -2,11 +2,13 @@
 // site base or points at a page that was not built (#519). Starlight does not
 // rewrite absolute Markdown links, so `](/configuration/)` ships as-is and
 // 404s on GitHub Pages, where the site lives under /hive/.
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const BASE = '/hive/';
-const DIST = new URL('../dist/', import.meta.url).pathname;
+// The dist directory is an argument so the tests can point it at a fixture.
+const DIST = resolve(process.argv[2] ?? fileURLToPath(new URL('../dist/', import.meta.url)));
 
 function* htmlFiles(dir) {
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -16,17 +18,25 @@ function* htmlFiles(dir) {
 	}
 }
 
+// A directory is not a page: /hive/guides/ with built children but no
+// guides/index.html still 404s.
+function isFile(path) {
+	return statSync(path, { throwIfNoEntry: false })?.isFile() ?? false;
+}
+
 function targetExists(url) {
 	const path = decodeURIComponent(url.slice(BASE.length).split(/[?#]/)[0]);
-	return existsSync(join(DIST, path, 'index.html')) || existsSync(join(DIST, path));
+	return isFile(join(DIST, path, 'index.html')) || isFile(join(DIST, path));
 }
 
 const problems = [];
 for (const file of htmlFiles(DIST)) {
 	const html = readFileSync(file, 'utf8');
-	for (const [, url] of html.matchAll(/(?:href|src)="(\/[^/"][^"]*|\/)"/g)) {
-		if (!url.startsWith(BASE)) problems.push(`${file.slice(DIST.length)}: ${url} (missing ${BASE} base)`);
-		else if (!targetExists(url)) problems.push(`${file.slice(DIST.length)}: ${url} (no such page)`);
+	const page = file.slice(DIST.length + 1);
+	// Either quote, optional spaces around `=`; `//host` is protocol-relative, not internal.
+	for (const [, , url] of html.matchAll(/\b(?:href|src)\s*=\s*(["'])(\/(?!\/)[^"']*)\1/g)) {
+		if (!url.startsWith(BASE)) problems.push(`${page}: ${url} (missing ${BASE} base)`);
+		else if (!targetExists(url)) problems.push(`${page}: ${url} (no such page)`);
 	}
 }
 

@@ -1,5 +1,5 @@
 ---
-id: lesson-111-a-site-base-does-not-reach-markdown-links
+id: lesson-113-a-site-base-does-not-reach-markdown-links
 type: lesson
 status: active
 created: "2026-10-22"
@@ -24,7 +24,7 @@ root.
 48 that already had it, and scan the built `dist/` in the `pages` build
 (`npm run check:links`, `site/scripts/check-links.mjs`). Every root-relative
 `href`/`src` must carry the base and resolve to a built file, so a renamed page
-fails too. Scanning `dist/` rather than the sources also covers frontmatter
+fails too; a directory with no `index.html` is not a page. `tests/test_check_links.py` runs the script against a fixture `dist/`. Scanning `dist/` rather than the sources also covers frontmatter
 `link:` values, MDX components and templates. `tests/test_pages_workflow.py`
 pins the step after the build and before the artifact upload.
 
