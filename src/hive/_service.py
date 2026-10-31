@@ -260,8 +260,10 @@ def _resolve_exec_prefix(prefix: Sequence[str]) -> list[str]:
     if not found:
         raise ExecPrefixError(f"exec prefix launcher {prefix[0]!r} was not found or not executable")
     # which() answers a path holding a separator as given, possibly relative,
-    # and systemd refuses a relative executable.
-    return [str(Path(found).resolve()), *prefix[1:]]
+    # and systemd refuses a relative executable. abspath, not resolve(): a
+    # launcher that is a symlink to a versioned install must stay the link, or
+    # the definition breaks when an upgrade removes that version.
+    return [os.path.abspath(found), *prefix[1:]]
 
 
 def _systemd_command_line(argv: Sequence[str]) -> str:

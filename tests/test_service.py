@@ -964,7 +964,25 @@ def test_a_relative_launcher_is_rendered_absolute(
     resolved = svc._resolve_exec_prefix([relative, "--"])
 
     assert Path(resolved[0]).is_absolute()
-    assert Path(resolved[0]) == (tmp_path / "bin" / "dotf").resolve()
+    assert resolved[0] == os.path.abspath(relative)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_a_launcher_found_by_name_keeps_its_symlink(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A Homebrew or uv-tool launcher is a link to a versioned install; the
+    definition must run the link, or the next upgrade breaks it."""
+    import hive._service as svc
+
+    target = _launcher(tmp_path / "real", name="dotf-1.2")
+    link = tmp_path / "bin" / "dotf"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(target)
+    monkeypatch.setattr(svc.shutil, "which", lambda name: str(link) if name == "dotf" else None)
+
+    assert svc._resolve_exec_prefix(["dotf", "--"]) == [str(link), "--"]
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows has no execute bit")
