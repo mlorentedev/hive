@@ -1,5 +1,20 @@
 # Changelog
 
+## [4.5.0](https://github.com/mlorentedev/hive/compare/v4.4.2...v4.5.0) (2026-10-31)
+
+
+### Features
+
+* **service:** start the daemon through a recorded exec prefix on every supervisor ([#541](https://github.com/mlorentedev/hive/issues/541)) ([f10acb1](https://github.com/mlorentedev/hive/commit/f10acb10af450294a6a0060ad5b1ef5f3ccb6fcd))
+
+
+### Bug Fixes
+
+* **ci:** build the docs site on the newest Node 22 patch ([#538](https://github.com/mlorentedev/hive/issues/538)) ([abbb41c](https://github.com/mlorentedev/hive/commit/abbb41c25c6fe18bcbac201b6f59f7808ae85a34))
+* **deadline:** reap terminated processes instead of draining their pipes ([#525](https://github.com/mlorentedev/hive/issues/525)) ([17fef03](https://github.com/mlorentedev/hive/commit/17fef03ae58d694ada61e2ac4ba88f55c2ca0362)), closes [#517](https://github.com/mlorentedev/hive/issues/517)
+* **site:** prefix internal links with the /hive base and fail the build on broken ones ([#526](https://github.com/mlorentedev/hive/issues/526)) ([97f1c9a](https://github.com/mlorentedev/hive/commit/97f1c9abc7fe2a65d88fb9eddde065d76f76a785))
+* **vault:** keep another session's staged work out of vault_commit ([#528](https://github.com/mlorentedev/hive/issues/528)) ([0c17dad](https://github.com/mlorentedev/hive/commit/0c17dad49f8b0483b4e9f9e6da0b5cafd48ee95d))
+
 ## [4.4.2](https://github.com/mlorentedev/hive/compare/v4.4.1...v4.4.2) (2026-10-22)
 
 
