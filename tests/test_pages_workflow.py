@@ -104,3 +104,13 @@ def test_the_link_check_is_wired_after_build_and_before_upload() -> None:
     assert "if" not in steps[check], "a gated link check lets a PR or a deploy skip it"
     upload = next(i for i, s in enumerate(steps) if "upload-pages-artifact" in s.get("uses", ""))
     assert check < upload, "a broken link must stop the deploy before the artifact is uploaded"
+
+
+def test_the_build_takes_the_newest_node_of_its_major() -> None:
+    # `node-version: 22` alone is satisfied by whatever 22.x the runner image has
+    # cached. Astro 7.4.2 requires >=22.23.4 while runners had 22.23.3, so its
+    # Dependabot bump failed the build (#532). `check-latest` resolves the newest
+    # 22.x on every run, so a dependency's raised floor never outruns the image.
+    setup = [s for s in _job("build")["steps"] if "actions/setup-node" in s.get("uses", "")]
+    assert len(setup) == 1
+    assert setup[0]["with"].get("check-latest") is True, "a cached patch can miss the floor"
