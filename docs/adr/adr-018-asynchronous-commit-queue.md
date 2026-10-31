@@ -13,7 +13,7 @@ created: "2026-08-07"
 
 ## Status
 
-Accepted (2026-08-07). **Amended 2026-08-09** — §4 contradicted itself about `vault_delete`; see "Amendment (2026-08-09)" below. Resolves [#353](https://github.com/mlorentedev/hive/issues/353). Gates `specs/HIVE-322-commit-outbox/`, which is now unfrozen for implementation. **Amends [ADR-014](adr-014-vault-commit-coordination.md)** — see "The ADR-014 tension" below, which is the load-bearing part of this decision. **Triggers the deferred "2b" evolution of [ADR-013](adr-013-write-idempotency-at-most-once.md)** — see "Relationship to ADR-013" below. The three design questions that blocked this ADR were resolved on 2026-08-07 and are recorded under "Decision".
+Accepted (2026-08-07). **Amended 2026-08-09** — §4 contradicted itself about `vault_delete`; see "Amendment (2026-08-09)" below. **Amended 2026-10-22** — §3's sweep no longer takes staged paths; see "Amendment (2026-10-22)" below. Resolves [#353](https://github.com/mlorentedev/hive/issues/353). Gates `specs/HIVE-322-commit-outbox/`, which is now unfrozen for implementation. **Amends [ADR-014](adr-014-vault-commit-coordination.md)** — see "The ADR-014 tension" below, which is the load-bearing part of this decision. **Triggers the deferred "2b" evolution of [ADR-013](adr-013-write-idempotency-at-most-once.md)** — see "Relationship to ADR-013" below. The three design questions that blocked this ADR were resolved on 2026-08-07 and are recorded under "Decision".
 
 Revised the same day, before acceptance, on three points:
 
@@ -210,6 +210,21 @@ Deleting is not a hot path. The throughput argument that motivates deferral for 
 - `commit` stays in the signature rather than being removed. Removing it would make every existing call fail MCP schema validation, which is a much wider break than rejecting the one value that never had a coherent meaning.
 - The error follows the repo's `WHY:`/`FIX:` convention, so a caller who hits it learns why deferral is unavailable here rather than only that it is.
 - §4's other clauses are unchanged: `vault_delete` still opts out of the queue, and still stays synchronous.
+
+## Amendment (2026-10-22): the sweep leaves the index alone
+
+### What changed
+
+§3 says `vault_commit` sweeps with `git add -A`. A bare sweep also records whatever is already **staged**, and several sessions share one vault, so one session's flush committed another session's staged work under its own message ([#510](https://github.com/mlorentedev/hive/issues/510), the same class as [#470](https://github.com/mlorentedev/hive/issues/470) on the write path).
+
+### Decision
+
+`vault_commit` still sweeps every **unstaged and untracked** change, including edits hive never made, so the consent argument in §3 and its AC10 test stand. A path that already has a staged change is left out (`git commit --only` with literal pathspecs), and the result names it.
+
+### Consequences
+
+- A write killed between `git add` and `git commit` leaves hive's own path staged, and git cannot tell it from another session's. `vault_commit` no longer recovers that orphan on its own; it names the path so a human can commit it with `git commit -- <path>`. This is a narrower remediation than §3 promised, accepted because the alternative silently commits other sessions' work.
+- Another session's `commit=False` write that is on disk but not yet staged still looks like a hand edit, and is still swept. Only cross-process tracking of pending paths can close that window ([#527](https://github.com/mlorentedev/hive/issues/527)).
 
 ## References
 

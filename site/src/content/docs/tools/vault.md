@@ -300,9 +300,11 @@ Flush the working tree into one git commit, without waiting for a tick.
 vault_commit(message="vault: end-of-session checkpoint")
 ```
 
-Stages everything dirty in the vault (`git add -A`) and creates a single commit. Returns the new SHA, a clean-tree notice if nothing is dirty, or a human-readable error. Best paired with the obsidian-git plugin (see [Configuration → Recommended configuration](/hive/configuration/#recommended-configuration)).
+Stages every unstaged and untracked change in the vault and creates a single commit. Returns the new SHA, a clean-tree notice if nothing is dirty, or a human-readable error. Best paired with the obsidian-git plugin (see [Configuration → Recommended configuration](/hive/configuration/#recommended-configuration)).
 
 This is the **only** path that sweeps the whole working tree, and that is deliberate: it stages edits hive never made, including your own work in progress. A human asking for a flush has consented to that; a timer has not, which is why the reconciler only ever commits paths it queued itself. It is also the remediation for anything the report under [`vault_health`](#vault_health) shows as uncommitted, since nothing clears those automatically.
+
+What it does **not** take is a path that is already staged. Several sessions share one vault, and staged work belongs to whoever staged it, so the commit leaves it staged and the result names it. One of those paths can be hive's own: a write killed between `git add` and `git commit` stays staged, and git cannot tell it apart from another session's. If a named path is yours, commit it deliberately with `git commit -- <path>`; for a staged rename, name both paths in the same commit. That records each path's working-tree copy, so run `git diff -- <path>` first: any edit it shows goes into the commit too.
 
 ## vault_delete
 
