@@ -286,7 +286,8 @@ def test_vault_commit_flush_commits_a_non_utf8_file_name(git_vault: Path) -> Non
     from hive._helpers import _git_commit_all
 
     name = b"caf\xe9.md"
-    (Path(os.fsencode(git_vault)) / name).write_bytes(b"x\n")  # type: ignore[operator]
+    with open(os.fsencode(git_vault) + b"/" + name, "wb") as fh:
+        fh.write(b"x\n")
 
     status, detail, _ = _git_commit_all(git_vault, "vault: flush")
 
