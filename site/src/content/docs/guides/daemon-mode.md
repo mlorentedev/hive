@@ -76,8 +76,11 @@ Every supervisor then runs `<launcher...> hive serve`, and a later
 recorded. The launcher must pass hive's exit code back, because the
 supervisors restart on a non-zero exit and stop on 0. The prefix is stored in
 `~/.config/hive/service.json` as given. At each install its first element is
-used as is when it is an absolute path that exists, and otherwise looked up on
-your PATH by name, so a launcher that moved is found again.
+used as is when it is an absolute path to an executable, and otherwise looked
+up on your PATH by name and rendered as an absolute path, so a launcher that
+moved is found again. An install refuses an empty element or one with a line
+break, and on Windows one with a double or typographic quote, before it writes
+anything.
 
 `hive service status` ends with `hive daemon: healthy` (exit 0) only when the
 listener on the stable port proves the daemon's certificate. Otherwise it

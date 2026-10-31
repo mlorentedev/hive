@@ -746,7 +746,9 @@ def _run_service(argv: list[str]) -> int:
 
     parser = argparse.ArgumentParser(prog="hive service")
     sub = parser.add_subparsers(dest="action", required=True)
-    install = sub.add_parser("install", help="install + enable the service")
+    # No abbreviations: `--exec` would reach the help-only option below and
+    # drop its value, installing without the prefix and without saying so.
+    install = sub.add_parser("install", help="install + enable the service", allow_abbrev=False)
     install.add_argument(
         "--no-enable",
         action="store_true",
@@ -785,6 +787,9 @@ def _run_service(argv: list[str]) -> int:
 
         return rotate_identity()
     if opts.action == "install":
+        # Only `--exec-prefix=VALUE` reaches argparse; the prefix needs `--`.
+        if opts.exec_prefix is not None:
+            install.error("--exec-prefix takes `--` and then the launcher's argv")
         if exec_prefix is not None and opts.no_exec_prefix:
             install.error("--exec-prefix and --no-exec-prefix cannot be combined")
         return install_service(

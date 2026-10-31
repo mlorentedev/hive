@@ -78,9 +78,11 @@ actualización no lo pierde. `--no-exec-prefix` lo borra y `hive service status`
 muestra el registrado. El lanzador tiene que devolver el código de salida de
 hive, porque los supervisores reinician con un código distinto de 0 y paran
 con 0. El prefijo se guarda tal cual en `~/.config/hive/service.json`. En cada
-instalación su primer elemento se usa sin cambios si es una ruta absoluta que
-existe, y si no se busca por nombre en el PATH, así que un lanzador que se ha
-movido se vuelve a encontrar.
+instalación su primer elemento se usa sin cambios si es una ruta absoluta a un
+ejecutable, y si no se busca por nombre en el PATH y se escribe como ruta
+absoluta, así que un lanzador que se ha movido se vuelve a encontrar. Una
+instalación rechaza, antes de escribir nada, un elemento vacío o con un salto
+de línea, y en Windows uno con comillas dobles o tipográficas.
 
 `hive service status` termina con `hive daemon: healthy` (código 0) solo cuando
 quien escucha en el puerto estable demuestra el certificado del daemon. Si no,

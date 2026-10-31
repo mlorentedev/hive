@@ -9,13 +9,11 @@ calls are validated by the cross-OS CI matrix (ubuntu + windows).
 
 from __future__ import annotations
 
+import os
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 @pytest.fixture(autouse=True)
@@ -768,6 +766,7 @@ def _launcher(tmp_path: Path, name: str = "dotf") -> str:
     path = tmp_path / "bin" / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("", encoding="utf-8")
+    path.chmod(0o755)
     return str(path)
 
 
@@ -934,6 +933,115 @@ def test_windows_refuses_a_prefix_its_loop_cannot_quote(
     assert registered == []
 
 
+@pytest.mark.parametrize("smart", ["‘", "’", "‚", "‛"])
+def test_windows_refuses_a_smart_quote_its_loop_would_read_as_a_delimiter(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    smart: str,
+) -> None:
+    """PowerShell ends a single-quoted string on any of these, not only `'`."""
+    import hive._service as svc
+
+    monkeypatch.setattr(svc, "_platform", lambda: "windows")
+
+    with pytest.raises(svc.ExecPrefixError):
+        svc._resolve_exec_prefix([_launcher(tmp_path), f"it{smart}s"])
+
+
+def test_a_relative_launcher_is_rendered_absolute(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """`shutil.which` answers a path with a separator as given, and systemd
+    refuses a relative executable, so the rendered launcher is made absolute."""
+    import hive._service as svc
+
+    _launcher(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    relative = os.path.join("bin", "dotf")
+    monkeypatch.setattr(svc.shutil, "which", lambda name: relative if name == relative else None)
+
+    resolved = svc._resolve_exec_prefix([relative, "--"])
+
+    assert Path(resolved[0]).is_absolute()
+    assert Path(resolved[0]) == (tmp_path / "bin" / "dotf").resolve()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no execute bit")
+def test_a_launcher_that_is_not_executable_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import hive._service as svc
+
+    launcher = _launcher(tmp_path)
+    Path(launcher).chmod(0o644)
+    monkeypatch.setattr(svc.shutil, "which", lambda name: None)
+
+    with pytest.raises(svc.ExecPrefixError):
+        svc._resolve_exec_prefix([launcher, "--"])
+
+
+@pytest.mark.parametrize("bad", ["", "a\nb", "a\rb"])
+def test_an_element_no_supervisor_can_carry_is_refused_on_every_platform(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    _isolated_service_config: Path,
+    bad: str,
+) -> None:
+    """An empty element is dropped by systemd and refused by the loader, so
+    recording it would break every later install; a line break ends the unit's
+    ExecStart line. Both are refused before anything is written."""
+    import hive._service as svc
+
+    unit_path = _linux(monkeypatch, tmp_path)
+
+    assert svc.install_service(enable=True, exec_prefix=[_launcher(tmp_path), bad, "--"]) != 0
+    assert "nothing was installed" in capsys.readouterr().err
+    assert not unit_path.exists()
+    assert not _isolated_service_config.exists()
+
+
+def test_systemd_quotes_a_bare_semicolon() -> None:
+    from hive._service import _systemd_command_line
+
+    assert _systemd_command_line(["/a/dotf", ";", "--"]) == '/a/dotf ";" --'
+
+
+def test_a_failed_record_write_keeps_the_previous_record(
+    monkeypatch: pytest.MonkeyPatch,
+    _isolated_service_config: Path,
+) -> None:
+    """The record is replaced atomically: a write that fails part-way leaves the
+    old one, never an empty file that blocks every later install."""
+    import hive._service as svc
+
+    svc.save_exec_prefix(["dotf", "run", "--"])
+
+    def _boom(*_a: object, **_k: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(svc.json, "dump", _boom)
+    with pytest.raises(OSError):
+        svc.save_exec_prefix(["other", "--"])
+
+    assert svc.load_exec_prefix() == ["dotf", "run", "--"]
+    assert list(_isolated_service_config.parent.iterdir()) == [_isolated_service_config]
+
+
+def test_an_unreadable_record_is_refused_and_named(
+    monkeypatch: pytest.MonkeyPatch,
+    _isolated_service_config: Path,
+) -> None:
+    import hive._service as svc
+
+    _isolated_service_config.mkdir(parents=True)  # a directory where the file goes
+
+    with pytest.raises(svc.ExecPrefixError, match="service.json"):
+        svc.load_exec_prefix()
+
+
 def test_install_launchd_runs_the_prefix_inside_the_env_wrapper(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1036,6 +1144,10 @@ def test_cli_exec_prefix_takes_everything_after_the_separator(
         ["install", "--exec-prefix", "--"],
         ["install", "--exec-prefix", "dotf", "--"],
         ["install", "--no-exec-prefix", "--exec-prefix", "--", "dotf"],
+        # Forms argparse would otherwise accept and silently drop the value of.
+        ["install", "--exec-prefix=/bin/true"],
+        ["install", "--exec", "/bin/true"],
+        ["install", "--exec-pre=/bin/true"],
     ],
 )
 def test_cli_exec_prefix_misuse_is_refused(

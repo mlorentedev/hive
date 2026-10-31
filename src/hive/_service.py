@@ -172,9 +172,13 @@ def _resolve_exec() -> str:
 # It must pass the child's exit code back, or the supervisors' restart contract
 # (0 stops, anything else relaunches) breaks.
 
+# A line break ends systemd's ExecStart line and PowerShell's command, so no
+# supervisor can carry one inside an element.
+_UNQUOTABLE = ("\n", "\r")
 # PowerShell runs the Windows loop from inside `-Command "..."`, so a double
-# quote would end that argument early and a line break would end the command.
-_PS_UNQUOTABLE = ('"', "\n", "\r")
+# quote would end that argument early. The typographic single quotes end a
+# single-quoted string there just as `'` does, and only `'` is doubled.
+_PS_UNQUOTABLE = ('"', "‘", "’", "‚", "‛")
 
 
 class ExecPrefixError(ValueError):
@@ -192,6 +196,8 @@ def load_exec_prefix() -> list[str]:
         raw = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return []
+    except OSError as exc:
+        raise ExecPrefixError(f"{path} cannot be read: {exc}") from exc
     try:
         prefix = json.loads(raw).get("exec_prefix", [])
     except (ValueError, AttributeError) as exc:
@@ -208,12 +214,18 @@ def save_exec_prefix(prefix: Sequence[str]) -> None:
         path.unlink(missing_ok=True)
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump({"exec_prefix": list(prefix)}, fh)
-        fh.write("\n")
-    # O_CREAT's mode applies only to a new file; an existing one keeps its own.
-    path.chmod(0o600)
+    # Written beside the record and swapped in, so a failed write leaves the
+    # previous record rather than an empty file that blocks every install.
+    # mkstemp creates the file owner-only.
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump({"exec_prefix": list(prefix)}, fh)
+            fh.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def _resolve_exec_prefix(prefix: Sequence[str]) -> list[str]:
@@ -226,22 +238,30 @@ def _resolve_exec_prefix(prefix: Sequence[str]) -> list[str]:
     """
     if not prefix:
         return []
-    if _platform() == "windows":
-        for element in prefix:
-            if any(c in element for c in _PS_UNQUOTABLE):
-                raise ExecPrefixError(
-                    f"exec prefix element {element!r} holds a double quote or a line "
-                    "break, which the Windows supervisor loop cannot quote"
-                )
+    for element in prefix:
+        # An empty element is dropped by systemd and refused by the loader, so
+        # recording one would fail every later install.
+        if not element or any(c in element for c in _UNQUOTABLE):
+            raise ExecPrefixError(
+                f"exec prefix element {element!r} is empty or holds a line break, "
+                "which no supervisor definition can carry"
+            )
+        if _platform() == "windows" and any(c in element for c in _PS_UNQUOTABLE):
+            raise ExecPrefixError(
+                f"exec prefix element {element!r} holds a double or typographic "
+                "quote, which the Windows supervisor loop cannot quote"
+            )
     launcher = Path(prefix[0])
-    if launcher.is_absolute() and launcher.is_file():
+    if launcher.is_absolute() and launcher.is_file() and os.access(launcher, os.X_OK):
         return list(prefix)
     # The name alone finds a launcher whose recorded path no longer exists, on
     # Windows too, where a drive-less path is not absolute.
     found = shutil.which(prefix[0]) or shutil.which(launcher.name)
     if not found:
-        raise ExecPrefixError(f"exec prefix launcher {prefix[0]!r} was not found")
-    return [found, *prefix[1:]]
+        raise ExecPrefixError(f"exec prefix launcher {prefix[0]!r} was not found or not executable")
+    # which() answers a path holding a separator as given, possibly relative,
+    # and systemd refuses a relative executable.
+    return [str(Path(found).resolve()), *prefix[1:]]
 
 
 def _systemd_command_line(argv: Sequence[str]) -> str:
@@ -250,7 +270,8 @@ def _systemd_command_line(argv: Sequence[str]) -> str:
     parts = []
     for arg in argv:
         escaped = arg.replace("%", "%%").replace("$", "$$")
-        if any(c.isspace() for c in arg) or any(c in arg for c in "\"'\\"):
+        # A bare `;` is a command separator to systemd.
+        if arg == ";" or any(c.isspace() for c in arg) or any(c in arg for c in "\"'\\"):
             escaped = '"' + escaped.replace("\\", "\\\\").replace('"', '\\"') + '"'
         parts.append(escaped)
     return " ".join(parts)
