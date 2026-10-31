@@ -22,8 +22,12 @@ removed the AC10 remediation outright.
 
 **Solution:** Keep the sweep, but take only what is *not* in the index:
 `git status --porcelain -z --untracked-files=all`, keep `??` and `␠Y`
-entries, then `add` and `commit --only` with `:(literal)` pathspecs. A path
-with any staged change (including `MM`) is left out and named in the result.
+entries, then `add` and `commit --only` reading `:(top,literal)` pathspecs
+from a NUL-separated file. The file keeps a sweep of hundreds of paths under
+Windows' command-line limit; `top` because porcelain paths start at the
+repository root; names decoded with `surrogateescape` so a non-UTF-8 name
+survives the round trip. A path with any staged change (including `MM`) is
+left out and named in the result, both halves for a rename.
 Naming matters: a write killed between `git add` and `git commit` leaves
 hive's *own* path staged, and git cannot tell it from another session's.
 

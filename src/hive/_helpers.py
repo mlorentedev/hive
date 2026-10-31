@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import subprocess
+import tempfile
 import threading
 import time
 from collections import deque
@@ -1884,9 +1885,14 @@ def _run_git(
     vault_path: Path,
     *,
     registry: list[subprocess.Popen[bytes]] | None = None,
+    stdout_errors: str = "replace",
 ) -> tuple[int, str, str]:
     """Spawn one git invocation as a ``subprocess.Popen``; register on the
     deadline registry; return ``(returncode, stdout, stderr)`` text.
+
+    ``stdout_errors="surrogateescape"`` keeps file names that are not valid
+    UTF-8 round-trippable back to their bytes, for a caller that hands the
+    names it read back to git.
 
     The Green prerequisite of HIVE-115 PR-3 (per the 2026-05-22 audit B2).
     All write-path git callers (``_git_commit``, ``_git_commit_all``)
@@ -1956,7 +1962,7 @@ def _run_git(
             registry.remove(proc)
     return (
         rc,
-        (stdout_b or b"").decode("utf-8", "replace"),
+        (stdout_b or b"").decode("utf-8", stdout_errors),
         (stderr_b or b"").decode("utf-8", "replace"),
     )
 
@@ -2084,7 +2090,30 @@ def _unstaged_paths(porcelain_z: str) -> tuple[list[str], list[str]]:
                 paths.append(source)  # the rename's other half: a deletion
         else:
             staged.append(path)
+            if x == "R":
+                staged.append(source)  # committing one half leaves the other staged
     return paths, staged
+
+
+@contextmanager
+def _pathspec_file(paths: list[str]) -> Iterator[list[str]]:
+    """Hand ``paths`` to git through a pathspec file, not the command line.
+
+    A sweep can name hundreds of paths, and Windows caps a command line at
+    32,767 characters. Each path is ``:(top,literal)``: porcelain reports
+    paths from the repository root, which is not the vault when the vault
+    is a subdirectory, and a glob-named file must not pull in its matches.
+    ``surrogateescape`` restores the bytes of a name that is not UTF-8.
+    """
+    fd, name = tempfile.mkstemp(prefix="hive-pathspec-")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            for p in paths:
+                fh.write(f":(top,literal){p}".encode("utf-8", "surrogateescape") + b"\0")
+        yield [f"--pathspec-from-file={name}", "--pathspec-file-nul"]
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(name)
 
 
 def _git_commit_all(
@@ -2119,18 +2148,20 @@ def _git_commit_all(
                 rc, porcelain_out, porcelain_err = _run_git(
                     ["status", "--porcelain", "-z", "--untracked-files=all"],
                     vault_path,
+                    stdout_errors="surrogateescape",
                 )
                 if rc != 0:
                     return "error", f"git status rc={rc}: {porcelain_err.strip() or '<empty>'}", []
                 paths, left_out = _unstaged_paths(porcelain_out)
                 if not paths:
                     return "clean", "", left_out
-                # Literal, so a glob-named file cannot pull in its matches.
-                pathspecs = [f":(literal){p}" for p in paths]
-                rc, _, err = _run_git(["add", "--", *pathspecs], vault_path)
-                if rc != 0:
-                    return "error", f"git add rc={rc}: {err.strip() or '<empty>'}", left_out
-                rc, _, err = _run_git(_commit_args(safe_msg, pathspecs), vault_path)
+                with _pathspec_file(paths) as from_file:
+                    rc, _, err = _run_git(["add", *from_file], vault_path)
+                    if rc != 0:
+                        return "error", f"git add rc={rc}: {err.strip() or '<empty>'}", left_out
+                    rc, _, err = _run_git(
+                        _commit_args(safe_msg) + ["--only", *from_file], vault_path
+                    )
                 if rc != 0:
                     return "error", f"git commit rc={rc}: {err.strip() or '<empty>'}", left_out
                 rc, rev_out, err = _run_git(["rev-parse", "HEAD"], vault_path)

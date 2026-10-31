@@ -99,25 +99,20 @@ def _notify_index_update(ctx: ServerContext, filepath: Path) -> None:
             logging.getLogger("hive.fts").warning("FTS index update failed: %s", exc)
 
 
-_LEFT_OUT_SHOWN = 10
-
-
 def _left_out_note(left_out: list[str]) -> str:
     """Name the staged paths ``vault_commit`` left alone, for the human to judge.
 
     One of them may be hive's own orphan, a write killed between ``git add``
-    and ``git commit``, so a count alone would hide the one path worth
-    rescuing (#510).
+    and ``git commit``, and it can sit anywhere in the list, so every path is
+    named rather than the first few (#510). Both halves of a staged rename
+    are listed; commit them together.
     """
     if not left_out:
         return ""
-    shown = ", ".join(left_out[:_LEFT_OUT_SHOWN])
-    more = len(left_out) - _LEFT_OUT_SHOWN
-    if more > 0:
-        shown += f" (+{more} more)"
     return (
-        f" Left {len(left_out)} staged path(s) out: {shown}. They belong to whoever "
-        "staged them; commit one deliberately with `git commit -- <path>`."
+        f" Left {len(left_out)} staged path(s) out: {', '.join(left_out)}. They belong "
+        "to whoever staged them; commit yours deliberately with `git commit -- <path>...`, "
+        "both paths for a rename."
     )
 
 
@@ -720,7 +715,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 "vault_commit",
                 "Working tree clean — nothing to commit.",
             )
-        return track(ctx, "vault_commit", f"Commit failed: {detail}")
+        return track(ctx, "vault_commit", f"Commit failed: {detail}.{note}")
 
     @mcp.tool(annotations=_WRITE)
     @wrap_sync_tool(ctx, "vault_delete")
