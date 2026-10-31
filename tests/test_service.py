@@ -18,6 +18,17 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+@pytest.fixture(autouse=True)
+def _isolated_service_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Every install reads the recorded exec prefix; no test may read or write
+    the developer's own."""
+    import hive._service as svc
+
+    path = tmp_path / "service-config" / "service.json"
+    monkeypatch.setattr(svc, "service_config_path", lambda: path)
+    return path
+
+
 # ── pure renderers (host-OS independent) ─────────────────────────────────
 
 
@@ -729,7 +740,7 @@ def test_cli_service_install_passes_no_enable_flag(
 
     seen: dict[str, object] = {}
 
-    def _fake_install(*, enable: bool) -> int:
+    def _fake_install(*, enable: bool, **_: object) -> int:
         seen["enable"] = enable
         return 0
 
@@ -745,6 +756,299 @@ def test_cli_service_status_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("hive._service.service_status", lambda: 3)
     assert server._run_service(["status"]) == 3
+
+
+# ── exec prefix: start the daemon through a launcher (#540) ──────────────
+
+_PREFIX = ["dotf", "secrets", "run", "--only", "NAN_API_KEY", "--skip-locked", "--"]
+
+
+def _launcher(tmp_path: Path, name: str = "dotf") -> str:
+    """A real file standing in for the launcher, so resolution needs no PATH."""
+    path = tmp_path / "bin" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("", encoding="utf-8")
+    return str(path)
+
+
+def _linux(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    import hive._service as svc
+
+    unit_path = tmp_path / "hive.service"
+    monkeypatch.setattr(svc, "_platform", lambda: "linux")
+    monkeypatch.setattr(svc, "systemd_unit_path", lambda: unit_path)
+    monkeypatch.setattr(svc, "_resolve_exec", lambda: "/usr/bin/hive")
+    monkeypatch.setattr(svc, "_systemctl", lambda *a: 0)
+    monkeypatch.setattr(svc, "_await_daemon", lambda deadline_s=30.0: "healthy")
+    return unit_path
+
+
+def _exec_start(unit_path: Path) -> str:
+    return next(
+        line.removeprefix("ExecStart=")
+        for line in unit_path.read_text(encoding="utf-8").splitlines()
+        if line.startswith("ExecStart=")
+    )
+
+
+def test_systemd_command_line_keeps_each_prefix_element_one_argument() -> None:
+    """systemd splits ExecStart on whitespace and expands `%` and `$`, so an
+    element holding any of them is quoted or escaped, never passed raw."""
+    from hive._service import _systemd_command_line
+
+    assert _systemd_command_line(["/a/dotf", "run", "--"]) == "/a/dotf run --"
+    assert _systemd_command_line(["/My Tools/dotf", "100%", "$HOME"]) == (
+        '"/My Tools/dotf" 100%% $$HOME'
+    )
+
+
+def test_supervisor_loop_runs_the_prefix_then_hive() -> None:
+    """Each element is its own single-quoted PowerShell argument, so the loop
+    still reads the exit code of the whole launch."""
+    from hive._service import _supervisor_ps_command
+
+    loop = _supervisor_ps_command(r"C:\hive.exe", "serve", prefix=[r"C:\dotf.exe", "it's", "--"])
+
+    assert r"& 'C:\dotf.exe' 'it''s' '--' 'C:\hive.exe' serve;" in loop
+    assert "if($LASTEXITCODE -eq 0){break}" in loop
+
+
+def test_windows_task_and_startup_fallback_carry_the_same_prefixed_loop() -> None:
+    from xml.sax.saxutils import escape
+
+    from hive._service import _supervisor_ps_command, render_startup_vbs, render_windows_task_xml
+
+    prefix = [r"C:\dotf.exe", "secrets", "run", "--"]
+    loop = _supervisor_ps_command(r"C:\hive.exe", "serve", prefix=prefix)
+
+    assert loop in render_startup_vbs(r"C:\hive.exe", prefix=prefix)
+    assert escape(loop) in render_windows_task_xml(r"C:\hive.exe", prefix=prefix)
+
+
+def test_install_records_the_prefix_and_runs_it_in_the_unit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    _isolated_service_config: Path,
+) -> None:
+    import hive._service as svc
+
+    unit_path = _linux(monkeypatch, tmp_path)
+    dotf = _launcher(tmp_path)
+
+    assert svc.install_service(enable=True, exec_prefix=[dotf, *_PREFIX[1:]]) == 0
+
+    expected = svc._systemd_command_line([dotf, *_PREFIX[1:]])
+    assert _exec_start(unit_path) == f"{expected} /usr/bin/hive serve"
+    assert svc.load_exec_prefix() == [dotf, *_PREFIX[1:]]
+    if sys.platform != "win32":
+        assert _isolated_service_config.stat().st_mode & 0o777 == 0o600
+
+
+def test_a_reinstall_without_the_flag_keeps_the_recorded_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The upgrade timer and setup scripts run a bare `hive service install`;
+    the prefix must survive them, or the credential is lost on the next upgrade."""
+    import hive._service as svc
+
+    unit_path = _linux(monkeypatch, tmp_path)
+    dotf = _launcher(tmp_path)
+    svc.install_service(enable=True, exec_prefix=[dotf, "run", "--"])
+    first = unit_path.read_text(encoding="utf-8")
+    unit_path.unlink()
+
+    assert svc.install_service(enable=True) == 0
+    assert unit_path.read_text(encoding="utf-8") == first
+
+
+def test_clearing_the_prefix_restores_the_plain_unit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    _isolated_service_config: Path,
+) -> None:
+    import hive._service as svc
+
+    unit_path = _linux(monkeypatch, tmp_path)
+    svc.install_service(enable=True, exec_prefix=[_launcher(tmp_path), "--"])
+
+    assert svc.install_service(enable=True, clear_exec_prefix=True) == 0
+    assert _exec_start(unit_path) == "/usr/bin/hive serve"
+    assert not _isolated_service_config.exists()
+
+
+def test_a_launcher_that_moved_is_found_again_by_name(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import hive._service as svc
+
+    unit_path = _linux(monkeypatch, tmp_path)
+    moved = _launcher(tmp_path / "new")
+    monkeypatch.setattr(svc.shutil, "which", lambda name: moved if name == "dotf" else None)
+
+    assert svc.install_service(enable=True, exec_prefix=["/gone/bin/dotf", "--"]) == 0
+    assert (
+        _exec_start(unit_path) == f"{svc._systemd_command_line([moved, '--'])} /usr/bin/hive serve"
+    )
+    assert svc.load_exec_prefix() == ["/gone/bin/dotf", "--"]  # recorded as given
+
+
+def test_a_launcher_that_cannot_be_found_is_refused_before_anything_is_written(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    _isolated_service_config: Path,
+) -> None:
+    import hive._service as svc
+
+    unit_path = _linux(monkeypatch, tmp_path)
+    monkeypatch.setattr(svc.shutil, "which", lambda name: None)
+
+    rc = svc.install_service(enable=True, exec_prefix=["no-such-launcher", "--"])
+
+    assert rc != 0
+    assert "no-such-launcher" in capsys.readouterr().err
+    assert not unit_path.exists()
+    assert not _isolated_service_config.exists()
+
+
+def test_windows_refuses_a_prefix_its_loop_cannot_quote(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A double quote would end the `-Command "..."` argument early, so the
+    task would run something other than what was recorded."""
+    import hive._service as svc
+
+    registered: list[str] = []
+    monkeypatch.setattr(svc, "_platform", lambda: "windows")
+    monkeypatch.setattr(svc, "_resolve_exec", lambda: r"C:\hive.exe")
+    monkeypatch.setattr(svc, "_schtasks_create", lambda name, *, xml: registered.append(xml) or 0)
+
+    rc = svc.install_service(enable=True, exec_prefix=[_launcher(tmp_path), 'say "hi"'])
+
+    assert rc != 0
+    assert 'say "hi"' in capsys.readouterr().err
+    assert registered == []
+
+
+def test_install_launchd_runs_the_prefix_inside_the_env_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The prefix goes after the env file, so `exec "$@"` starts the prefix and
+    hive.env keeps working beside it."""
+    import plistlib
+
+    import hive._service as svc
+
+    _, plist_path = _darwin(monkeypatch, tmp_path, loaded=False)
+    dotf = _launcher(tmp_path)
+
+    assert svc.install_service(enable=True, exec_prefix=[dotf, "run", "--"]) == 0
+
+    args = plistlib.loads(plist_path.read_bytes())["ProgramArguments"]
+    assert args[:2] == ["/bin/sh", "-c"]
+    assert args[-5:] == [dotf, "run", "--", "/usr/local/bin/hive", "serve"]
+
+
+def test_with_no_prefix_every_definition_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import hive._service as svc
+
+    unit_path = _linux(monkeypatch, tmp_path)
+    svc.install_service(enable=True)
+    assert unit_path.read_text(encoding="utf-8") == svc.render_systemd_unit(
+        "/usr/bin/hive", vault=str(svc.settings.vault_path)
+    )
+    assert svc._supervisor_ps_command(r"C:\hive.exe", "serve", prefix=[]) == (
+        svc._supervisor_ps_command(r"C:\hive.exe", "serve")
+    )
+
+
+def test_a_malformed_record_is_refused_and_named(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    _isolated_service_config: Path,
+) -> None:
+    import hive._service as svc
+
+    unit_path = _linux(monkeypatch, tmp_path)
+    _isolated_service_config.parent.mkdir(parents=True)
+    _isolated_service_config.write_text('{"exec_prefix": "dotf run --"}', encoding="utf-8")
+
+    assert svc.install_service(enable=True) != 0
+    assert str(_isolated_service_config) in capsys.readouterr().err
+    assert not unit_path.exists()
+
+
+def test_status_names_the_recorded_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _isolated_service_config: Path,
+) -> None:
+    import hive._service as svc
+
+    monkeypatch.setattr(svc, "_platform", lambda: "linux")
+    monkeypatch.setattr(svc, "_run_passthrough", lambda cmd: 0)
+    monkeypatch.setattr(svc, "daemon_state", lambda: "healthy")
+
+    svc.service_status()
+    assert "exec prefix: none recorded" in capsys.readouterr().out
+
+    svc.save_exec_prefix(["dotf", "run", "--"])
+    svc.service_status()
+    assert "exec prefix: dotf run --" in capsys.readouterr().out
+
+
+def test_cli_exec_prefix_takes_everything_after_the_separator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The prefix itself ends in `--`, so the CLI takes the rest of the line
+    verbatim instead of letting argparse read it."""
+    from hive import server
+
+    seen: dict[str, object] = {}
+
+    def _fake_install(**kwargs: object) -> int:
+        seen.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("hive._service.install_service", _fake_install)
+
+    assert server._run_service(["install", "--exec-prefix", "--", *_PREFIX]) == 0
+    assert seen == {"enable": True, "exec_prefix": _PREFIX, "clear_exec_prefix": False}
+
+    assert server._run_service(["install", "--no-exec-prefix"]) == 0
+    assert seen["exec_prefix"] is None
+    assert seen["clear_exec_prefix"] is True
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["install", "--exec-prefix"],
+        ["install", "--exec-prefix", "--"],
+        ["install", "--exec-prefix", "dotf", "--"],
+        ["install", "--no-exec-prefix", "--exec-prefix", "--", "dotf"],
+    ],
+)
+def test_cli_exec_prefix_misuse_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+) -> None:
+    from hive import server
+
+    monkeypatch.setattr("hive._service.install_service", lambda **_: 0)
+
+    with pytest.raises(SystemExit) as exc:
+        server._run_service(argv)
+    assert exc.value.code == 2
 
 
 # ── _run surfaces failures to the user (#252 bug 1) ──────────────────────

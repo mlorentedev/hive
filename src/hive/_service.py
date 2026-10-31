@@ -23,9 +23,11 @@ last run failed".
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import os
 import plistlib
+import shlex
 import shutil
 import socket
 import subprocess
@@ -33,10 +35,14 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 from xml.sax.saxutils import escape
 
 from hive._helpers import _subprocess_run_kwargs
 from hive.config import settings
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _log = logging.getLogger(__name__)
 
@@ -155,6 +161,99 @@ def _resolve_argv() -> list[str]:
 def _resolve_exec() -> str:
     """``_resolve_argv`` as the command line systemd and Task Scheduler take."""
     return " ".join(_resolve_argv())
+
+
+# ── exec prefix: start the daemon through a launcher (#540) ──────────────
+#
+# A consumer that keeps the worker credential out of every file starts the
+# daemon through a launcher that resolves the credential and hands it to its
+# child, such as `dotf secrets run -- hive serve`. The prefix is recorded once,
+# so every later `hive service install` (the upgrade timer's included) keeps it.
+# It must pass the child's exit code back, or the supervisors' restart contract
+# (0 stops, anything else relaunches) breaks.
+
+# PowerShell runs the Windows loop from inside `-Command "..."`, so a double
+# quote would end that argument early and a line break would end the command.
+_PS_UNQUOTABLE = ('"', "\n", "\r")
+
+
+class ExecPrefixError(ValueError):
+    """The recorded or requested exec prefix cannot be rendered safely."""
+
+
+def service_config_path() -> Path:
+    return _config_root() / "hive" / "service.json"
+
+
+def load_exec_prefix() -> list[str]:
+    """The recorded prefix, or ``[]`` when none is recorded."""
+    path = service_config_path()
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    try:
+        prefix = json.loads(raw).get("exec_prefix", [])
+    except (ValueError, AttributeError) as exc:
+        raise ExecPrefixError(f"{path} is not a JSON object: {exc}") from exc
+    if not isinstance(prefix, list) or not all(isinstance(e, str) and e for e in prefix):
+        raise ExecPrefixError(f"{path}: exec_prefix must be a list of non-empty strings")
+    return prefix
+
+
+def save_exec_prefix(prefix: Sequence[str]) -> None:
+    """Record *prefix* owner-only; an empty one removes the record."""
+    path = service_config_path()
+    if not prefix:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump({"exec_prefix": list(prefix)}, fh)
+        fh.write("\n")
+    # O_CREAT's mode applies only to a new file; an existing one keeps its own.
+    path.chmod(0o600)
+
+
+def _resolve_exec_prefix(prefix: Sequence[str]) -> list[str]:
+    """*prefix* with its launcher as an absolute path, ready to render.
+
+    Neither systemd nor launchd searches the user's PATH, so the launcher is
+    resolved here: an absolute path that exists is kept, anything else is
+    looked up by name, which also finds a launcher that has moved since it was
+    recorded. Refuses rather than write a definition that never starts.
+    """
+    if not prefix:
+        return []
+    if _platform() == "windows":
+        for element in prefix:
+            if any(c in element for c in _PS_UNQUOTABLE):
+                raise ExecPrefixError(
+                    f"exec prefix element {element!r} holds a double quote or a line "
+                    "break, which the Windows supervisor loop cannot quote"
+                )
+    launcher = Path(prefix[0])
+    if launcher.is_absolute() and launcher.is_file():
+        return list(prefix)
+    # The name alone finds a launcher whose recorded path no longer exists, on
+    # Windows too, where a drive-less path is not absolute.
+    found = shutil.which(prefix[0]) or shutil.which(launcher.name)
+    if not found:
+        raise ExecPrefixError(f"exec prefix launcher {prefix[0]!r} was not found")
+    return [found, *prefix[1:]]
+
+
+def _systemd_command_line(argv: Sequence[str]) -> str:
+    """*argv* as systemd's ExecStart reads it: `%` and `$` are expansions there,
+    and whitespace splits, so each element is escaped and, when needed, quoted."""
+    parts = []
+    for arg in argv:
+        escaped = arg.replace("%", "%%").replace("$", "$$")
+        if any(c.isspace() for c in arg) or any(c in arg for c in "\"'\\"):
+            escaped = '"' + escaped.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        parts.append(escaped)
+    return " ".join(parts)
 
 
 def _current_windows_user() -> str:
@@ -278,6 +377,7 @@ def render_windows_task_xml(
     arguments: str = "serve",
     *,
     user: str = "",
+    prefix: Sequence[str] = (),
 ) -> str:
     """A Task Scheduler definition for the Phase C daemon on Windows (ADR-015).
 
@@ -297,7 +397,7 @@ def render_windows_task_xml(
     """
     ps_arguments = (
         f"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden "
-        f'-Command "{_supervisor_ps_command(command, arguments)}"'
+        f'-Command "{_supervisor_ps_command(command, arguments, prefix=prefix)}"'
     )
     principal_user = f"      <UserId>{escape(user)}</UserId>\n" if user else ""
     return _WINDOWS_TASK_TEMPLATE.format(
@@ -306,18 +406,29 @@ def render_windows_task_xml(
     )
 
 
-def _supervisor_ps_command(command: str, arguments: str) -> str:
+def _supervisor_ps_command(command: str, arguments: str, *, prefix: Sequence[str] = ()) -> str:
     """The PowerShell relaunch loop shared by the Scheduled Task and the
     Startup-folder fallback — a single SSOT for the restart contract: relaunch
     ``<command> <arguments>`` while it exits non-zero, stop on a clean exit 0
-    (drift → 75 → relaunch onto new code; clean stop / singleton-decline → 0)."""
-    return (
-        f"while($true){{ & '{command}' {arguments}; "
-        f"if($LASTEXITCODE -eq 0){{break}} Start-Sleep -Seconds 1 }}"
-    )
+    (drift → 75 → relaunch onto new code; clean stop / singleton-decline → 0).
+
+    With an exec *prefix* the loop calls the launcher, each element a quoted
+    argument of its own and hive among them, and reads the launcher's exit code.
+    """
+    if prefix:
+        quoted = " ".join("'" + e.replace("'", "''") + "'" for e in [*prefix, command])
+        launch = f"& {quoted} {arguments}"
+    else:
+        launch = f"& '{command}' {arguments}"
+    return f"while($true){{ {launch}; if($LASTEXITCODE -eq 0){{break}} Start-Sleep -Seconds 1 }}"
 
 
-def render_startup_vbs(command: str, arguments: str = "serve") -> str:
+def render_startup_vbs(
+    command: str,
+    arguments: str = "serve",
+    *,
+    prefix: Sequence[str] = (),
+) -> str:
     """A windowless Startup-folder launcher for the daemon — the fallback used
     when Task Scheduler is policy-locked for a non-admin/domain user (#252).
 
@@ -329,7 +440,7 @@ def render_startup_vbs(command: str, arguments: str = "serve") -> str:
     """
     ps = (
         f"powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden "
-        f'-Command "{_supervisor_ps_command(command, arguments)}"'
+        f'-Command "{_supervisor_ps_command(command, arguments, prefix=prefix)}"'
     )
     # A double-quote inside a VBS string literal is escaped by doubling it.
     vbs_arg = ps.replace('"', '""')
@@ -446,11 +557,14 @@ def _unsupported(action: str) -> int:
 # ── public commands (dispatch on platform) ───────────────────────────────
 
 
-def _install_systemd(*, enable: bool) -> int:
+def _install_systemd(*, enable: bool, prefix: Sequence[str] = ()) -> int:
     path = systemd_unit_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    exec_start = _resolve_exec()
+    if prefix:
+        exec_start = f"{_systemd_command_line(prefix)} {exec_start}"
     path.write_text(
-        render_systemd_unit(_resolve_exec(), vault=str(settings.vault_path)),
+        render_systemd_unit(exec_start, vault=str(settings.vault_path)),
         encoding="utf-8",
     )
     print(f"hive: wrote systemd unit {path}")
@@ -476,8 +590,8 @@ def _install_systemd(*, enable: bool) -> int:
     return 0
 
 
-def _install_windows(*, enable: bool) -> int:
-    xml = render_windows_task_xml(_resolve_exec(), user=_current_windows_user())
+def _install_windows(*, enable: bool, prefix: Sequence[str] = ()) -> int:
+    xml = render_windows_task_xml(_resolve_exec(), user=_current_windows_user(), prefix=prefix)
     if not enable:
         path = _config_root() / "hive" / f"{WINDOWS_TASK_NAME}.xml"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -507,10 +621,10 @@ def _install_windows(*, enable: bool) -> int:
         return 0
     # Task Scheduler can be policy-locked for a non-admin/domain user; fall back
     # to a per-user Startup launcher that needs no admin (#252).
-    return _install_windows_startup_fallback()
+    return _install_windows_startup_fallback(prefix=prefix)
 
 
-def _install_windows_startup_fallback() -> int:
+def _install_windows_startup_fallback(*, prefix: Sequence[str] = ()) -> int:
     """Write a per-user Startup-folder launcher when Task Scheduler is locked.
 
     Returns 0 on success; on a write failure it prints an actionable message and
@@ -519,7 +633,7 @@ def _install_windows_startup_fallback() -> int:
     path = startup_vbs_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(render_startup_vbs(exe), encoding="utf-8")
+        path.write_text(render_startup_vbs(exe, prefix=prefix), encoding="utf-8")
     except OSError as exc:
         print(
             f"hive: Task Scheduler is unavailable and the Startup-folder fallback "
@@ -547,10 +661,12 @@ def _install_windows_startup_fallback() -> int:
     return 0
 
 
-def _install_launchd(*, enable: bool) -> int:
+def _install_launchd(*, enable: bool, prefix: Sequence[str] = ()) -> int:
     path = launchd_plist_path()
     log = launchd_log_path()
-    plist = render_launchd_plist(_resolve_argv(), vault=str(settings.vault_path), log=str(log))
+    plist = render_launchd_plist(
+        [*prefix, *_resolve_argv()], vault=str(settings.vault_path), log=str(log)
+    )
     previous = path.read_bytes() if path.exists() else None
     path.parent.mkdir(parents=True, exist_ok=True)
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -662,16 +778,39 @@ def _await_daemon(deadline_s: float = _START_DEADLINE_S) -> str:
         time.sleep(_START_POLL_S)
 
 
-def install_service(*, enable: bool = True) -> int:
-    """Install the daemon as a per-user service for the current OS."""
+def install_service(
+    *,
+    enable: bool = True,
+    exec_prefix: Sequence[str] | None = None,
+    clear_exec_prefix: bool = False,
+) -> int:
+    """Install the daemon as a per-user service for the current OS.
+
+    *exec_prefix* records a launcher that every supervisor runs in front of
+    ``hive serve``; with neither it nor *clear_exec_prefix*, the recorded one is
+    kept. Nothing is recorded or written unless the prefix resolves.
+    """
     plat = _platform()
+    if plat not in ("linux", "windows", "darwin"):
+        return _unsupported("install")
+    try:
+        if clear_exec_prefix:
+            requested: list[str] = []
+        elif exec_prefix is not None:
+            requested = list(exec_prefix)
+        else:
+            requested = load_exec_prefix()
+        prefix = _resolve_exec_prefix(requested)
+    except ExecPrefixError as exc:
+        print(f"hive: {exc}; nothing was installed.", file=sys.stderr)
+        return 2
+    if clear_exec_prefix or exec_prefix is not None:
+        save_exec_prefix(requested)
     if plat == "linux":
-        return _install_systemd(enable=enable)
+        return _install_systemd(enable=enable, prefix=prefix)
     if plat == "windows":
-        return _install_windows(enable=enable)
-    if plat == "darwin":
-        return _install_launchd(enable=enable)
-    return _unsupported("install")
+        return _install_windows(enable=enable, prefix=prefix)
+    return _install_launchd(enable=enable, prefix=prefix)
 
 
 def uninstall_service() -> int:
@@ -790,6 +929,12 @@ def service_status() -> int:
         _run_passthrough(["schtasks", "/Query", "/TN", WINDOWS_TASK_NAME, "/V"])
     elif plat == "darwin":
         _run_passthrough(["launchctl", "print", f"{_launchd_domain()}/{LAUNCHD_LABEL}"])
+    try:
+        recorded = load_exec_prefix()
+        shown = shlex.join(recorded) if recorded else "none recorded"
+        print(f"hive service: exec prefix: {shown}", flush=True)
+    except ExecPrefixError as exc:
+        print(f"hive: {exc}", file=sys.stderr)
     try:
         state = daemon_state()
     except (RuntimeError, ValueError) as exc:

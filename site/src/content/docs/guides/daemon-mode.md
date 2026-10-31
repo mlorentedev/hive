@@ -62,6 +62,23 @@ hive service status                    # supervisor's view + pinned /health prob
 Use `hive service install --no-enable` to write the unit/task without starting
 it, and `hive service uninstall` to stop and remove it.
 
+To start the daemon through a launcher, for example one that resolves the
+worker API key from a secrets manager so the key never sits in a file, record
+it once:
+
+```bash
+hive service install --exec-prefix -- dotf secrets run --only NAN_API_KEY --
+```
+
+Every supervisor then runs `<launcher...> hive serve`, and a later
+`hive service install` keeps the prefix, so an upgrade does not drop it.
+`--no-exec-prefix` forgets it, and `hive service status` shows the one
+recorded. The launcher must pass hive's exit code back, because the
+supervisors restart on a non-zero exit and stop on 0. The prefix is stored in
+`~/.config/hive/service.json` as given. At each install its first element is
+used as is when it is an absolute path that exists, and otherwise looked up on
+your PATH by name, so a launcher that moved is found again.
+
 `hive service status` ends with `hive daemon: healthy` (exit 0) only when the
 listener on the stable port proves the daemon's certificate. Otherwise it
 reports `unverified listener` (possible impersonation), `unverified listener,
