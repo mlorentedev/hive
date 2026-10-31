@@ -130,42 +130,55 @@ async def test_subprocess_terminated() -> None:
     assert spawned[0].poll() is not None, "sleep 60 was never signalled"
 
 
+# Runs in a child that leads its own session, so the sleep it spawns
+# shares the child's group, never pytest's. A guard regression then kills
+# the child, which the test reports, instead of killing the test runner.
+_OWN_GROUP_SCENARIO = """
+import asyncio, subprocess, sys
+from hive._deadline import bounded_call
+
+registry, spawned = [], []
+
+def owner():
+    proc = subprocess.Popen(["sleep", "60"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    registry.append(proc)
+    spawned.append(proc)
+    try:
+        proc.wait()
+    finally:
+        if proc in registry:
+            registry.remove(proc)
+
+async def main():
+    try:
+        await bounded_call(asyncio.to_thread, owner, deadline_s=1.0, process_registry=registry)
+    except TimeoutError:
+        pass
+    sys.exit(0 if spawned and spawned[0].poll() is not None else 3)
+
+asyncio.run(main())
+"""
+
+
 @_POSIX_ONLY
-@pytest.mark.asyncio
-async def test_terminator_never_signals_its_own_process_group() -> None:
+def test_terminator_never_signals_its_own_process_group() -> None:
     """A registrant that shares our process group is signalled alone.
 
     The terminator signals the child's whole process group. A child spawned
     without ``start_new_session`` is in ours, so the group signal would take
     down pytest, or the server, with it (#524).
     """
-    from hive._deadline import bounded_call
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", _OWN_GROUP_SCENARIO],
+        start_new_session=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
 
-    registry: list[subprocess.Popen[bytes]] = []
-    spawned: list[subprocess.Popen[bytes]] = []
-
-    def owner() -> None:
-        proc = subprocess.Popen(  # noqa: S603
-            ["sleep", "60"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        registry.append(proc)
-        spawned.append(proc)
-        try:
-            proc.wait()
-        finally:
-            if proc in registry:
-                registry.remove(proc)
-
-    async def spawn_and_wait() -> None:
-        await asyncio.to_thread(owner)
-
-    with pytest.raises(TimeoutError):
-        await bounded_call(spawn_and_wait, deadline_s=1.0, process_registry=registry)
-
-    assert len(spawned) == 1
-    assert spawned[0].poll() is not None, "sleep 60 was never signalled"
+    assert result.returncode != -15, "the terminator signalled its own group"
+    assert result.returncode != 3, "sleep 60 was never signalled"
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
 
 
 @_POSIX_ONLY

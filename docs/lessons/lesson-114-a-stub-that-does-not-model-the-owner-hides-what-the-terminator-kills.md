@@ -38,8 +38,9 @@ compares the child's group with `os.getpgrp()` and, if they match, signals the
 pid alone and logs a warning (`_signal_group` in `_deadline.py`).
 
 **Testing notes:** Assert on the effect (the process exited), never on a
-collection the code under test is allowed to empty. When a test signals
-process groups, run it from a wrapper started with `start_new_session=True`:
-if the guard is wrong, the stray signal takes the wrapper, not your shell.
-The red run of `test_terminator_never_signals_its_own_process_group` showed up
-as exit 143 from that wrapper.
+collection the code under test is allowed to empty. A test that sends real
+group signals must run its scenario in a child started with
+`start_new_session=True`: if the guard is wrong, the stray signal takes the
+child and the test reports it, instead of killing pytest (and, locally, the
+shell that launched it, which is how this was found: exit 143). The group
+logic itself is also covered with `os.killpg`/`os.kill` monkeypatched.
