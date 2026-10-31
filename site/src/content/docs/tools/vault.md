@@ -214,7 +214,7 @@ Two blocks there report on [deferred commits](#deferred-commits-ack-semantics). 
 The commit moved off the write path. A write lands on disk, its path is queued, and a reconciler thread drains the queue into **one commit per tick** (`HIVE_COMMIT_TICK_S`, default 5s) rather than one commit per write. Commit rate is now a function of the tick instead of write volume, which is what lifts the throughput ceiling: git commits against one repository serialize, so the only way to go faster is to commit less often.
 
 :::caution[The tick has a ceiling of 300s]
-Setting `HIVE_COMMIT_TICK_S` above **300** does not slow the reconciler down — it stops it from starting at all. What stops is *automatic* reconciliation: queued paths still reach git through a clean shutdown, an explicit `vault_commit`, or an [external committer](/guides/obsidian-git-integration/), but nothing happens on a timer any more, and `vault_health` is what shows the backlog growing. The server logs `mcp.reconciler.auto_flush_disabled` at startup when this happens. For infrequent commits, use a tick of **up to 300 seconds inclusive** — exactly 300 still runs.
+Setting `HIVE_COMMIT_TICK_S` above **300** does not slow the reconciler down — it stops it from starting at all. What stops is *automatic* reconciliation: queued paths still reach git through a clean shutdown, an explicit `vault_commit`, or an [external committer](/hive/guides/obsidian-git-integration/), but nothing happens on a timer any more, and `vault_health` is what shows the backlog growing. The server logs `mcp.reconciler.auto_flush_disabled` at startup when this happens. For infrequent commits, use a tick of **up to 300 seconds inclusive** — exactly 300 still runs.
 :::
 
 | You want | Pass |
@@ -223,7 +223,7 @@ Setting `HIVE_COMMIT_TICK_S` above **300** does not slow the reconciler down —
 | The default | nothing — queued, committed on the next tick |
 | To flush early | [`vault_commit`](#vault_commit) |
 
-What the default guarantees is narrow, deliberately: **the write reached disk before its path was queued.** Everything after that is best-effort. A tick may legitimately produce no commit at all (see [obsidian-git integration](/guides/obsidian-git-integration/)), and a process killed before its tick leaves the path on disk uncommitted.
+What the default guarantees is narrow, deliberately: **the write reached disk before its path was queued.** Everything after that is best-effort. A tick may legitimately produce no commit at all (see [obsidian-git integration](/hive/guides/obsidian-git-integration/)), and a process killed before its tick leaves the path on disk uncommitted.
 
 `commit=False` no longer means "stay uncommitted until I flush" — it is now an alias for the default. The indefinite-deferral mode is **removed**, not preserved. What it existed for — batch many writes, pay for one commit — is what the queue now does automatically and without configuration.
 
@@ -264,7 +264,7 @@ vault_write(
 - **replace**: Replaces the entire file. Requires valid YAML frontmatter with `id`, `type`, `status`
 - **create**: Creates a new file. Auto-generates frontmatter with `id`, `type`, `status: draft`, `created: today`
 
-All three operations defer their commit to the next reconciler tick. The file is on disk when the call returns; `git status` shows it dirty until the tick fires. Pass `commit=True` to commit before returning, flush early with [`vault_commit`](#vault_commit), or let an external committer (e.g. obsidian-git auto-commit) take it — see [Deferred commits](#deferred-commits-ack-semantics) for the full contract and [Configuration → Recommended configuration](/configuration/#recommended-configuration) for durability.
+All three operations defer their commit to the next reconciler tick. The file is on disk when the call returns; `git status` shows it dirty until the tick fires. Pass `commit=True` to commit before returning, flush early with [`vault_commit`](#vault_commit), or let an external committer (e.g. obsidian-git auto-commit) take it — see [Deferred commits](#deferred-commits-ack-semantics) for the full contract and [Configuration → Recommended configuration](/hive/configuration/#recommended-configuration) for durability.
 
 ## vault_patch
 
@@ -300,7 +300,7 @@ Flush the working tree into one git commit, without waiting for a tick.
 vault_commit(message="vault: end-of-session checkpoint")
 ```
 
-Stages every unstaged and untracked change in the vault and creates a single commit. Returns the new SHA, a clean-tree notice if nothing is dirty, or a human-readable error. Best paired with the obsidian-git plugin (see [Configuration → Recommended configuration](/configuration/#recommended-configuration)).
+Stages every unstaged and untracked change in the vault and creates a single commit. Returns the new SHA, a clean-tree notice if nothing is dirty, or a human-readable error. Best paired with the obsidian-git plugin (see [Configuration → Recommended configuration](/hive/configuration/#recommended-configuration)).
 
 This is the **only** path that sweeps the whole working tree, and that is deliberate: it stages edits hive never made, including your own work in progress. A human asking for a flush has consented to that; a timer has not, which is why the reconciler only ever commits paths it queued itself. It is also the remediation for anything the report under [`vault_health`](#vault_health) shows as uncommitted, since nothing clears those automatically.
 

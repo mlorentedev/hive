@@ -214,7 +214,7 @@ Dos bloques ahí informan sobre los [commits diferidos](#commits-diferidos-semá
 El commit salió del camino de escritura. Una escritura aterriza en disco, su ruta se encola, y un hilo reconciler vacía la cola en **un commit por tick** (`HIVE_COMMIT_TICK_S`, 5s por defecto) en vez de un commit por escritura. La tasa de commits pasa a ser función del tick y no del volumen de escrituras, que es lo que levanta el techo de rendimiento: los commits de git contra un mismo repositorio se serializan, así que la única forma de ir más rápido es commitear menos veces.
 
 :::caution[El tick tiene un techo de 300s]
-Poner `HIVE_COMMIT_TICK_S` por encima de **300** no ralentiza el reconciler: impide que arranque. Lo que se detiene es la reconciliación *automática*: las rutas encoladas siguen llegando a git mediante un apagado limpio, un `vault_commit` explícito o un [committer externo](/es/guides/obsidian-git-integration/), pero ya nada ocurre por temporizador, y `vault_health` es lo que muestra crecer el backlog. El servidor registra `mcp.reconciler.auto_flush_disabled` al arrancar cuando ocurre. Si quieres commits poco frecuentes, usa un tick de **hasta 300 segundos inclusive** — exactamente 300 sigue arrancando.
+Poner `HIVE_COMMIT_TICK_S` por encima de **300** no ralentiza el reconciler: impide que arranque. Lo que se detiene es la reconciliación *automática*: las rutas encoladas siguen llegando a git mediante un apagado limpio, un `vault_commit` explícito o un [committer externo](/hive/es/guides/obsidian-git-integration/), pero ya nada ocurre por temporizador, y `vault_health` es lo que muestra crecer el backlog. El servidor registra `mcp.reconciler.auto_flush_disabled` al arrancar cuando ocurre. Si quieres commits poco frecuentes, usa un tick de **hasta 300 segundos inclusive** — exactamente 300 sigue arrancando.
 :::
 
 | Si quieres | Pasa |
@@ -223,7 +223,7 @@ Poner `HIVE_COMMIT_TICK_S` por encima de **300** no ralentiza el reconciler: imp
 | El comportamiento por defecto | nada — se encola y se commitea en el siguiente tick |
 | Hacer flush ya | [`vault_commit`](#vault_commit) |
 
-Lo que garantiza el comportamiento por defecto es estrecho, y a propósito: **la escritura llegó a disco antes de que su ruta se encolara.** Todo lo posterior es best-effort. Un tick puede legítimamente no producir ningún commit (ver [integración con obsidian-git](/es/guides/obsidian-git-integration/)), y un proceso muerto antes de su tick deja la ruta en disco sin commitear.
+Lo que garantiza el comportamiento por defecto es estrecho, y a propósito: **la escritura llegó a disco antes de que su ruta se encolara.** Todo lo posterior es best-effort. Un tick puede legítimamente no producir ningún commit (ver [integración con obsidian-git](/hive/es/guides/obsidian-git-integration/)), y un proceso muerto antes de su tick deja la ruta en disco sin commitear.
 
 `commit=False` ya no significa "que siga sin commitear hasta que yo haga flush" — ahora es un alias del comportamiento por defecto. El modo de diferido indefinido está **eliminado**, no conservado. Para lo que existía — agrupar muchas escrituras y pagar un solo commit — es justo lo que la cola hace ahora de forma automática y sin configuración.
 
@@ -264,7 +264,7 @@ vault_write(
 - **replace**: Reemplaza el archivo completo. Requiere frontmatter YAML válido con `id`, `type`, `status`
 - **create**: Crea un nuevo archivo. Auto-genera frontmatter con `id`, `type`, `status: draft`, `created: hoy`
 
-Las tres operaciones difieren su commit al siguiente tick del reconciler. El archivo está en disco cuando la llamada devuelve; `git status` lo muestra como modificado hasta que salta el tick. Pasa `commit=True` para commitear antes de devolver, haz flush ya con [`vault_commit`](#vault_commit), o deja que un committer externo (p. ej. el auto-commit de obsidian-git) lo recoja — ver [Commits diferidos](#commits-diferidos-semántica-de-ack) para el contrato completo y [Configuración → Configuración recomendada](/es/configuration/#configuración-recomendada) para la durabilidad.
+Las tres operaciones difieren su commit al siguiente tick del reconciler. El archivo está en disco cuando la llamada devuelve; `git status` lo muestra como modificado hasta que salta el tick. Pasa `commit=True` para commitear antes de devolver, haz flush ya con [`vault_commit`](#vault_commit), o deja que un committer externo (p. ej. el auto-commit de obsidian-git) lo recoja — ver [Commits diferidos](#commits-diferidos-semántica-de-ack) para el contrato completo y [Configuración → Configuración recomendada](/hive/es/configuration/#configuración-recomendada) para la durabilidad.
 
 ## vault_patch
 
@@ -300,7 +300,7 @@ Hace flush del árbol de trabajo en un único commit de git, sin esperar a un ti
 vault_commit(message="vault: checkpoint fin de sesión")
 ```
 
-Hace stage de todo cambio sin stage y de todo fichero no rastreado del vault, y crea un único commit. Devuelve el nuevo SHA, un aviso de árbol limpio si no hay nada modificado, o un error legible. Idealmente combinado con el plugin obsidian-git (ver [Configuración → Configuración recomendada](/es/configuration/#configuración-recomendada)).
+Hace stage de todo cambio sin stage y de todo fichero no rastreado del vault, y crea un único commit. Devuelve el nuevo SHA, un aviso de árbol limpio si no hay nada modificado, o un error legible. Idealmente combinado con el plugin obsidian-git (ver [Configuración → Configuración recomendada](/hive/es/configuration/#configuración-recomendada)).
 
 Este es el **único** camino que barre el árbol de trabajo entero, y es deliberado: hace stage de ediciones que hive nunca hizo, incluido tu propio trabajo a medias. Una persona que pide un flush ha consentido eso; un temporizador no, y por eso el reconciler solo commitea rutas que él mismo encoló. Es además el remedio para todo lo que el reporte de [`vault_health`](#vault_health) muestre como sin commitear, ya que nada de eso se resuelve solo.
 
