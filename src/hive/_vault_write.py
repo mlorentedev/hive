@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 from typing import TYPE_CHECKING
 
 from hive._helpers import (
@@ -105,14 +106,17 @@ def _left_out_note(left_out: list[str]) -> str:
     One of them may be hive's own orphan, a write killed between ``git add``
     and ``git commit``, and it can sit anywhere in the list, so every path is
     named rather than the first few (#510). Both halves of a staged rename
-    are listed; commit them together.
+    are listed; commit them together. Each path is shell-quoted, so a name
+    holding ``", "`` cannot read as two.
     """
     if not left_out:
         return ""
+    named = ", ".join(shlex.quote(p) for p in left_out)
     return (
-        f" Left {len(left_out)} staged path(s) out: {', '.join(left_out)}. They belong "
+        f" Left {len(left_out)} staged path(s) out: {named}. They belong "
         "to whoever staged them; commit yours deliberately with `git commit -- <path>...`, "
-        "both paths for a rename."
+        "both paths for a rename. That records each path's working-tree copy, so check "
+        "`git diff -- <path>` first for edits made after staging."
     )
 
 

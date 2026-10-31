@@ -2092,7 +2092,10 @@ def _unstaged_paths(porcelain_z: str) -> tuple[list[str], list[str]]:
             staged.append(path)
             if x == "R":
                 staged.append(source)  # committing one half leaves the other staged
-    return paths, staged
+    # A fresh file at a staged rename's source shows as `??` too; taking it
+    # would commit over the staged deletion.
+    taken = set(staged)
+    return [p for p in paths if p not in taken], staged
 
 
 @contextmanager
@@ -2142,6 +2145,7 @@ def _git_commit_all(
     safe_msg = message.replace("\n", " ").replace("\r", " ") or "vault: batch update"
     if not _acquire_with_telemetry(_GIT_LOCK, "_GIT_LOCK"):
         return "error", "thread lock timeout", []
+    left_out: list[str] = []
     try:
         try:
             with _filelock_with_telemetry(_git_filelock(vault_path), "_git_filelock"):
@@ -2171,7 +2175,7 @@ def _git_commit_all(
         except filelock.Timeout:
             return "error", "inter-process lock timeout", []
         except Exception as exc:
-            return "error", f"unexpected: {type(exc).__name__}: {exc}", []
+            return "error", f"unexpected: {type(exc).__name__}: {exc}", left_out
     finally:
         _GIT_LOCK.release()
 

@@ -304,7 +304,7 @@ Hace stage de todo cambio sin stage y de todo fichero no rastreado del vault, y 
 
 Este es el **único** camino que barre el árbol de trabajo entero, y es deliberado: hace stage de ediciones que hive nunca hizo, incluido tu propio trabajo a medias. Una persona que pide un flush ha consentido eso; un temporizador no, y por eso el reconciler solo commitea rutas que él mismo encoló. Es además el remedio para todo lo que el reporte de [`vault_health`](#vault_health) muestre como sin commitear, ya que nada de eso se resuelve solo.
 
-Lo que **no** recoge es una ruta que ya está en stage. Varias sesiones comparten un vault, y el trabajo en stage pertenece a quien lo puso ahí, así que el commit lo deja en stage y el resultado lo nombra. Una de esas rutas puede ser de hive: una escritura matada entre `git add` y `git commit` se queda en stage, y git no la distingue de la de otra sesión. Si una ruta nombrada es tuya, commitéala a propósito con `git commit -- <ruta>`; si es un rename en stage, nombra las dos rutas en el mismo commit.
+Lo que **no** recoge es una ruta que ya está en stage. Varias sesiones comparten un vault, y el trabajo en stage pertenece a quien lo puso ahí, así que el commit lo deja en stage y el resultado lo nombra. Una de esas rutas puede ser de hive: una escritura matada entre `git add` y `git commit` se queda en stage, y git no la distingue de la de otra sesión. Si una ruta nombrada es tuya, commitéala a propósito con `git commit -- <ruta>`; si es un rename en stage, nombra las dos rutas en el mismo commit. Eso registra la copia del árbol de trabajo de cada ruta, así que ejecuta antes `git diff -- <ruta>`: cualquier edición que muestre entra también en el commit.
 
 ## vault_delete
 

@@ -346,3 +346,54 @@ async def test_vault_commit_failure_still_names_left_out_paths(
     assert text.startswith("Commit failed"), text
     assert "staged path(s) out: theirs.md." in text, text
     ctx.reconciler.close()
+
+
+def test_vault_commit_flush_leaves_a_new_file_at_a_staged_rename_source_out(
+    git_vault: Path,
+) -> None:
+    # `git mv old new` then a fresh `old`: sweeping the fresh file would commit
+    # over the staged deletion and leave the rename half-committed.
+    from hive._helpers import _git_commit_all
+
+    (git_vault / "old.md").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    _git(git_vault, "add", "old.md")
+    _git(git_vault, "commit", "-m", "add old.md")
+    _git(git_vault, "mv", "old.md", "new.md")
+    (git_vault / "old.md").write_text("replacement\n", encoding="utf-8")
+    (git_vault / "dropped-in-by-hand.md").write_text("x\n", encoding="utf-8")
+
+    status, _, left_out = _git_commit_all(git_vault, "vault: flush")
+
+    assert status == "committed"
+    assert sorted(left_out) == ["new.md", "old.md"]
+    assert _committed(git_vault) == {"dropped-in-by-hand.md"}
+    assert _git(git_vault, "show", "HEAD:old.md") == "one\ntwo\nthree\n"
+
+
+def test_vault_commit_flush_keeps_left_out_paths_on_an_unexpected_error(
+    git_vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hive import _helpers
+
+    (git_vault / "theirs.md").write_text("x\n", encoding="utf-8")
+    _git(git_vault, "add", "theirs.md")
+    (git_vault / "mine.md").write_text("x\n", encoding="utf-8")
+
+    def broken_pathspec_file(_paths: list[str]) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(_helpers, "_pathspec_file", broken_pathspec_file)
+
+    status, detail, left_out = _helpers._git_commit_all(git_vault, "vault: flush")
+
+    assert status == "error"
+    assert "boom" in detail
+    assert left_out == ["theirs.md"]
+
+
+def test_left_out_note_quotes_a_path_that_reads_as_two() -> None:
+    from hive._vault_write import _left_out_note
+
+    note = _left_out_note(["a, b.md", "c.md"])
+
+    assert "'a, b.md', c.md." in note, note
