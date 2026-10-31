@@ -150,7 +150,6 @@ async def test_terminator_never_signals_its_own_process_group() -> None:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        assert os.getpgid(proc.pid) == os.getpgrp()
         registry.append(proc)
         spawned.append(proc)
         try:
@@ -167,6 +166,29 @@ async def test_terminator_never_signals_its_own_process_group() -> None:
 
     assert len(spawned) == 1
     assert spawned[0].poll() is not None, "sleep 60 was never signalled"
+
+
+@_POSIX_ONLY
+def test_signal_group_skips_killpg_on_our_own_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same guard, without real signals: a regression fails instead of
+    killing the test runner."""
+    import signal
+
+    from hive import _deadline
+
+    calls: list[tuple[str, int, int]] = []
+    monkeypatch.setattr(_deadline.os, "getpgid", lambda _pid: os.getpgrp())
+    monkeypatch.setattr(_deadline.os, "killpg", lambda pg, sig: calls.append(("killpg", pg, sig)))
+    monkeypatch.setattr(_deadline.os, "kill", lambda pid, sig: calls.append(("kill", pid, sig)))
+
+    class _Proc:
+        pid = 424242
+
+    _deadline._signal_group(_Proc(), signal.SIGTERM)  # type: ignore[arg-type]
+
+    assert calls == [("kill", 424242, signal.SIGTERM)]
 
 
 # ── #517 — the terminator never shares a Popen with its owner ───────────

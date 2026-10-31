@@ -16,7 +16,8 @@ Cross-OS termination chain (per ADR-008 §3):
 
 - POSIX: ``start_new_session=True`` at Popen creation +
   ``os.killpg(os.getpgid(pid), SIGTERM)`` then SIGKILL after grace.
-  Reaches descendant process groups (git → git-add → git-pack).
+  Reaches descendant process groups (git → git-add → git-pack). A child
+  that shares our own group is signalled alone (#524).
 - Windows: ``creationflags=subprocess.CREATE_NEW_PROCESS_GROUP`` at
   Popen creation + ``Popen.terminate()`` (TerminateProcess) twice
   (no graceful kill on Windows; second call ensures the group drops).
@@ -87,6 +88,9 @@ def _signal_group(proc: subprocess.Popen[bytes], sig: int) -> None:
     signalling that group would kill this process too (#524). Such a child
     gets the signal alone.
     """
+    if sys.platform == "win32":
+        # Callers take their Windows branch first; this narrows for mypy.
+        raise NotImplementedError("process groups are POSIX-only")
     pgid = os.getpgid(proc.pid)
     if pgid == os.getpgrp():
         _log.warning(
