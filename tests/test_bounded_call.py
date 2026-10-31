@@ -87,22 +87,32 @@ async def test_blocking_thread_sleep_terminated() -> None:
 @pytest.mark.asyncio
 async def test_subprocess_terminated() -> None:
     """A registered Popen ``sleep 60`` is killed within deadline + grace."""
-    from hive._deadline import bounded_call
+    from hive._deadline import bounded_call, popen_creation_kwargs
 
     registry: list[subprocess.Popen[bytes]] = []
+    spawned: list[subprocess.Popen[bytes]] = []
 
-    async def spawn_and_wait() -> None:
+    # Like _run_git, the owner spawns into its own session and registers
+    # and unregisters from its own thread. A coroutine-side finally would
+    # run on cancellation, before the terminator reads the registry, and
+    # nothing would be killed (#524).
+    def owner() -> None:
         proc = subprocess.Popen(  # noqa: S603
             ["sleep", "60"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            **popen_creation_kwargs(),
         )
         registry.append(proc)
+        spawned.append(proc)
         try:
-            await asyncio.to_thread(proc.wait)
+            proc.wait()
         finally:
             if proc in registry:
                 registry.remove(proc)
+
+    async def spawn_and_wait() -> None:
+        await asyncio.to_thread(owner)
 
     start = time.monotonic()
     with pytest.raises(TimeoutError):
@@ -114,11 +124,49 @@ async def test_subprocess_terminated() -> None:
     elapsed = time.monotonic() - start
 
     assert elapsed < 4.0
-    # After termination the registry should be either empty (inner ran
-    # to completion via terminate-induced exit) or contain a reaped Popen
-    # whose returncode is non-None.
-    for proc in registry:
-        assert proc.poll() is not None, "Popen still running after bounded_call"
+    # Check the process itself: the owner empties the registry once its
+    # wait() returns, so iterating the registry would prove nothing.
+    assert len(spawned) == 1
+    assert spawned[0].poll() is not None, "sleep 60 was never signalled"
+
+
+@_POSIX_ONLY
+@pytest.mark.asyncio
+async def test_terminator_never_signals_its_own_process_group() -> None:
+    """A registrant that shares our process group is signalled alone.
+
+    The terminator signals the child's whole process group. A child spawned
+    without ``start_new_session`` is in ours, so the group signal would take
+    down pytest, or the server, with it (#524).
+    """
+    from hive._deadline import bounded_call
+
+    registry: list[subprocess.Popen[bytes]] = []
+    spawned: list[subprocess.Popen[bytes]] = []
+
+    def owner() -> None:
+        proc = subprocess.Popen(  # noqa: S603
+            ["sleep", "60"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert os.getpgid(proc.pid) == os.getpgrp()
+        registry.append(proc)
+        spawned.append(proc)
+        try:
+            proc.wait()
+        finally:
+            if proc in registry:
+                registry.remove(proc)
+
+    async def spawn_and_wait() -> None:
+        await asyncio.to_thread(owner)
+
+    with pytest.raises(TimeoutError):
+        await bounded_call(spawn_and_wait, deadline_s=1.0, process_registry=registry)
+
+    assert len(spawned) == 1
+    assert spawned[0].poll() is not None, "sleep 60 was never signalled"
 
 
 # ── #517 — the terminator never shares a Popen with its owner ───────────
@@ -353,11 +401,13 @@ def test_ghost_responses_record_backcompat_no_source() -> None:
 @pytest.mark.asyncio
 async def test_windows_subprocess_terminated_reaches_descendants() -> None:
     """Windows: ``CREATE_NEW_PROCESS_GROUP`` lets ``terminate()`` reach git's children."""
-    from hive._deadline import bounded_call
+    from hive._deadline import bounded_call, popen_creation_kwargs
 
     registry: list[subprocess.Popen[bytes]] = []
+    spawned: list[subprocess.Popen[bytes]] = []
 
-    async def spawn_cmd_sleep() -> None:
+    # Spawns and registers like the owner in test_subprocess_terminated.
+    def owner() -> None:
         # ``ping -n 61`` delays ~60s WITHOUT reading the console: unlike
         # ``timeout``, it does not abort with "Input redirection is not
         # supported" when stdin is redirected (as under pytest/CI). cmd.exe is
@@ -367,16 +417,20 @@ async def test_windows_subprocess_terminated_reaches_descendants() -> None:
         # environments, so bounded_call never hit its deadline (#212).
         proc = subprocess.Popen(  # noqa: S603
             ["cmd", "/c", "ping", "-n", "61", "127.0.0.1"],
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            **popen_creation_kwargs(),
         )
         registry.append(proc)
+        spawned.append(proc)
         try:
-            await asyncio.to_thread(proc.wait)
+            proc.wait()
         finally:
             if proc in registry:
                 registry.remove(proc)
+
+    async def spawn_cmd_sleep() -> None:
+        await asyncio.to_thread(owner)
 
     start = time.monotonic()
     with pytest.raises(TimeoutError):
@@ -388,8 +442,8 @@ async def test_windows_subprocess_terminated_reaches_descendants() -> None:
     elapsed = time.monotonic() - start
 
     assert elapsed < 5.0  # Windows has slower IPC; give an extra second
-    for proc in registry:
-        assert proc.poll() is not None
+    assert len(spawned) == 1
+    assert spawned[0].poll() is not None, "cmd /c ping was never terminated"
 
 
 # ── T3.7b — concurrent bounded_call invocations (m2) ────────────────────

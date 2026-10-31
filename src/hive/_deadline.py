@@ -80,6 +80,24 @@ def popen_creation_kwargs() -> dict[str, Any]:
 # ── Termination primitives ──────────────────────────────────────────────
 
 
+def _signal_group(proc: subprocess.Popen[bytes], sig: int) -> None:
+    """POSIX: signal ``proc``'s process group, unless it is ours.
+
+    A child spawned without ``start_new_session`` shares our group, and
+    signalling that group would kill this process too (#524). Such a child
+    gets the signal alone.
+    """
+    pgid = os.getpgid(proc.pid)
+    if pgid == os.getpgrp():
+        _log.warning(
+            "pid=%s shares our process group; signalling it alone",
+            proc.pid,
+        )
+        os.kill(proc.pid, sig)
+        return
+    os.killpg(pgid, sig)
+
+
 def _send_terminate(proc: subprocess.Popen[bytes]) -> bool:
     """First-stage termination. Returns True if a signal was actually sent."""
     if proc.poll() is not None:
@@ -90,8 +108,7 @@ def _send_terminate(proc: subprocess.Popen[bytes]) -> bool:
             return True
         # POSIX: reach the process group if start_new_session was set
         try:
-            pgid = os.getpgid(proc.pid)
-            os.killpg(pgid, signal.SIGTERM)
+            _signal_group(proc, signal.SIGTERM)
         except ProcessLookupError:
             # Process already gone between poll() and getpgid()
             return False
@@ -111,11 +128,8 @@ def _send_kill(proc: subprocess.Popen[bytes]) -> None:
             # so descendant processes in the new group drop on retry.
             proc.terminate()
             return
-        try:
-            pgid = os.getpgid(proc.pid)
-            os.killpg(pgid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        with contextlib.suppress(ProcessLookupError):
+            _signal_group(proc, signal.SIGKILL)
     except OSError as exc:
         _log.debug("kill failed for pid=%s: %s", proc.pid, exc)
 
