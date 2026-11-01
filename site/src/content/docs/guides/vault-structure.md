@@ -133,4 +133,4 @@ Your vault directory must be a git repository. If it isn't, run `git init` in yo
 
 ### Deferring commits for batched writes
 
-For bulk operations (mass refactors, spec scaffolding, importing many lessons), passing `commit=False` to `vault_write` / `vault_patch` writes to disk but skips the per-call `git commit`. Flush the accumulated changes later with `vault_commit(message="...")`. This drops the per-call overhead from ~150ms to ~5–15ms; see [Configuration → Recommended configuration](/configuration/#recommended-configuration) for the pairing with the obsidian-git plugin and the durability contract.
+For bulk operations (mass refactors, spec scaffolding, importing many lessons), passing `commit=False` to `vault_write` / `vault_patch` writes to disk but skips the per-call `git commit`. Flush the accumulated changes later with `vault_commit(message="...")`. This drops the per-call overhead from ~150ms to ~5–15ms; see [Configuration → Recommended configuration](/hive/configuration/#recommended-configuration) for the pairing with the obsidian-git plugin and the durability contract.

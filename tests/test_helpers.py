@@ -793,12 +793,13 @@ class TestGitCommitNoVerify:
             _vault: Path,
             *,
             registry: object = None,  # noqa: ARG001
+            stdout_errors: str = "replace",  # noqa: ARG001
         ) -> tuple[int, str, str]:
             calls.append(["git", *args])
             # ``status`` must look dirty so ``_git_commit_all`` reaches commit;
             # ``rev-parse`` must yield a SHA for its return path.
             if args[:2] == ["status", "--porcelain"]:
-                return 0, " M a.md\n", ""
+                return 0, " M a.md\0", ""
             if args[:1] == ["rev-parse"]:
                 return 0, "0" * 40, ""
             return 0, "", ""
@@ -862,7 +863,9 @@ class TestGitCommitNoVerify:
         _git_commit_all(tmp_path, "batch update")
 
         [commit] = [c for c in calls if c[:2] == ["git", "commit"]]
-        assert commit == ["git", "commit", "--no-verify", "-m", "batch update"]
+        assert commit[:6] == ["git", "commit", "--no-verify", "-m", "batch update", "--only"]
+        assert commit[6].startswith("--pathspec-from-file=")
+        assert commit[7:] == ["--pathspec-file-nul"]
 
     def test_git_commit_all_omits_no_verify_when_disabled(
         self,
@@ -877,5 +880,6 @@ class TestGitCommitNoVerify:
         _git_commit_all(tmp_path, "batch update")
 
         [commit] = [c for c in calls if c[:2] == ["git", "commit"]]
-        assert commit == ["git", "commit", "-m", "batch update"]
+        assert commit[:5] == ["git", "commit", "-m", "batch update", "--only"]
+        assert commit[5].startswith("--pathspec-from-file=")
         assert "--no-verify" not in commit

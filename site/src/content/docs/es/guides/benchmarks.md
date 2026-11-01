@@ -73,7 +73,7 @@ Coste wall-clock de escrituras al vault con y sin el coalescer de commits y la o
 | 10 llamadas `vault_patch` secuenciales, una edición cada una | 72.3 ms | 7.2 ms | 1.0x |
 | 1 llamada `vault_patch` con 10 patches (coalescer) | 7.0 ms | 0.7 ms | **10.4x** |
 
-La ganancia 10.4x del multi-patch llega de forma automática — no requiere cambio de API; pasar `patches=[{...}, {...}]` ya emite exactamente un `git add` y un `git commit` desde HIVE-104. La ganancia 4.8x del batching opt-in requiere pasar `commit=False` y llamar a `vault_commit` al final; combínalo con el plugin obsidian-git para sacar el flush completamente de la ruta sincrónica de la herramienta (ver [Configuración → Configuración recomendada](/es/configuration/#configuración-recomendada)).
+La ganancia 10.4x del multi-patch llega de forma automática — no requiere cambio de API; pasar `patches=[{...}, {...}]` ya emite exactamente un `git add` y un `git commit` desde HIVE-104. La ganancia 4.8x del batching opt-in requiere pasar `commit=False` y llamar a `vault_commit` al final; combínalo con el plugin obsidian-git para sacar el flush completamente de la ruta sincrónica de la herramienta (ver [Configuración → Configuración recomendada](/hive/es/configuration/#configuración-recomendada)).
 
 > En un vault bajo contención (varios procesos Hive, `.git/index` grande, disco lento), el coste base por llamada puede subir a ~150 ms; las mismas ratios de speed-up siguen aplicándose.
 

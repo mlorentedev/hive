@@ -133,4 +133,4 @@ Tu directorio del vault debe ser un repositorio git. Si no lo es, ejecuta `git i
 
 ### Diferir commits para escrituras en lote
 
-Para operaciones masivas (refactors grandes, scaffolding de specs, importación de muchas lecciones), pasar `commit=False` a `vault_write` / `vault_patch` escribe a disco pero omite el `git commit` por llamada. Haz flush de los cambios acumulados más tarde con `vault_commit(message="...")`. Esto reduce el coste por llamada de ~150ms a ~5–15ms; ver [Configuración → Configuración recomendada](/es/configuration/#configuración-recomendada) para el pairing con el plugin obsidian-git y el contrato de durabilidad.
+Para operaciones masivas (refactors grandes, scaffolding de specs, importación de muchas lecciones), pasar `commit=False` a `vault_write` / `vault_patch` escribe a disco pero omite el `git commit` por llamada. Haz flush de los cambios acumulados más tarde con `vault_commit(message="...")`. Esto reduce el coste por llamada de ~150ms a ~5–15ms; ver [Configuración → Configuración recomendada](/hive/es/configuration/#configuración-recomendada) para el pairing con el plugin obsidian-git y el contrato de durabilidad.

@@ -1134,6 +1134,11 @@ async def test_vault_commit_still_sweeps_foreign_working_tree_edits(
     startup refusing to self-heal, this sweep and the next write to the vault
     are all an orphaned path has.
 
+    The one narrowing that did land is by *state*, not by owner: a path that
+    is already staged is left out and named (#510, ADR-018 amendment
+    2026-10-22). Both edits here are unstaged, so this test still pins the
+    sweep.
+
     Both shapes of foreign edit are asserted, mirroring AC7's reasoning: a
     narrowing to "paths hive knows about" could still sweep an untracked file
     while silently dropping a modification to a tracked one.
