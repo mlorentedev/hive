@@ -6,12 +6,13 @@
     "dev": "astro dev",
     "start": "astro dev",
     "build": "astro build",
+    "check:links": "node scripts/check-links.mjs",
     "preview": "astro preview",
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.42.6",
-    "astro": "^7.4.0",
+    "@astrojs/starlight": "^0.42.7",
+    "astro": "^7.4.3",
     "sharp": "^0.35.5"
   }
 }

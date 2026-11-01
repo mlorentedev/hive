@@ -373,7 +373,7 @@ vault_write timed out after 60s — partial state: disk write succeeded, git com
    ```
    The file should appear as modified or staged; nothing committed.
 4. **Recover the commit** either by:
-   - Calling `vault_commit` (Hive flushes whatever is dirty), or
+   - Calling `vault_commit` (Hive flushes whatever is modified but not staged; a staged path is left out and named, so commit that one with `git -C "$VAULT_PATH" commit -- <path>`), or
    - Letting obsidian-git pick it up on its next tick (if installed), or
    - Manually `git -C "$VAULT_PATH" add . && git commit -m "vault: rescue partial state"`.
 

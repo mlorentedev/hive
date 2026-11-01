@@ -1,0 +1,37 @@
+[
+  {
+    "id": "HIVE-540-service-exec-prefix-f1",
+    "behavior": "AC1: systemd, launchd and both Windows launchers run the prefix, then hive, then serve, each element its own argument",
+    "verification": "uv run pytest tests/test_service.py -q -k 'systemd_command_line or supervisor_loop_runs_the_prefix or carry_the_same_prefixed_loop or runs_it_in_the_unit or inside_the_env_wrapper'",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-540-service-exec-prefix-f2",
+    "behavior": "AC2: the prefix is recorded owner-only, kept by a reinstall without the flag, and cleared by --no-exec-prefix",
+    "verification": "uv run pytest tests/test_service.py -q -k 'runs_it_in_the_unit or keeps_the_recorded_prefix or restores_the_plain_unit or moved_is_found_again or cli_exec_prefix_takes'",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-540-service-exec-prefix-f3",
+    "behavior": "AC3: an unresolvable launcher, a malformed record, or (Windows) an unquotable element is refused and nothing is written",
+    "verification": "uv run pytest tests/test_service.py -q -k 'cannot_be_found or cannot_quote or malformed_record or misuse_is_refused'",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-540-service-exec-prefix-f4",
+    "behavior": "AC4: with no prefix every renderer's output is unchanged",
+    "verification": "uv run pytest tests/test_service.py -q -k 'every_definition_is_unchanged or render_'",
+    "state": "pending",
+    "evidence": ""
+  },
+  {
+    "id": "HIVE-540-service-exec-prefix-f5",
+    "behavior": "AC5: hive service status names the recorded prefix or says none is recorded",
+    "verification": "uv run pytest tests/test_service.py -q -k 'status_names_the_recorded_prefix'",
+    "state": "pending",
+    "evidence": ""
+  }
+]

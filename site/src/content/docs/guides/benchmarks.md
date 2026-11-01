@@ -73,7 +73,7 @@ Wall-clock cost of vault writes with and without the commit coalescer and the `c
 | 10 sequential `vault_patch` calls, one edit each | 72.3 ms | 7.2 ms | 1.0x |
 | 1 `vault_patch` call with 10 patches (coalescer) | 7.0 ms | 0.7 ms | **10.4x** |
 
-The 10.4x multi-patch result lands automatically — no API change is required; passing `patches=[{...}, {...}]` already issues exactly one `git add` and one `git commit` since HIVE-104. The 4.8x opt-in batching requires passing `commit=False` and calling `vault_commit` at the end; pair it with the obsidian-git plugin to push the flush off the synchronous tool path entirely (see [Configuration → Recommended configuration](/configuration/#recommended-configuration)).
+The 10.4x multi-patch result lands automatically — no API change is required; passing `patches=[{...}, {...}]` already issues exactly one `git add` and one `git commit` since HIVE-104. The 4.8x opt-in batching requires passing `commit=False` and calling `vault_commit` at the end; pair it with the obsidian-git plugin to push the flush off the synchronous tool path entirely (see [Configuration → Recommended configuration](/hive/configuration/#recommended-configuration)).
 
 > On a vault under contention (multiple Hive processes, large `.git/index`, slow disk), the baseline per-call cost can climb to ~150 ms; the same speed-up ratios still apply.
 

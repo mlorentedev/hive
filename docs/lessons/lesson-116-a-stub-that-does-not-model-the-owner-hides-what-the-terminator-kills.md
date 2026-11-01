@@ -1,5 +1,5 @@
 ---
-id: lesson-114-a-stub-that-does-not-model-the-owner-hides-what-the-terminator-kills
+id: lesson-116-a-stub-that-does-not-model-the-owner-hides-what-the-terminator-kills
 type: lesson
 status: active
 created: "2026-10-30"
