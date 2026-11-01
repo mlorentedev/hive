@@ -39,7 +39,7 @@ The package layout follows a deliberate split: `server.py` is a thin registratio
 
 ### MCP major and the cancel race
 
-hive runs on **mcp 2.x / fastmcp 4.x on purpose** (#434): `pyproject.toml` has `mcp>=2.2,<3` and `fastmcp>=4,<5`, and `uv.lock` resolves mcp 2.2.0 / fastmcp 4.0.9.
+hive runs on **mcp 2.x / fastmcp 4.x on purpose** (#434): `pyproject.toml` has `mcp>=2.2,<3` and `fastmcp>=4,<5`. Those bounds are the contract; the exact versions in use are whatever `uv.lock` resolves, so they are not restated here.
 
 - **Why the 1.x shim is gone.** On mcp 1.x, a response produced after its request was cancelled tripped `assert not self._completed` in `RequestResponder.respond`; the assertion reached the stdio receive loop's task group and killed the server, and every later call got `Connection closed` ([python-sdk#2416](https://github.com/modelcontextprotocol/python-sdk/issues/2416), still open for 1.x). hive monkey-patched that private method in `src/hive/_compat.py`. The 2.x dispatcher never answers a cancelled request, and the #2416 repro crashes 3/3 on 1.x and 0/3 on 2.x, so the patch was deleted rather than retargeted. The floors keep 1.x out, because nothing patches it any more.
 - **What guards it now.** `tests/test_cancel_race.py` drives hive's own server with an uncancellable sync tool and fails if a cancelled call is answered twice or the server stops answering; it fails on 1.x without the patch. `tests/test_dependency_bounds.py` fails if either bound leaves its audited major, and if the suite runs on a version outside it. Dependabot's `semver-major` ignore rule is **not** a guard: it does not stop requirement-range widening, which got through twice (#316, #369).
