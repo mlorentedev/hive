@@ -746,12 +746,35 @@ def _run_service(argv: list[str]) -> int:
 
     parser = argparse.ArgumentParser(prog="hive service")
     sub = parser.add_subparsers(dest="action", required=True)
-    install = sub.add_parser("install", help="install + enable the service")
+    # No abbreviations: `--exec` would reach the help-only option below and
+    # drop its value, installing without the prefix and without saying so.
+    install = sub.add_parser("install", help="install + enable the service", allow_abbrev=False)
     install.add_argument(
         "--no-enable",
         action="store_true",
         help="write the unit/task only; do not start it",
     )
+    # Never parsed by argparse: the prefix usually ends in its own `--`, so
+    # everything after `--exec-prefix --` is taken verbatim below. Declared
+    # here so that `--help` documents it.
+    install.add_argument(
+        "--exec-prefix",
+        metavar="-- ARGV",
+        help="start the daemon as `ARGV... hive serve` on every supervisor, and "
+        "keep that for later installs; ARGV must pass hive's exit code back",
+    )
+    install.add_argument(
+        "--no-exec-prefix",
+        action="store_true",
+        help="forget the recorded exec prefix",
+    )
+    exec_prefix: list[str] | None = None
+    if argv[:1] == ["install"] and "--exec-prefix" in argv:
+        at = argv.index("--exec-prefix")
+        exec_prefix = argv[at + 2 :]
+        if argv[at + 1 : at + 2] != ["--"] or not exec_prefix:
+            install.error("--exec-prefix takes `--` and then the launcher's argv")
+        argv = argv[:at]
     sub.add_parser("uninstall", help="stop + remove the service")
     sub.add_parser("status", help="show the supervisor's view of the daemon")
     sub.add_parser(
@@ -764,7 +787,16 @@ def _run_service(argv: list[str]) -> int:
 
         return rotate_identity()
     if opts.action == "install":
-        return install_service(enable=not opts.no_enable)
+        # Only `--exec-prefix=VALUE` reaches argparse; the prefix needs `--`.
+        if opts.exec_prefix is not None:
+            install.error("--exec-prefix takes `--` and then the launcher's argv")
+        if exec_prefix is not None and opts.no_exec_prefix:
+            install.error("--exec-prefix and --no-exec-prefix cannot be combined")
+        return install_service(
+            enable=not opts.no_enable,
+            exec_prefix=exec_prefix,
+            clear_exec_prefix=opts.no_exec_prefix,
+        )
     if opts.action == "uninstall":
         return uninstall_service()
     return service_status()
