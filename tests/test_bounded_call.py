@@ -168,17 +168,25 @@ def test_terminator_never_signals_its_own_process_group() -> None:
     without ``start_new_session`` is in ours, so the group signal would take
     down pytest, or the server, with it (#524).
     """
-    result = subprocess.run(  # noqa: S603
+    import signal
+
+    with subprocess.Popen(  # noqa: S603
         [sys.executable, "-c", _OWN_GROUP_SCENARIO],
         start_new_session=True,
-        capture_output=True,
-        timeout=30,
-        check=False,
-    )
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as child:
+        try:
+            _, stderr = child.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            # The child leads its own group, which holds the sleep it left
+            # running; subprocess.run would kill the child alone.
+            os.killpg(child.pid, signal.SIGKILL)
+            raise
 
-    assert result.returncode != -15, "the terminator signalled its own group"
-    assert result.returncode != 3, "sleep 60 was never signalled"
-    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    assert child.returncode != -15, "the terminator signalled its own group"
+    assert child.returncode != 3, "sleep 60 was never signalled"
+    assert child.returncode == 0, stderr.decode(errors="replace")
 
 
 @_POSIX_ONLY
@@ -202,6 +210,31 @@ def test_signal_group_skips_killpg_on_our_own_group(
     _deadline._signal_group(_Proc(), signal.SIGTERM)  # type: ignore[arg-type]
 
     assert calls == [("kill", 424242, signal.SIGTERM)]
+
+
+@_POSIX_ONLY
+def test_send_kill_on_our_own_group_signals_the_pid_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The SIGKILL stage goes through the same guard as SIGTERM."""
+    import signal
+
+    from hive import _deadline
+
+    calls: list[tuple[str, int, int]] = []
+    monkeypatch.setattr(_deadline.os, "getpgid", lambda _pid: os.getpgrp())
+    monkeypatch.setattr(_deadline.os, "killpg", lambda pg, sig: calls.append(("killpg", pg, sig)))
+    monkeypatch.setattr(_deadline.os, "kill", lambda pid, sig: calls.append(("kill", pid, sig)))
+
+    class _Proc:
+        pid = 424242
+
+        def poll(self) -> None:
+            return None
+
+    _deadline._send_kill(_Proc())  # type: ignore[arg-type]
+
+    assert calls == [("kill", 424242, signal.SIGKILL)]
 
 
 # ── #517 — the terminator never shares a Popen with its owner ───────────
