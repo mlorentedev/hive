@@ -458,6 +458,28 @@ def test_vault_commit_flush_names_a_renamed_dirty_submodule(
     assert "sub2" in left_out, "the staged rename itself still belongs to whoever staged it"
 
 
+def test_vault_commit_flush_does_not_call_a_tree_clean_when_the_submodule_probe_fails(
+    git_vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The sweep's status hides a dirty submodule; with the probe down, "clean"
+    # would be a claim nothing checked.
+    from hive import _helpers
+
+    real_run_git = _helpers._run_git
+
+    def failing_probe(args: list[str], vault: Path, **kw: object) -> tuple[int, str, str]:
+        if "--porcelain=v2" in args:
+            return 128, "", "fatal: probe failed"
+        return real_run_git(args, vault, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(_helpers, "_run_git", failing_probe)
+
+    status, detail, _, _ = _helpers._git_commit_all(git_vault, "vault: flush")
+
+    assert status == "error"
+    assert "submodule" in detail and "probe failed" in detail, detail
+
+
 def test_vault_commit_flush_records_a_submodule_new_commit(
     git_vault: Path, tmp_path_factory: pytest.TempPathFactory
 ) -> None:

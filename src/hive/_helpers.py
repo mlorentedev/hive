@@ -2200,15 +2200,21 @@ def _git_commit_all(
                     return "error", f"git status rc={rc}: {err}", [], []
                 paths, left_out = _unstaged_paths(porcelain_out)
                 # `--untracked-files=no` would also hide a submodule's untracked files.
-                rc, v2_out, _ = _run_git(
+                rc, v2_out, v2_err = _run_git(
                     ["status", "--porcelain=v2", "-z", "--untracked-files=normal"],
                     vault_path,
                     stdout_errors="surrogateescape",
                 )
-                # Naming them is a courtesy; a failed probe must not fail the commit.
                 dirty = _dirty_submodules(v2_out) if rc == 0 else []
                 if not paths:
+                    if rc != 0:
+                        # The sweep's status hides dirty submodules, so "clean"
+                        # here would be a claim nothing checked.
+                        err = v2_err.strip() or "<empty>"
+                        detail = f"submodule state not checked: git status rc={rc}: {err}"
+                        return "error", detail, left_out, []
                     return "clean", "", left_out, dirty
+                # With files to commit, a failed probe costs only the naming.
                 with _pathspec_file(paths) as from_file:
                     rc, _, err = _run_git(["add", *from_file], vault_path)
                     if rc != 0:

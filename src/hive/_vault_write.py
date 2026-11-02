@@ -127,7 +127,8 @@ def _dirty_submodule_note(dirty: list[str]) -> str:
     named = ", ".join(shlex.quote(p) for p in dirty)
     return (
         f" {len(dirty)} submodule(s) with uncommitted content left out: {named}. "
-        "Commit inside the submodule; vault_commit then records its new commit."
+        "Commit inside the submodule; vault_commit then records its new commit, "
+        "unless the submodule path itself is staged."
     )
 
 
