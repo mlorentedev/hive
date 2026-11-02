@@ -44,15 +44,17 @@ class HiveSettings(BaseSettings):
     # discovered the leak. Tracked as #397; `repr=False` closes the leak now.
     worker_api_key: str = Field(default="", repr=False)
     vault_scopes: dict[str, str] = Field(
-        # ``agents`` is intentionally LAST: auto-scan (plain project name)
-        # resolves first-match over insertion order, so appending keeps an
-        # 80_agents/ dir from shadowing an existing projects/work project.
+        # Scopes added later are appended, never inserted: auto-scan (plain
+        # project name) resolves first-match over insertion order, so appending
+        # keeps an 80_agents/ or 05_research/ dir from shadowing an existing
+        # projects/work project. ``research`` holds external teardowns (#491).
         # Override the whole mapping via HIVE_VAULT_SCOPES (JSON).
         default={
             "projects": "10_projects",
             "meta": "00_meta",
             "work": "50_work",
             "agents": "80_agents",
+            "research": "05_research",
         },
     )
     # HIVE-211: optional semantic backend for vault_ask. Empty base_url =

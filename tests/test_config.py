@@ -140,16 +140,19 @@ class TestVaultScopes:
             "meta": "00_meta",
             "work": "50_work",
             "agents": "80_agents",
+            "research": "05_research",
         }
 
-    def test_agents_scope_appended_last(self) -> None:
-        """agents must be the LAST key so auto-scan (first-match) cannot let
-        an agent dir shadow an existing projects/work project name."""
+    def test_added_scopes_are_appended_after_the_original_three(self) -> None:
+        """agents and research come after projects/meta/work, in the order they
+        were added, so auto-scan (first-match) cannot let a newer scope's dir
+        shadow an existing project name (#154, #491)."""
         assert list(HiveSettings().vault_scopes) == [
             "projects",
             "meta",
             "work",
             "agents",
+            "research",
         ]
 
     def test_scopes_env_can_add_agents(self, monkeypatch: pytest.MonkeyPatch) -> None:
