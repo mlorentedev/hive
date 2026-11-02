@@ -28,7 +28,7 @@ from hive._helpers import (
     vault_write_lock,
     wrap_sync_tool,
 )
-from hive.frontmatter import validate_frontmatter
+from hive.frontmatter import parse_frontmatter, validate_frontmatter
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,6 +38,45 @@ if TYPE_CHECKING:
     from hive._context import ServerContext
 
 _WRITE_OPERATIONS = frozenset({"append", "replace", "create"})
+
+
+def _doubled_project_path(project_dir: Path, vault: Path, path: str) -> str:
+    """The project-relative remainder when *path* repeats the project's vault path.
+
+    ``path`` is joined onto the project directory, so a caller that passes the
+    vault-rooted form (``10_projects/<project>/sessions/x.md``) gets
+    ``10_projects/<project>/10_projects/<project>/sessions/x.md``, inside the
+    vault and reported as created (#383). That prefix is never a legitimate
+    request, so it is refused, naming the path the caller meant. Returns "" when
+    the path does not repeat the prefix.
+    """
+    try:
+        prefix = project_dir.relative_to(vault).as_posix() + "/"
+    except ValueError:
+        return ""
+    normalized = path.replace("\\", "/").lstrip("/")
+    return normalized[len(prefix) :] if normalized.startswith(prefix) else ""
+
+
+def _create_frontmatter(path: Path, content: str, doc_type: str) -> tuple[str, str]:
+    """The frontmatter to prepend on create, or a refusal: ``(prefix, error)``.
+
+    Content that opens with its own frontmatter keeps it as the only block: the
+    vault reads the first block, so a synthesised one on top would register an
+    authored ``type: session`` as ``type: note`` (#383). An explicit
+    ``doc_type`` that contradicts the authored ``type`` is refused rather than
+    resolved silently either way.
+    """
+    authored = parse_frontmatter(content)
+    if authored is None:
+        return _make_frontmatter(path.stem, doc_type or "note"), ""
+    if doc_type and doc_type != authored.type:
+        return "", (
+            f"Content already has frontmatter with type: {authored.type or '(none)'}, "
+            f"which contradicts doc_type='{doc_type}'. Drop doc_type or make them agree."
+        )
+    return "", ""
+
 
 _AUTO_DEFER_ENV = "HIVE_AUTO_DEFER_TO_EXTERNAL_COMMITTER"
 
@@ -259,20 +298,25 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
         Modes:
         - append/replace: Update a project section. Requires section.
-        - create: Create a new file with auto-generated frontmatter. Requires
-          path; doc_type defaults to "note". Inferred automatically when you
-          pass a path with no section, so operation may be omitted.
+        - create: Create a new file. Requires path, relative to the project
+          directory. Frontmatter is generated (doc_type defaults to "note")
+          unless content opens with its own block, which is kept as is.
+          Inferred automatically when you pass a path with no section, so
+          operation may be omitted.
 
         Args:
             project: Project slug or '_meta' for cross-project content.
-            content: Markdown content to write (body only for create mode).
+            content: Markdown content to write. In create mode, either a body
+                (frontmatter is generated) or a full document with frontmatter.
             operation: 'append', 'replace', or 'create'. Default 'append'.
                 'create' is inferred when path is set and section is empty.
             section: Section shortcut (context, tasks, roadmap, lessons). For append/replace.
-            path: Relative path for the file. Setting this with no section
-                creates the file (create mode).
-            doc_type: Document type for frontmatter (create mode). Optional;
-                defaults to "note".
+            path: File path relative to the project directory (e.g.
+                'sessions/x.md', not '10_projects/<project>/sessions/x.md').
+                Setting this with no section creates the file (create mode).
+            doc_type: Document type for generated frontmatter (create mode).
+                Optional; defaults to "note". Refused if it contradicts the
+                type in content's own frontmatter.
             commit: If True, commit synchronously before returning — the
                 escape hatch for a caller that needs the commit to exist by
                 the time the call ends. Defaults to False, which queues the
@@ -322,14 +366,26 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                     "Path is required for create operation.",
                     project,
                 )
-            doc_type = doc_type or "note"  # #202 Bug 2: doc_type optional, default note
+            meant = _doubled_project_path(project_dir, ctx.vault, path)
+            if meant:
+                return track(
+                    ctx,
+                    "vault_write",
+                    f"path is relative to the project directory, not the vault root: "
+                    f"'{path}' would be written under the project twice. "
+                    f"Pass path='{meant}'.",
+                    project,
+                )
 
             filepath = project_dir / path
             boundary_error = _check_path_boundary(filepath, ctx.vault)
             if boundary_error:
                 return track(ctx, "vault_write", boundary_error, project)
 
-            frontmatter = _make_frontmatter(filepath.stem, doc_type)
+            # #202 Bug 2: doc_type is optional and defaults to note.
+            frontmatter, fm_error = _create_frontmatter(filepath, content, doc_type)
+            if fm_error:
+                return track(ctx, "vault_write", fm_error, project)
 
             try:
                 with vault_write_lock(ctx.vault):
