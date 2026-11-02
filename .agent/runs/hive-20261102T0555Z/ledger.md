@@ -3,7 +3,7 @@
 | item | state | branch | PR | evidence |
 |---|---|---|---|---|
 | 468 | pr-open (draft) | fix/issue-468-health-sections | #552 | make check rc=0, 1197 passed |
-| 466 | queued | | | |
+| 466 | pr-open (draft), parts 1-2; part 3 = #467 | fix/issue-466-health-readings | #553 | make check rc=0, 1205 passed |
 | 491 | queued | | | |
 | 383 | queued | | | |
 | 288 | queued | | | |
