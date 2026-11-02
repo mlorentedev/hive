@@ -23,6 +23,7 @@ from hive._helpers import (
     detect_obsidian_git,
     project_not_found,
     scan_project,
+    section_file,
     stale_reference_date,
     track,
     wrap_sync_tool,
@@ -272,9 +273,7 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
                 frontmatters,
                 stale_threshold,
             )
-            missing = [
-                s for s, fname in SECTION_SHORTCUTS.items() if not (project_dir / fname).exists()
-            ]
+            missing = [s for s in SECTION_SHORTCUTS if not section_file(project_dir, s).exists()]
 
             lines.append(f"## {scope_name}/{project_dir.name}")
             lines.append(f"- Files: {len(md_files)}")

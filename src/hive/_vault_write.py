@@ -24,6 +24,7 @@ from hive._helpers import (
     mark_disk_write_done,
     project_not_found,
     schedule_async_hook,
+    section_file,
     track,
     vault_write_lock,
     wrap_sync_tool,
@@ -400,8 +401,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 project,
             )
 
-        filename = SECTION_SHORTCUTS.get(section)
-        if filename is None:
+        if section not in SECTION_SHORTCUTS:
             available = ", ".join(SECTION_SHORTCUTS)
             return track(
                 ctx,
@@ -410,7 +410,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 project,
             )
 
-        filepath = project_dir / filename
+        filepath = section_file(project_dir, section)
 
         if operation == "replace":
             error = validate_frontmatter(content)

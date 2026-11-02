@@ -26,6 +26,7 @@ from hive._helpers import (
     format_io_error,
     project_not_found,
     scan_project,
+    section_file,
     track,
     wrap_sync_tool,
 )
@@ -144,9 +145,7 @@ def list_projects_text(ctx: ServerContext) -> str:
             continue
         for project_dir in projects:
             found_any = True
-            sections = [
-                s for s, filename in SECTION_SHORTCUTS.items() if (project_dir / filename).exists()
-            ]
+            sections = [s for s in SECTION_SHORTCUTS if section_file(project_dir, s).exists()]
             try:
                 md_count = len(list(project_dir.rglob("*.md")))
             except OSError:
