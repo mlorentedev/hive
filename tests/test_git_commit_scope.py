@@ -128,7 +128,7 @@ def test_vault_commit_flush_leaves_a_staged_then_edited_path_out(git_vault: Path
     (git_vault / "theirs.md").write_text("staged, then edited\n", encoding="utf-8")
     (git_vault / "dropped-in-by-hand.md").write_text("x\n", encoding="utf-8")
 
-    status, _, left_out = _git_commit_all(git_vault, "vault: flush")
+    status, _, left_out, _ = _git_commit_all(git_vault, "vault: flush")
 
     assert status == "committed"
     assert _committed(git_vault) == {"dropped-in-by-hand.md"}
@@ -146,7 +146,7 @@ def test_vault_commit_flush_commits_an_unstaged_deletion(git_vault: Path) -> Non
     _git(git_vault, "add", "theirs.md")
     (git_vault / "gone.md").unlink()
 
-    status, _, left_out = _git_commit_all(git_vault, "vault: flush")
+    status, _, left_out, _ = _git_commit_all(git_vault, "vault: flush")
 
     assert status == "committed"
     assert _committed(git_vault) == {"gone.md"}
@@ -186,7 +186,7 @@ def test_vault_commit_flush_reads_a_worktree_rename_as_two_paths(git_vault: Path
     (git_vault / "old.md").rename(git_vault / "new.md")
     _git(git_vault, "add", "-N", "new.md")
 
-    status, _, left_out = _git_commit_all(git_vault, "vault: flush")
+    status, _, left_out, _ = _git_commit_all(git_vault, "vault: flush")
 
     assert status == "committed"
     assert left_out == []
@@ -205,7 +205,7 @@ def test_vault_commit_flush_names_both_halves_of_a_staged_rename(git_vault: Path
     _git(git_vault, "mv", "old.md", "new.md")
     (git_vault / "dropped-in-by-hand.md").write_text("x\n", encoding="utf-8")
 
-    status, _, left_out = _git_commit_all(git_vault, "vault: flush")
+    status, _, left_out, _ = _git_commit_all(git_vault, "vault: flush")
 
     assert status == "committed"
     assert sorted(left_out) == ["new.md", "old.md"]
@@ -229,7 +229,7 @@ def test_vault_commit_flush_works_when_the_vault_is_a_repo_subdirectory(tmp_path
     vault.mkdir()
     (vault / "note.md").write_text("x\n", encoding="utf-8")
 
-    status, detail, _ = _git_commit_all(vault, "vault: flush")
+    status, detail, _, _ = _git_commit_all(vault, "vault: flush")
 
     assert status == "committed", detail
     # Only note.md is asserted: in such a vault hive's own lock lands in the
@@ -259,7 +259,7 @@ def test_vault_commit_flush_keeps_paths_off_the_command_line(
 
     monkeypatch.setattr("hive._helpers._run_git", fake_run_git)
 
-    status, _, _ = _git_commit_all(tmp_path, "vault: flush")
+    status, _, _, _ = _git_commit_all(tmp_path, "vault: flush")
 
     assert status == "committed"
     assert max(len(" ".join(a)) for a in argvs) < 1000
@@ -275,7 +275,7 @@ def test_vault_commit_flush_with_many_paths_commits_them_all(git_vault: Path) ->
     for name in names:
         (git_vault / name).write_text("x\n", encoding="utf-8")
 
-    status, detail, left_out = _git_commit_all(git_vault, "vault: flush")
+    status, detail, left_out, _ = _git_commit_all(git_vault, "vault: flush")
 
     assert status == "committed", detail
     assert _committed(git_vault) == names
@@ -295,7 +295,7 @@ def test_vault_commit_flush_commits_a_non_utf8_file_name(git_vault: Path) -> Non
     with open(os.fsencode(git_vault) + b"/" + name, "wb") as fh:
         fh.write(b"x\n")
 
-    status, detail, _ = _git_commit_all(git_vault, "vault: flush")
+    status, detail, _, _ = _git_commit_all(git_vault, "vault: flush")
 
     assert status == "committed", detail
     out = subprocess.run(
@@ -335,7 +335,7 @@ async def test_vault_commit_failure_still_names_left_out_paths(
     monkeypatch.setattr(
         _vault_write,
         "_git_commit_all",
-        lambda _vault, _msg: ("error", "git commit rc=1: boom", ["theirs.md"]),
+        lambda _vault, _msg: ("error", "git commit rc=1: boom", ["theirs.md"], []),
     )
     mcp = create_server(vault_path=git_vault)
     ctx = mcp._hive_ctx  # type: ignore[attr-defined]
@@ -362,7 +362,7 @@ def test_vault_commit_flush_leaves_a_new_file_at_a_staged_rename_source_out(
     (git_vault / "old.md").write_text("replacement\n", encoding="utf-8")
     (git_vault / "dropped-in-by-hand.md").write_text("x\n", encoding="utf-8")
 
-    status, _, left_out = _git_commit_all(git_vault, "vault: flush")
+    status, _, left_out, _ = _git_commit_all(git_vault, "vault: flush")
 
     assert status == "committed"
     assert sorted(left_out) == ["new.md", "old.md"]
@@ -384,11 +384,102 @@ def test_vault_commit_flush_keeps_left_out_paths_on_an_unexpected_error(
 
     monkeypatch.setattr(_helpers, "_pathspec_file", broken_pathspec_file)
 
-    status, detail, left_out = _helpers._git_commit_all(git_vault, "vault: flush")
+    status, detail, left_out, _ = _helpers._git_commit_all(git_vault, "vault: flush")
 
     assert status == "error"
     assert "boom" in detail
     assert left_out == ["theirs.md"]
+
+
+def _with_submodule(vault: Path, upstream: Path) -> Path:
+    """Add a one-file submodule ``sub`` to ``vault``, committed, and return its path."""
+    upstream.mkdir()
+    _git(upstream, "init", "-q")
+    _git(upstream, "config", "user.email", "test@test.com")
+    _git(upstream, "config", "user.name", "Test")
+    (upstream / "a.md").write_text("a\n", encoding="utf-8")
+    _git(upstream, "add", "a.md")
+    _git(upstream, "commit", "-q", "-m", "a")
+    # git >= 2.38.1 refuses a local-path submodule unless the file protocol is allowed.
+    _git(vault, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(upstream), "sub")
+    _git(vault, "commit", "-q", "-m", "add sub")
+    return vault / "sub"
+
+
+def test_vault_commit_flush_names_a_submodule_with_only_uncommitted_content(
+    git_vault: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    # Porcelain v1 shows a dirty submodule as ` M`, but `git add` stages nothing
+    # for it, so `git commit --only sub` failed with an empty stderr (#543).
+    from hive._helpers import _git_commit_all
+
+    sub = _with_submodule(git_vault, tmp_path_factory.mktemp("upstream") / "repo")
+    (sub / "a.md").write_text("edited inside the submodule\n", encoding="utf-8")
+    head_before = _git(git_vault, "rev-parse", "HEAD")
+
+    status, detail, left_out, dirty_submodules = _git_commit_all(git_vault, "vault: flush")
+
+    assert status == "clean", detail
+    assert left_out == []
+    assert dirty_submodules == ["sub"]
+    assert _git(git_vault, "rev-parse", "HEAD") == head_before
+
+
+def test_vault_commit_flush_commits_around_a_dirty_submodule_and_names_it(
+    git_vault: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    from hive._helpers import _git_commit_all
+
+    sub = _with_submodule(git_vault, tmp_path_factory.mktemp("upstream") / "repo")
+    (sub / "untracked.md").write_text("x\n", encoding="utf-8")
+    (git_vault / "mine.md").write_text("x\n", encoding="utf-8")
+
+    status, detail, _, dirty_submodules = _git_commit_all(git_vault, "vault: flush")
+
+    assert status == "committed", detail
+    assert _committed(git_vault) == {"mine.md"}
+    assert dirty_submodules == ["sub"]
+
+
+def test_vault_commit_flush_records_a_submodule_new_commit(
+    git_vault: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    # A new commit inside the submodule moves its gitlink, which the parent can
+    # commit; only uncommitted content inside it is out of reach.
+    from hive._helpers import _git_commit_all
+
+    sub = _with_submodule(git_vault, tmp_path_factory.mktemp("upstream") / "repo")
+    _git(sub, "config", "user.email", "test@test.com")
+    _git(sub, "config", "user.name", "Test")
+    (sub / "b.md").write_text("b\n", encoding="utf-8")
+    _git(sub, "add", "b.md")
+    _git(sub, "commit", "-q", "-m", "b")
+
+    status, detail, _, dirty_submodules = _git_commit_all(git_vault, "vault: flush")
+
+    assert status == "committed", detail
+    assert _committed(git_vault) == {"sub"}
+    assert dirty_submodules == []
+
+
+@pytest.mark.asyncio
+async def test_vault_commit_names_a_dirty_submodule_instead_of_failing(
+    git_vault: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    from hive.server import create_server
+
+    sub = _with_submodule(git_vault, tmp_path_factory.mktemp("upstream") / "repo")
+    (sub / "a.md").write_text("edited inside the submodule\n", encoding="utf-8")
+    mcp = create_server(vault_path=git_vault)
+    ctx = mcp._hive_ctx  # type: ignore[attr-defined]
+
+    result = await mcp.call_tool("vault_commit", {"message": "vault: flush"})
+    text = result.content[0].text  # type: ignore[attr-defined,union-attr]
+
+    assert not text.startswith("Commit failed"), text
+    assert "submodule(s) with uncommitted content left out: sub." in text, text
+    assert "clean" not in text.lower(), "a dirty submodule must not read as a clean tree"
+    ctx.reconciler.close()
 
 
 def test_left_out_note_quotes_a_path_that_reads_as_two() -> None:
