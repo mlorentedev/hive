@@ -6,6 +6,7 @@ import contextlib
 import re
 import sys
 import time
+from collections import Counter
 from datetime import UTC, date, datetime, timedelta
 from importlib import metadata
 from pathlib import Path
@@ -19,12 +20,14 @@ from hive._helpers import (
     _safe_read,
     _strip_code,
     _vault_guard,
+    bounded_tracker_call,
     count_stale_from,
     detect_obsidian_git,
     project_not_found,
     scan_project,
     stale_reference_date,
     track,
+    tracker_timeout_text,
     wrap_sync_tool,
 )
 from hive.frontmatter import (
@@ -42,6 +45,21 @@ if TYPE_CHECKING:
 _ALL_CHECKS = frozenset({"frontmatter", "stale", "links"})
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+?)(?:[|#][^\]]*?)?\]\]")
 _POSIX_CLASS_RE = re.compile(r"^:[a-z]+:$")
+
+# Directories whose files follow a consumer schema, not the vault frontmatter
+# schema, mirroring vault-validate.py (#348).
+_MEMORY_DIRS = frozenset({"memory", "memories"})
+
+
+def _path_suffixes(vault_rel: str) -> list[str]:
+    """Every ``/``-boundary suffix of a vault-rooted path, shorter than the path.
+
+    Obsidian resolves ``[[harness-sota/_index]]`` to the one file whose path ends
+    in ``/harness-sota/_index.md`` (#466). The links check accepts a target that
+    is such a suffix of exactly one file; an ambiguous suffix stays reported.
+    """
+    parts = vault_rel.split("/")
+    return ["/".join(parts[i:]) for i in range(1, len(parts))]
 
 
 def _hive_version() -> str:
@@ -122,7 +140,7 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
     uptime_s = max(0.0, time.monotonic() - ctx.started_at_monotonic)
     tools = _registered_tool_names(mcp)
     period = datetime.now(UTC).strftime("%Y-%m")
-    usage = ctx.budget.month_usage()
+    _, usage = bounded_tracker_call(ctx.budget.month_usage, "budget_month_usage")
 
     # HIVE-115 telemetry. Each computation is defensive: a psutil error
     # or stat failure must NEVER prevent vault_health from returning.
@@ -208,12 +226,17 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
         "- uncommitted:",
         f"  - count: {count_text}",
         f"  - oldest_age_s: {oldest_age_text}",
-        "- worker_usage:",
-        f"  - request_count: {usage['request_count']}",
-        f"  - total_tokens: {usage['total_tokens']}",
-        f"  - period: {period}",
-        "",
     ]
+    if usage is None:
+        lines.append(f"- worker_usage: unavailable ({tracker_timeout_text()})")
+    else:
+        lines += [
+            "- worker_usage:",
+            f"  - request_count: {usage['request_count']}",
+            f"  - total_tokens: {usage['total_tokens']}",
+            f"  - period: {period}",
+        ]
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -450,12 +473,14 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
 
             all_stems: set[str] = set()
             all_paths: set[str] = set()
+            suffix_counts: Counter[str] = Counter()
             if "links" in active_checks:
-                # Index every .md in the vault under all 4 forms Obsidian
+                # Index every .md in the vault under the forms Obsidian
                 # accepts: bare stem, vault-rooted full path, vault-rooted
-                # without scope dir, and project-relative. Meta-scope files
-                # also get an `_meta/`-prefixed form (the slug Obsidian/Hive
-                # users type in wikilinks).
+                # without scope dir, project-relative, and a `/`-boundary
+                # path suffix that names exactly one file (suffix_counts,
+                # #466). Meta-scope files also get an `_meta/`-prefixed form
+                # (the slug Obsidian/Hive users type in wikilinks).
                 scope_dir_names = set(ctx.scopes.values())
                 meta_dir_name = ctx.scopes.get(META_SCOPE)
                 try:
@@ -469,6 +494,7 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                     with contextlib.suppress(ValueError):
                         vault_rel = f.relative_to(ctx.vault).with_suffix("").as_posix()
                         all_paths.add(vault_rel)
+                        suffix_counts.update(_path_suffixes(vault_rel))
                         if "/" in vault_rel:
                             leading, rest = vault_rel.split("/", 1)
                             if leading in scope_dir_names:
@@ -498,7 +524,9 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                         continue
 
                     fm = parse_frontmatter(content)
-                    in_memory_dir = "memory" in (f.relative_to(project_dir).parts)
+                    # memory/ holds harness auto-memory, memories/ agent-runtime
+                    # memory: both have their own consumer schema (#348).
+                    in_memory_dir = not _MEMORY_DIRS.isdisjoint(f.relative_to(project_dir).parts)
 
                     if "frontmatter" in active_checks and not in_memory_dir:
                         if fm is None:
@@ -540,7 +568,11 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                             target = m.group(1).strip().rstrip("\\").strip()
                             if _POSIX_CLASS_RE.match(target):
                                 continue
-                            if target not in all_stems and target not in all_paths:
+                            if (
+                                target not in all_stems
+                                and target not in all_paths
+                                and suffix_counts[target] != 1
+                            ):
                                 issues.append(
                                     f"[warning] {proj_name}/{rel}: Broken link [[{target}]]"
                                 )
@@ -568,8 +600,10 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                 parts.append("\n".join(validate_lines))
 
         if include_usage:
-            stats = ctx.tracker.stats(usage_days)
-            if stats["total_calls"] == 0:
+            _, stats = bounded_tracker_call(lambda: ctx.tracker.stats(usage_days), "usage_stats")
+            if stats is None:
+                parts.append(f"\nVault usage unavailable: {tracker_timeout_text()}.")
+            elif stats["total_calls"] == 0:
                 parts.append(f"\nNo vault tool calls recorded in the last {usage_days} days.")
             else:
                 usage_parts: list[str] = [

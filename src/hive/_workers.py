@@ -23,12 +23,14 @@ from hive._helpers import (
     _resolve_project_dir,
     _safe_read,
     _vault_guard,
+    bounded_tracker_call,
     check_lesson_recurrence,
     extract_lesson_headings,
     format_io_error,
     project_not_found,
     tool_span,
     track,
+    tracker_timeout_text,
 )
 from hive.frontmatter import extract_body, parse_frontmatter
 
@@ -355,12 +357,19 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
     """Register worker tools on the MCP server."""
 
     def _record(resp: ClientResponse) -> None:
-        """Record a successful response as usage telemetry (tokens, latency)."""
-        ctx.budget.record_request(
-            model=resp.model,
-            tokens=resp.tokens,
-            latency_ms=resp.latency_ms,
-            task_type="delegate",
+        """Record a successful response as usage telemetry (tokens, latency).
+
+        Bounded and skipped on timeout (#288): the response is already in hand,
+        and a stuck tracker must not hold it back.
+        """
+        bounded_tracker_call(
+            lambda: ctx.budget.record_request(
+                model=resp.model,
+                tokens=resp.tokens,
+                latency_ms=resp.latency_ms,
+                task_type="delegate",
+            ),
+            "budget_record_request",
         )
 
     async def _try_worker(
@@ -915,7 +924,7 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
         """
         try:
             async with tool_span("worker_status", ctx.tool_timeout):
-                usage = ctx.budget.month_usage()
+                _, usage = bounded_tracker_call(ctx.budget.month_usage, "budget_month_usage")
                 configured = ctx.worker is not None
 
                 lines = [
@@ -940,15 +949,17 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                     models = []
                     lines.append("- Reachable: unprobed")
 
-                lines += [
-                    "",
-                    "## Usage this month",
-                    f"- Requests: {usage['request_count']}",
-                    f"- Tokens: {usage['total_tokens']}",
-                    "",
-                ]
+                lines += ["", "## Usage this month"]
+                if usage is None:
+                    lines += [f"- unavailable: {tracker_timeout_text()}", ""]
+                else:
+                    lines += [
+                        f"- Requests: {usage['request_count']}",
+                        f"- Tokens: {usage['total_tokens']}",
+                        "",
+                    ]
 
-                if usage["by_model"]:
+                if usage is not None and usage["by_model"]:
                     lines.append("## By model")
                     for model_name, model_stats in usage["by_model"].items():
                         lines.append(
