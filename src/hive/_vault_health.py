@@ -43,6 +43,10 @@ _ALL_CHECKS = frozenset({"frontmatter", "stale", "links"})
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+?)(?:[|#][^\]]*?)?\]\]")
 _POSIX_CLASS_RE = re.compile(r"^:[a-z]+:$")
 
+# Directories whose files follow a consumer schema, not the vault frontmatter
+# schema, mirroring vault-validate.py (#348).
+_MEMORY_DIRS = frozenset({"memory", "memories"})
+
 
 def _hive_version() -> str:
     """Return the installed hive-vault version, or a marker for editable installs."""
@@ -498,7 +502,9 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                         continue
 
                     fm = parse_frontmatter(content)
-                    in_memory_dir = "memory" in (f.relative_to(project_dir).parts)
+                    # memory/ holds harness auto-memory, memories/ agent-runtime
+                    # memory: both have their own consumer schema (#348).
+                    in_memory_dir = not _MEMORY_DIRS.isdisjoint(f.relative_to(project_dir).parts)
 
                     if "frontmatter" in active_checks and not in_memory_dir:
                         if fm is None:
