@@ -14,7 +14,8 @@ import yaml
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "pr-agent-shared.yml"
 PINNED_LINE = re.compile(
-    r"uses: mlorentedev/ci-workflows/\.github/workflows/pr-agent\.yml@[0-9a-f]{40} # v\d+\.\d+\.\d+$",
+    r"uses: mlorentedev/ci-workflows/\.github/workflows/pr-agent\.yml"
+    r"@[0-9a-f]{40} # v\d+\.\d+\.\d+$",
     re.MULTILINE,
 )
 
@@ -36,4 +37,4 @@ def test_dotf_is_pinned_to_a_release() -> None:
 
 
 def test_secrets_are_passed_by_name() -> None:
-    assert _job()["secrets"] != "inherit"
+    assert set(_job()["secrets"]) == {"NAN_API_KEY", "PR_AGENT_ANTHROPIC_API_KEY"}
