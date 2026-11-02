@@ -12,3 +12,8 @@
 
 Cold start 2026-11-02T05:53Z: master 14d3ac9, `make check` rc=0 (1193 passed, 6 skipped).
 Wake lock: `caffeinate -i -t 43200`. Re-entry: session cron at :17 and :47.
+
+## Triage log
+- 07:58Z #552: CodeRabbit 2 findings (is_file; section-write boundary) applied in e17cf5c, replied in-thread. Branch updated from master (#551 merged).
+- 07:56Z #553: CodeRabbit review-limit notice (not a review); next slot ~08:40Z. Mark remaining PRs ready one at a time so each gets a CodeRabbit slot.
+- GitHub Actions runners heavily queued (shared account); CI not settled on any PR yet.
