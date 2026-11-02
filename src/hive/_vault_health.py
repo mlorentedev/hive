@@ -19,12 +19,14 @@ from hive._helpers import (
     _safe_read,
     _strip_code,
     _vault_guard,
+    bounded_tracker_call,
     count_stale_from,
     detect_obsidian_git,
     project_not_found,
     scan_project,
     stale_reference_date,
     track,
+    tracker_timeout_text,
     wrap_sync_tool,
 )
 from hive.frontmatter import (
@@ -126,7 +128,7 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
     uptime_s = max(0.0, time.monotonic() - ctx.started_at_monotonic)
     tools = _registered_tool_names(mcp)
     period = datetime.now(UTC).strftime("%Y-%m")
-    usage = ctx.budget.month_usage()
+    _, usage = bounded_tracker_call(ctx.budget.month_usage, "budget_month_usage")
 
     # HIVE-115 telemetry. Each computation is defensive: a psutil error
     # or stat failure must NEVER prevent vault_health from returning.
@@ -212,12 +214,17 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
         "- uncommitted:",
         f"  - count: {count_text}",
         f"  - oldest_age_s: {oldest_age_text}",
-        "- worker_usage:",
-        f"  - request_count: {usage['request_count']}",
-        f"  - total_tokens: {usage['total_tokens']}",
-        f"  - period: {period}",
-        "",
     ]
+    if usage is None:
+        lines.append(f"- worker_usage: unavailable ({tracker_timeout_text()})")
+    else:
+        lines += [
+            "- worker_usage:",
+            f"  - request_count: {usage['request_count']}",
+            f"  - total_tokens: {usage['total_tokens']}",
+            f"  - period: {period}",
+        ]
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -574,8 +581,10 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                 parts.append("\n".join(validate_lines))
 
         if include_usage:
-            stats = ctx.tracker.stats(usage_days)
-            if stats["total_calls"] == 0:
+            _, stats = bounded_tracker_call(lambda: ctx.tracker.stats(usage_days), "usage_stats")
+            if stats is None:
+                parts.append(f"\nVault usage unavailable: {tracker_timeout_text()}.")
+            elif stats["total_calls"] == 0:
                 parts.append(f"\nNo vault tool calls recorded in the last {usage_days} days.")
             else:
                 usage_parts: list[str] = [
