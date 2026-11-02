@@ -271,7 +271,7 @@ def create_server(
             "boilerplate and format conversion, not for architecture or "
             "security decisions.\n"
             "- **Checking workers:** Call `worker_status` before "
-            "`delegate_task` to verify budget and model availability.\n"
+            "`delegate_task` to verify the worker is configured and reachable.\n"
             "- **Checking vault health:** Call `vault_health` after modifying "
             "vault files or periodically to detect drift. Add "
             "`include_usage=True` for usage statistics.\n\n"
@@ -395,9 +395,9 @@ Evaluate the task against this matrix:
 
 If the task is NOT delegatable, say so and handle it directly. Stop here.
 
-### Step 2 — Budget Check
-- `worker_status()` to check remaining budget and model availability
-- If budget exhausted or no models available, report and stop
+### Step 2 — Worker Check
+- `worker_status()` to check the worker is configured and reachable
+- If it is not configured or not reachable, report and stop
 
 ### Step 3 — Context Compression
 - `delegate_task(project=<slug>, path=<file>)` to summarize relevant vault files
@@ -405,7 +405,6 @@ If the task is NOT delegatable, say so and handle it directly. Stop here.
 - Keep prompt under 2000 tokens
 
 ### Step 4 — Delegate
-- `worker_status()` to see available models and pick the appropriate tier
 - `delegate_task(prompt=<compressed task>)`
 - One task per call — never batch
 
@@ -416,7 +415,7 @@ If the task is NOT delegatable, say so and handle it directly. Stop here.
 
 ## Rules
 
-- Always check budget before delegating
+- Always check the worker before delegating
 - Never delegate tasks involving secrets, credentials, or auth logic
 - One task per `delegate_task` call
 - State which model handled the task in your response

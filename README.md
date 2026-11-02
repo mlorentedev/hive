@@ -148,7 +148,7 @@ version, exits `75`, and the supervisor restarts it into the new code. See the
 | `capture_lesson` | Capture lessons inline / batch-extract from text / look up existing lessons by keyword (`find=`) |
 | `session_briefing` | Tasks + lessons + git log + health in one call |
 | `delegate_task` | Route tasks to cheaper models or summarize vault files |
-| `worker_status` | Budget, connectivity, available models |
+| `worker_status` | Whether the worker is configured and reachable, its model, and usage |
 
 Plus 5 [resources](https://mlorentedev.github.io/hive/reference/resources/) and 4 [prompts](https://mlorentedev.github.io/hive/guides/prompts/) for guided workflows.
 
