@@ -1,0 +1,44 @@
+# Arming envelope for an unattended run. The run reads the COMMITTED copy only.
+version: 1
+run_id: "hive-20261102T0555Z"
+armed_by: manu
+armed_at: 2026-11-02T05:55:00Z
+expires_at: 2026-11-02T17:50:00Z
+objective: "Fix the queued hive bugs below, one draft PR each, verified by make check, left open for the owner to merge."
+branch: chore/autopilot-20261102
+worktree: /Users/manu/Projects/worktrees/hive/chore-autopilot-20261102
+scope:
+  write_paths: ["src/hive/**", "tests/**", "docs/lessons/**", "docs/adr/**", "docs/runbooks/**", "site/src/content/docs/**", "README.md", ".agent/runs/**"]
+  frozen_paths: [".github/**", "**/AGENTS.md", ".claude/**", "pyproject.toml", "uv.lock", "CHANGELOG.md", ".release-please-manifest.json", ".agent/unattended.yml"]
+  max_files: 10
+  max_loc: 300
+allowed_commands: [dotf, git, make, uv, "gh api repos/mlorentedev/hive/...", "gh api rate_limit", "gh pr ready", "gh pr checks"]
+coordination:
+  peers_checked_at: 2026-11-02T05:50:00Z
+  hive_peer_sessions: none   # 25 peers, none with a hive worktree
+  own_open_prs: [551]        # touches _git_commit_all/_vault_write; queue avoids that code
+  excluded_prs: [549]        # owner's release PR
+queue:
+  source: frozen-list        # GraphQL board queries fail under the shared rate limit
+  items: [468, 466, 491, 383, 288, 289, 348]
+  excluded:
+    owner_assigned: [292, 328, 384, 437, 467, 503]
+    windows: [458, 537, 545]
+    security_or_architecture: [397, 438, 442, 456, 462]
+    contention_with_551: [469, 527, 536, 542]
+    too_large: [176, 245, 250, 305, 323, 387, 398, 399, 422, 432, 500]
+    release: [459, 549]
+  max_items: 7
+budget:
+  max_iterations: 10
+  max_minutes_per_iteration: 60
+  max_consecutive_failures: 2
+  fix_loop_breaker: 3
+authority:
+  merge: never               # no .github/merge-grant.yml on master
+  push: true
+  open_pr: true              # draft, then ready once checks settle
+  advisor_tier: top
+host:
+  machine: macmini (Mac18,5, AC power)
+  wake_lock: caffeinate -i held for the session process
