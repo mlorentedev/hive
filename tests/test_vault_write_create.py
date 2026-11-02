@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
 from hive.frontmatter import parse_frontmatter
 from hive.server import create_server
 
@@ -35,6 +37,18 @@ async def test_create_refuses_a_path_that_repeats_the_project_path(git_vault: Pa
     assert not (project / "10_projects").exists()
     assert "relative to the project" in result
     assert "sessions/x.md" in result
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["./10_projects/testproject/sessions/x.md", "10_projects/./testproject/sessions/x.md"],
+)
+async def test_create_refuses_dot_segment_spellings_of_the_doubled_path(
+    git_vault: Path, path: str
+) -> None:
+    result = await _create(git_vault, path, "# x\n")
+    assert not (git_vault / "10_projects" / "testproject" / "10_projects").exists()
+    assert "Pass path='sessions/x.md'" in result
 
 
 async def test_create_accepts_a_project_relative_path(git_vault: Path) -> None:
@@ -69,6 +83,12 @@ async def test_create_accepts_a_doc_type_that_matches_the_authored_type(
     await _create(git_vault, "sessions/s-1.md", _AUTHORED, doc_type="session")
     written = (git_vault / "10_projects" / "testproject" / "sessions" / "s-1.md").read_text()
     assert written == _AUTHORED
+
+
+async def test_create_detects_frontmatter_after_leading_blank_lines(git_vault: Path) -> None:
+    await _create(git_vault, "sessions/s-2.md", "\n\n" + _AUTHORED)
+    written = (git_vault / "10_projects" / "testproject" / "sessions" / "s-2.md").read_text()
+    assert written.count("type:") == 1
 
 
 async def test_create_still_adds_frontmatter_to_a_body_only_content(git_vault: Path) -> None:

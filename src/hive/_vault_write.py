@@ -54,7 +54,8 @@ def _doubled_project_path(project_dir: Path, vault: Path, path: str) -> str:
         prefix = project_dir.relative_to(vault).as_posix() + "/"
     except ValueError:
         return ""
-    normalized = path.replace("\\", "/").lstrip("/")
+    segments = path.replace("\\", "/").split("/")
+    normalized = "/".join(s for s in segments if s not in ("", "."))
     return normalized[len(prefix) :] if normalized.startswith(prefix) else ""
 
 
