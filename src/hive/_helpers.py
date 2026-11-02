@@ -1161,6 +1161,10 @@ def _safe_read(f: Path) -> str | None:
 
 # ── Tracking ───────────────────────────────────────────────────────────
 
+# Bound on the relevance write inside track() (#289), the same 3s that
+# session_briefing gives its relevance touches (#282).
+_TRACK_RELEVANCE_TIMEOUT_S = 3.0
+
 
 def track(
     ctx: ServerContext,
@@ -1169,11 +1173,21 @@ def track(
     project: str = "",
     section: str = "",
 ) -> str:
-    """Log a tool call and return the result unchanged."""
+    """Log a tool call and return the result unchanged.
+
+    The relevance write is bounded (#289): ``record_access`` takes the same
+    untimed lock that hung ``session_briefing`` in #282, and losing one access
+    signal is cosmetic, so a stuck tracker costs at most the bound, never the
+    tool. The result does not depend on it, so the timeout is only logged.
+    """
     ctx.tracker.log_call(tool, project, len(result.splitlines()))
     if project and section:
         is_write = tool == "vault_write"
-        ctx.relevance.record_access(project, section, is_write=is_write)
+        _bounded_sync_call(
+            lambda: ctx.relevance.record_access(project, section, is_write=is_write),
+            _TRACK_RELEVANCE_TIMEOUT_S,
+            label="track_record_access",
+        )
     return result
 
 
