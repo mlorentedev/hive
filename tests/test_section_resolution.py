@@ -49,12 +49,23 @@ async def test_health_does_not_call_bare_named_sections_missing(mock_vault: Path
     assert "Missing sections" not in _project_block(report, "bareproject")
 
 
-async def test_health_still_names_a_section_that_is_missing(mock_vault: Path) -> None:
-    project = _bare_project(mock_vault)
-    (project / "roadmap.md").unlink()
+async def test_health_expects_only_context_of_a_project(mock_vault: Path) -> None:
+    """tasks live on the board and lessons in each repo's docs/lessons/ (#468):
+    a project with context.md and nothing else is complete."""
+    project = mock_vault / "10_projects" / "contextonly"
+    project.mkdir(parents=True)
+    (project / "context.md").write_text("---\nid: c\ntype: project\nstatus: active\n---\n")
     mcp = create_server(vault_path=mock_vault)
     report = _text(await mcp.call_tool("vault_health", {}))
-    assert "Missing sections: roadmap" in _project_block(report, "bareproject")
+    assert "Missing sections" not in _project_block(report, "contextonly")
+
+
+async def test_health_still_names_a_missing_context(mock_vault: Path) -> None:
+    project = _bare_project(mock_vault)
+    (project / "context.md").unlink()
+    mcp = create_server(vault_path=mock_vault)
+    report = _text(await mcp.call_tool("vault_health", {}))
+    assert "Missing sections: context" in _project_block(report, "bareproject")
 
 
 async def test_list_shows_bare_named_sections_as_shortcuts(mock_vault: Path) -> None:
