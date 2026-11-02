@@ -2106,15 +2106,24 @@ def _dirty_submodules(porcelain_v2_z: str) -> list[str]:
     the submodule state in its third field: ``S`` then commit-changed,
     tracked-changes and untracked flags. Only tracked or untracked changes
     count; a new commit inside the submodule moves its gitlink, which commits.
+    A rename or copy entry (type ``2``) has one more field before the path,
+    and ``-z`` puts its source path in a field of its own.
     """
     dirty: list[str] = []
-    for entry in porcelain_v2_z.split("\0"):
-        fields = entry.split(" ", 8)
-        if fields[0] != "1" or len(fields) < 9:
+    entries = iter(porcelain_v2_z.split("\0"))
+    for entry in entries:
+        kind = entry[:2]
+        if kind not in ("1 ", "2 "):
+            continue
+        n = 8 if kind == "1 " else 9
+        fields = entry.split(" ", n)
+        if kind == "2 ":
+            next(entries, "")  # the source path, not an entry
+        if len(fields) <= n:
             continue
         sub = fields[2]
         if sub[0] == "S" and (sub[2] == "M" or sub[3] == "U"):
-            dirty.append(fields[8])
+            dirty.append(fields[n])
     return dirty
 
 

@@ -441,6 +441,23 @@ def test_vault_commit_flush_commits_around_a_dirty_submodule_and_names_it(
     assert dirty_submodules == ["sub"]
 
 
+def test_vault_commit_flush_names_a_renamed_dirty_submodule(
+    git_vault: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    # Porcelain v2 reports a staged rename as a type-2 entry, followed by the
+    # source path in a field of its own; the submodule state is still there.
+    from hive._helpers import _git_commit_all
+
+    _with_submodule(git_vault, tmp_path_factory.mktemp("upstream") / "repo")
+    _git(git_vault, "mv", "sub", "sub2")
+    (git_vault / "sub2" / "a.md").write_text("edited inside the submodule\n", encoding="utf-8")
+
+    _, _, left_out, dirty_submodules = _git_commit_all(git_vault, "vault: flush")
+
+    assert dirty_submodules == ["sub2"]
+    assert "sub2" in left_out, "the staged rename itself still belongs to whoever staged it"
+
+
 def test_vault_commit_flush_records_a_submodule_new_commit(
     git_vault: Path, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
