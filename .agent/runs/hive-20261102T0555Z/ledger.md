@@ -5,7 +5,7 @@
 | 468 | pr-open (draft) | fix/issue-468-health-sections | #552 | make check rc=0, 1197 passed |
 | 466 | pr-open (draft), parts 1-2; part 3 = #467 | fix/issue-466-health-readings | #553 | make check rc=0, 1205 passed |
 | 491 | pr-open (draft) | feat/issue-491-research-scope | #554 | make check rc=0, 1201 passed |
-| 383 | queued | | | |
+| 383 | pr-open (draft) | fix/issue-383-vault-write-create | #555 | make check rc=0, 1205 passed |
 | 288 | queued | | | |
 | 289 | queued | | | |
 | 348 | queued | | | |
