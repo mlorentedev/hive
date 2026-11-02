@@ -22,3 +22,4 @@ Wake lock: `caffeinate -i -t 43200`. Re-entry: session cron at :17 and :47.
 - 08:58Z #553: PR-Agent stale-precedence (later date wins) + stale comment applied in 431e41e. Triage posted. CodeRabbit: limit notice only.
 - 08:58Z #554: PR-Agent no issues. Triage posted. CodeRabbit: limit notice only.
 - Pending: #555 review; #556/#557/#558 still draft (CI green), mark ready as CodeRabbit slots reopen.
+- 09:25Z — #555: PR-Agent `./` bypass reproduced red and fixed in `d64035e` (dot segments dropped); leading-newline finding pinned by test; triage posted. make check 1208 passed. #556: PR-Agent review running, CodeRabbit limit notice (next slot ~09:53Z). #558 marked ready (CI clean). #557 stays draft until #556 is triaged (stacked).
