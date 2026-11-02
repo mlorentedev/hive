@@ -225,6 +225,7 @@ Deleting is not a hot path. The throughput argument that motivates deferral for 
 
 - A write killed between `git add` and `git commit` leaves hive's own path staged, and git cannot tell it from another session's. `vault_commit` no longer recovers that orphan on its own; it names the path so a human can commit it with `git commit -- <path>`. This is a narrower remediation than §3 promised, accepted because the alternative silently commits other sessions' work.
 - Another session's `commit=False` write that is on disk but not yet staged still looks like a hand edit, and is still swept. Only cross-process tracking of pending paths can close that window ([#527](https://github.com/mlorentedev/hive/issues/527)).
+- *Added 2026-11-01 ([#543](https://github.com/mlorentedev/hive/issues/543)):* a submodule holding uncommitted content is not swept either. The parent repository cannot stage that content, and sweeping such a submodule on its own failed the commit with an empty error. The result names it, so it is committed inside the submodule. A submodule whose checked-out commit moved is still swept, because its gitlink can be committed.
 
 ## References
 

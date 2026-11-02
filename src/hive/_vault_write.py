@@ -121,6 +121,18 @@ def _left_out_note(left_out: list[str]) -> str:
     )
 
 
+def _dirty_submodule_note(dirty: list[str]) -> str:
+    """Name the submodules whose uncommitted content ``vault_commit`` cannot take (#543)."""
+    if not dirty:
+        return ""
+    named = ", ".join(shlex.quote(p) for p in dirty)
+    return (
+        f" {len(dirty)} submodule(s) with uncommitted content left out: {named}. "
+        "Commit inside the submodule; vault_commit then records its new commit, "
+        "unless the submodule path itself is staged."
+    )
+
+
 def _commit_status_suffix(
     requested_commit: bool,
     deferred: bool,
@@ -703,7 +715,7 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
 
         try:
             with vault_write_lock(ctx.vault):
-                status, detail, left_out = _git_commit_all(ctx.vault, message)
+                status, detail, left_out, dirty = _git_commit_all(ctx.vault, message)
         except WriteLockTimeout as exc:
             return track(
                 ctx,
@@ -711,10 +723,10 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
                 f"Server busy — {exc.reason}. Retry shortly.",
             )
 
-        note = _left_out_note(left_out)
+        note = _left_out_note(left_out) + _dirty_submodule_note(dirty)
         if status == "committed":
             return track(ctx, "vault_commit", f"Committed {detail}.{note}")
-        if status == "clean" and left_out:
+        if status == "clean" and note:
             return track(ctx, "vault_commit", f"Nothing to commit outside the index.{note}")
         if status == "clean":
             return track(
