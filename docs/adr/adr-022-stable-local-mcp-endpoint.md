@@ -415,19 +415,22 @@ client.
 - Every TCP connection completes this verification before the relay writes
   the request line, headers, or body. The relay may reuse a verified
   connection. It never writes to one that is not verified.
-- A handshake that fails after the listener presented a certificate, or
-  because the listener does not speak TLS, aborts the request. The error names
-  a possible impersonation, so it is distinct from "daemon unavailable", and
-  contains no credential. The one exception is the pinned certificate itself
-  presented after it expired: that aborts at once with its own error, which
-  says to restart the daemon. *Revised 2026-11-01 (#512, #513):* this bullet
-  first covered every handshake failure. A listener that resets or closes the
-  connection before presenting any certificate is a daemon stopping or
-  starting. Only a ClientHello has left at that point, with no bearer and no
-  request, so the relay retries it within `HIVE_CLIENT_RECONNECT_WINDOW_S` and
-  then reports the daemon unavailable. A listener that only ever closes gains
-  that delay and nothing else, and `hive service status` still reports it as
-  an unverified listener.
+- A handshake in which the listener presents a certificate that fails
+  verification against the pin, or does not speak TLS, aborts the request. The
+  error names a possible impersonation, so it is distinct from "daemon
+  unavailable", and contains no credential. The one exception is the pinned
+  certificate itself presented after it expired: that aborts at once with its
+  own error, which says to restart the daemon. *Revised 2026-11-01 (#512,
+  #513):* this bullet first covered every handshake failure. A listener that
+  resets or closes the connection mid-handshake, before any certificate has
+  failed verification, is a daemon stopping or starting, and is retried
+  whether or not it had already sent a certificate: verification runs as the
+  certificate arrives, so a mismatch raises before the close is seen. Only the
+  handshake has left at that point, with no bearer and no request, so the
+  relay retries within `HIVE_CLIENT_RECONNECT_WINDOW_S` and then reports the
+  daemon unavailable. A listener that only ever closes gains that delay and
+  nothing else, and `hive service status` still reports it as an unverified
+  listener.
 - The relay re-reads the pin from the owner-only store before every
   connection, and fails closed if it cannot read it. That covers a rotation
   that happened while it was running. Re-reading the store does not trust the
