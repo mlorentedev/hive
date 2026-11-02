@@ -2696,21 +2696,26 @@ def count_stale_from(
 
 
 def stale_reference_date(fm: Frontmatter | None, path: Path) -> date | None:
-    """The date staleness is measured from: ``updated``, else ``created``, else mtime.
+    """The date staleness is measured from: the last touch, else ``created``, else mtime.
 
     Freshness is the last touch, not the birth. A ``context.md`` rewritten every
     session but created a year ago is the opposite of stale, yet the previous rule
-    read only ``created`` and flagged 30 active projects on 2026-09-06. ``updated``
-    is what ``/context-refresh`` writes, so it is the signal; ``created`` covers
-    notes that are never refreshed; mtime is the last resort for notes with no
-    dates at all. Returns ``None`` only when even the stat fails.
+    read only ``created`` and flagged 30 active projects on 2026-09-06. The vault
+    writes the last touch under two keys: ``/context-refresh`` and the project
+    context template write ``last_updated``, other notes ``updated`` (#466). Both
+    are the signal, and a note carrying both is measured from the later one;
+    ``created`` covers notes that are never refreshed; mtime is the last resort
+    for notes with no dates at all. Returns ``None`` only when even the stat
+    fails.
     """
     if fm is not None:
-        updated_raw = fm.raw.get("updated")
-        if updated_raw:
-            ref = parse_date(str(updated_raw))
-            if ref is not None:
-                return ref
+        touched = [
+            ref
+            for key in ("updated", "last_updated")
+            if (raw := fm.raw.get(key)) and (ref := parse_date(str(raw))) is not None
+        ]
+        if touched:
+            return max(touched)
         if fm.created:
             ref = parse_date(fm.created)
             if ref is not None:

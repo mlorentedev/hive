@@ -6,6 +6,7 @@ import contextlib
 import re
 import sys
 import time
+from collections import Counter
 from datetime import UTC, date, datetime, timedelta
 from importlib import metadata
 from pathlib import Path
@@ -48,6 +49,17 @@ _POSIX_CLASS_RE = re.compile(r"^:[a-z]+:$")
 # Directories whose files follow a consumer schema, not the vault frontmatter
 # schema, mirroring vault-validate.py (#348).
 _MEMORY_DIRS = frozenset({"memory", "memories"})
+
+
+def _path_suffixes(vault_rel: str) -> list[str]:
+    """Every ``/``-boundary suffix of a vault-rooted path, shorter than the path.
+
+    Obsidian resolves ``[[harness-sota/_index]]`` to the one file whose path ends
+    in ``/harness-sota/_index.md`` (#466). The links check accepts a target that
+    is such a suffix of exactly one file; an ambiguous suffix stays reported.
+    """
+    parts = vault_rel.split("/")
+    return ["/".join(parts[i:]) for i in range(1, len(parts))]
 
 
 def _hive_version() -> str:
@@ -461,12 +473,14 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
 
             all_stems: set[str] = set()
             all_paths: set[str] = set()
+            suffix_counts: Counter[str] = Counter()
             if "links" in active_checks:
-                # Index every .md in the vault under all 4 forms Obsidian
+                # Index every .md in the vault under the forms Obsidian
                 # accepts: bare stem, vault-rooted full path, vault-rooted
-                # without scope dir, and project-relative. Meta-scope files
-                # also get an `_meta/`-prefixed form (the slug Obsidian/Hive
-                # users type in wikilinks).
+                # without scope dir, project-relative, and a `/`-boundary
+                # path suffix that names exactly one file (suffix_counts,
+                # #466). Meta-scope files also get an `_meta/`-prefixed form
+                # (the slug Obsidian/Hive users type in wikilinks).
                 scope_dir_names = set(ctx.scopes.values())
                 meta_dir_name = ctx.scopes.get(META_SCOPE)
                 try:
@@ -480,6 +494,7 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                     with contextlib.suppress(ValueError):
                         vault_rel = f.relative_to(ctx.vault).with_suffix("").as_posix()
                         all_paths.add(vault_rel)
+                        suffix_counts.update(_path_suffixes(vault_rel))
                         if "/" in vault_rel:
                             leading, rest = vault_rel.split("/", 1)
                             if leading in scope_dir_names:
@@ -553,7 +568,11 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                             target = m.group(1).strip().rstrip("\\").strip()
                             if _POSIX_CLASS_RE.match(target):
                                 continue
-                            if target not in all_stems and target not in all_paths:
+                            if (
+                                target not in all_stems
+                                and target not in all_paths
+                                and suffix_counts[target] != 1
+                            ):
                                 issues.append(
                                     f"[warning] {proj_name}/{rel}: Broken link [[{target}]]"
                                 )
