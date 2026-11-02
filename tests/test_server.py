@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 import time
 from typing import TYPE_CHECKING
@@ -2041,6 +2042,19 @@ class TestPrompts:
         result = await vault_mcp.render_prompt("delegate", {"task": "generate boilerplate"})
         text = self._prompt_text(result)
         assert "generate boilerplate" in text
+
+    async def test_delegate_guidance_names_no_budget_or_tier(self, vault_mcp: FastMCP) -> None:
+        # 4.0.0 removed the spend cap and the tiered fallback chain (#384, #391);
+        # guidance that still asks for them sends the host after a gauge that no
+        # longer exists (#520).
+        prompt = self._prompt_text(await vault_mcp.render_prompt("delegate", {"task": "x"}))
+        instructions = vault_mcp.instructions
+        assert instructions, "the server instructions are a guidance surface too"
+        for surface in (prompt, instructions):
+            assert not re.search(r"\bbudget\b|\btiers?\b", surface, re.IGNORECASE), surface
+            # An absence check alone stays green if the worker check is deleted outright.
+            assert "worker_status" in surface
+            assert "configured and reachable" in surface
 
     # -- vault_sync --
 

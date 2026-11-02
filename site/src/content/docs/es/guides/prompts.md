@@ -25,14 +25,12 @@ Protocolo estructurado para delegar tareas a modelos más baratos mediante hive-
 
 **Parámetros**: `task` (string)
 
-**Protocolo** (tal como lo enuncia hoy el prompt):
+**Protocolo**:
 1. Comprobación de idoneidad contra una matriz de tareas delegables y no delegables
-2. Comprobación de presupuesto: `worker_status` para el presupuesto restante y los modelos disponibles
+2. Comprobación del worker: `worker_status` para confirmar que está configurado y responde
 3. Compresión de contexto: resumir los archivos relevantes del vault y reducir la tarea a su instrucción esencial
-4. Delegar: elegir un nivel con `worker_status` y llamar a `delegate_task`, una tarea por llamada
+4. Delegar: llamar a `delegate_task`, una tarea por llamada
 5. Evaluar el resultado y, si es pobre, resolver la tarea directamente
-
-El worker ya no tiene presupuesto ni niveles de modelo; el texto del prompt se corrige en [#520](https://github.com/mlorentedev/hive/issues/520), y esta página cambia con él.
 
 **Uso**: Pide a tu asistente que "delegue esta tarea: explica esta regex"
 
