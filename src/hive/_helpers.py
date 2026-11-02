@@ -2672,16 +2672,19 @@ def stale_reference_date(fm: Frontmatter | None, path: Path) -> date | None:
     read only ``created`` and flagged 30 active projects on 2026-09-06. The vault
     writes the last touch under two keys: ``/context-refresh`` and the project
     context template write ``last_updated``, other notes ``updated`` (#466). Both
-    are the signal, ``updated`` first; ``created`` covers notes that are never
-    refreshed; mtime is the last resort for notes with no dates at all. Returns
-    ``None`` only when even the stat fails.
+    are the signal, and a note carrying both is measured from the later one;
+    ``created`` covers notes that are never refreshed; mtime is the last resort
+    for notes with no dates at all. Returns ``None`` only when even the stat
+    fails.
     """
     if fm is not None:
-        for key in ("updated", "last_updated"):
-            raw = fm.raw.get(key)
-            ref = parse_date(str(raw)) if raw else None
-            if ref is not None:
-                return ref
+        touched = [
+            ref
+            for key in ("updated", "last_updated")
+            if (raw := fm.raw.get(key)) and (ref := parse_date(str(raw))) is not None
+        ]
+        if touched:
+            return max(touched)
         if fm.created:
             ref = parse_date(fm.created)
             if ref is not None:

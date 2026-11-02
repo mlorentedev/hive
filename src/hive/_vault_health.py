@@ -464,11 +464,12 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
             all_paths: set[str] = set()
             suffix_counts: Counter[str] = Counter()
             if "links" in active_checks:
-                # Index every .md in the vault under all 4 forms Obsidian
+                # Index every .md in the vault under the forms Obsidian
                 # accepts: bare stem, vault-rooted full path, vault-rooted
-                # without scope dir, and project-relative. Meta-scope files
-                # also get an `_meta/`-prefixed form (the slug Obsidian/Hive
-                # users type in wikilinks).
+                # without scope dir, project-relative, and a `/`-boundary
+                # path suffix that names exactly one file (suffix_counts,
+                # #466). Meta-scope files also get an `_meta/`-prefixed form
+                # (the slug Obsidian/Hive users type in wikilinks).
                 scope_dir_names = set(ctx.scopes.values())
                 meta_dir_name = ctx.scopes.get(META_SCOPE)
                 try:

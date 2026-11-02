@@ -49,14 +49,17 @@ async def test_stale_still_flags_an_old_last_updated(mock_vault: Path) -> None:
     assert f"abandoned.md: Stale (last touched {old}" in report
 
 
-async def test_updated_wins_over_last_updated(mock_vault: Path) -> None:
+async def test_the_later_of_updated_and_last_updated_wins(mock_vault: Path) -> None:
+    """A note that used ``updated`` and was later refreshed by /context-refresh
+    carries both keys; its last touch is the later date, whichever key holds it."""
     today = date.today().isoformat()
     old = (date.today() - timedelta(days=2000)).isoformat()
-    _note(
-        mock_vault / "10_projects" / "testproject" / "both.md",
-        extra=f'updated: "{today}"\nlast_updated: "{old}"\n',
-    )
-    assert "both.md" not in await _health(mock_vault, "stale")
+    project = mock_vault / "10_projects" / "testproject"
+    _note(project / "old-updated.md", extra=f'updated: "{old}"\nlast_updated: "{today}"\n')
+    _note(project / "old-last.md", extra=f'updated: "{today}"\nlast_updated: "{old}"\n')
+    report = await _health(mock_vault, "stale")
+    assert "old-updated.md" not in report
+    assert "old-last.md" not in report
 
 
 # ── 2. a unique path-suffix wikilink resolves ───────────────────
