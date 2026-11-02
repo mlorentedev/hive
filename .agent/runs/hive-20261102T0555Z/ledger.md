@@ -26,3 +26,4 @@ Wake lock: `caffeinate -i -t 43200`. Re-entry: session cron at :17 and :47.
 - 09:55Z — #556 triaged: leaky-test finding declined (tracker defaults to `:memory:`, conftest isolates); stall cost ticketed as #559 (detect→ticket). #558 triaged: scope finding declined (ticket's rule; only `*.md` walked). #557 marked ready (CI clean; stacked on #556).
 - 10:25Z — #557 triaged: thread-leak finding → #559; timing slack tightened in `0aa6ac8` (measured ~0.12s), make check 1206 passed. All 7 PRs ready with triage; waiting on CI for `0aa6ac8` and any late reviewer output.
 - 10:52Z — #557: CI green on `0aa6ac8`; CodeRabbit (Major) thread-cap finding deferred to #559 (in-thread reply + triage update + note on #559). Queue drained. Remaining: CodeRabbit reviews on #553–#556, #558 (quota-limited); requested one on #555. Run stays armed to triage late reviews until expiry or until all are reviewed.
+- 11:22Z — run ended (queue-empty); report.md written.
