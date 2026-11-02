@@ -1161,6 +1161,25 @@ def _safe_read(f: Path) -> str | None:
 
 # ── Tracking ───────────────────────────────────────────────────────────
 
+# Bound on the relevance write inside track() (#289), the same 3s that
+# session_briefing gives its relevance touches (#282).
+_TRACK_RELEVANCE_TIMEOUT_S = 3.0
+
+# Bound on every UsageTracker / BudgetTracker call (#288). Both are telemetry
+# since the spend cap was retired (#384): a write that times out is skipped,
+# a read that times out is reported as unavailable, never as zero.
+_TRACKER_TIMEOUT_S = 3.0
+
+
+def bounded_tracker_call[T](fn: Callable[[], T], label: str) -> tuple[bool, T | None]:
+    """Run a usage/budget tracker call under ``_TRACKER_TIMEOUT_S`` (#288)."""
+    return _bounded_sync_call(fn, _TRACKER_TIMEOUT_S, label=label)
+
+
+def tracker_timeout_text() -> str:
+    """Why a tracker read shows no numbers: it timed out, which is not zero."""
+    return f"the usage tracker did not respond in {_TRACKER_TIMEOUT_S:g}s"
+
 
 def track(
     ctx: ServerContext,
@@ -1169,11 +1188,23 @@ def track(
     project: str = "",
     section: str = "",
 ) -> str:
-    """Log a tool call and return the result unchanged."""
-    ctx.tracker.log_call(tool, project, len(result.splitlines()))
+    """Log a tool call and return the result unchanged.
+
+    Both writes are bounded: ``record_access`` (#289) and ``log_call`` (#288)
+    each take an untimed tracker lock like the one that hung
+    ``session_briefing`` in #282, and losing one telemetry signal is cosmetic,
+    so a stuck tracker costs at most the bound, never the tool. The result does
+    not depend on either, so a timeout is only logged.
+    """
+    lines = len(result.splitlines())
+    bounded_tracker_call(lambda: ctx.tracker.log_call(tool, project, lines), "track_log_call")
     if project and section:
         is_write = tool == "vault_write"
-        ctx.relevance.record_access(project, section, is_write=is_write)
+        _bounded_sync_call(
+            lambda: ctx.relevance.record_access(project, section, is_write=is_write),
+            _TRACK_RELEVANCE_TIMEOUT_S,
+            label="track_record_access",
+        )
     return result
 
 

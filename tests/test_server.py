@@ -4490,6 +4490,29 @@ class TestVaultValidate:
         )
         assert "memory/MEMORY.md" not in result, f"MEMORY.md must be skipped; got: {result}"
 
+    async def test_agent_memories_file_skipped_by_frontmatter_check(
+        self,
+        mock_vault: Path,
+    ) -> None:
+        """``80_agents/<agent>/memories/MEMORY.md`` is agent-runtime memory:
+        ``§``-separated plain text parsed by the agent's bootstrap, so vault
+        frontmatter would break its consumer (#348). Skipped like ``memory/``;
+        a file with no frontmatter beside it is still reported.
+        """
+        agent = mock_vault / "80_agents" / "Hermes-NaN"
+        (agent / "memories").mkdir(parents=True)
+        (agent / "memories" / "MEMORY.md").write_text("fact one\n§\nfact two\n")
+        (agent / "notes.md").write_text("No frontmatter here.\n")
+        mcp = create_server(vault_path=mock_vault)
+        result = _text(
+            await mcp.call_tool(
+                "vault_health",
+                {"project": "agents:Hermes-NaN", "checks": ["frontmatter"]},
+            )
+        )
+        assert "memories/MEMORY.md" not in result, f"memories/ must be skipped; got: {result}"
+        assert "notes.md" in result, f"the check must still run beside it; got: {result}"
+
     async def test_meta_scope_wikilink_resolves(
         self,
         mock_vault: Path,
