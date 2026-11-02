@@ -108,6 +108,6 @@ async def test_health_runtime_says_worker_usage_unavailable(mock_vault: Path) ->
 async def test_health_usage_says_unavailable_not_no_calls(mock_vault: Path) -> None:
     mcp = create_server(vault_path=mock_vault, usage_tracker=_StuckUsage())
     text, elapsed = await _timed(mcp, "vault_health", {"include_usage": True})
-    assert elapsed < 0.4 + _STALL_S  # track() of vault_health itself is one bounded write
+    assert elapsed < 0.4
     assert "Vault usage unavailable" in text
     assert "No vault tool calls recorded" not in text
