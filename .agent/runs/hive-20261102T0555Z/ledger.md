@@ -17,3 +17,4 @@ Wake lock: `caffeinate -i -t 43200`. Re-entry: session cron at :17 and :47.
 - 07:58Z #552: CodeRabbit 2 findings (is_file; section-write boundary) applied in e17cf5c, replied in-thread. Branch updated from master (#551 merged).
 - 07:56Z #553: CodeRabbit review-limit notice (not a review); next slot ~08:40Z. Mark remaining PRs ready one at a time so each gets a CodeRabbit slot.
 - GitHub Actions runners heavily queued (shared account); CI not settled on any PR yet.
+- 08:20Z #554, #555 CI green, marked ready. #552 re-running CI after update-branch (ff7d08f). Waiting on review jobs (PR-Agent) and runner queue.
