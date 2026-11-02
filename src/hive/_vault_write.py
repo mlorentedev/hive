@@ -411,6 +411,9 @@ def register_vault_write(mcp: FastMCP, ctx: ServerContext) -> None:
             )
 
         filepath = section_file(project_dir, section)
+        boundary_error = _check_path_boundary(filepath, ctx.vault)
+        if boundary_error:
+            return track(ctx, "vault_write", boundary_error, project)
 
         if operation == "replace":
             error = validate_frontmatter(content)

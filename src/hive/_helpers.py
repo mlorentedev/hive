@@ -185,7 +185,7 @@ def section_file(project_dir: Path, section: str) -> Path:
     reads, lists, health-checks and writes the same file.
     """
     bare = project_dir / f"{section}.md"
-    return bare if bare.exists() else project_dir / SECTION_SHORTCUTS[section]
+    return bare if bare.is_file() else project_dir / SECTION_SHORTCUTS[section]
 
 
 # The scope KEY (not directory) that holds cross-project content. Several

@@ -16,6 +16,7 @@ from hive.server import create_server
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import pytest
     from fastmcp.tools import ToolResult
 
 _SECTIONS = ("context", "tasks", "roadmap", "lessons")
@@ -86,3 +87,30 @@ async def test_section_replace_writes_the_file_vault_query_reads(git_vault: Path
         await mcp.call_tool("vault_query", {"project": "bareproject", "section": "tasks"})
     )
     assert "# Replaced" in read_back
+
+
+def test_a_directory_named_like_a_section_does_not_shadow_the_legacy_file(tmp_path: Path) -> None:
+    from hive._helpers import section_file
+
+    (tmp_path / "tasks.md").mkdir()
+    (tmp_path / "11-tasks.md").write_text("# tasks\n")
+    assert section_file(tmp_path, "tasks") == tmp_path / "11-tasks.md"
+
+
+async def test_section_write_refuses_a_symlink_out_of_the_vault(
+    git_vault: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    outside = tmp_path_factory.mktemp("outside") / "target.md"
+    outside.write_text("untouched\n")
+    project = _bare_project(git_vault)
+    (project / "tasks.md").unlink()
+    (project / "tasks.md").symlink_to(outside)
+    mcp = create_server(vault_path=git_vault)
+    result = _text(
+        await mcp.call_tool(
+            "vault_write",
+            {"project": "bareproject", "section": "tasks", "content": "- appended\n"},
+        )
+    )
+    assert "escapes vault boundary" in result
+    assert outside.read_text() == "untouched\n"
