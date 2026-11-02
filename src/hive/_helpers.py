@@ -2098,6 +2098,35 @@ def _unstaged_paths(porcelain_z: str) -> tuple[list[str], list[str]]:
     return [p for p in paths if p not in taken], staged
 
 
+def _dirty_submodules(porcelain_v2_z: str) -> list[str]:
+    """Name the submodules in ``git status --porcelain=v2 -z`` holding uncommitted content.
+
+    The parent repository cannot commit that content, and porcelain v1 shows
+    such a submodule as an ordinary `` M`` (#543). A v2 ordinary entry carries
+    the submodule state in its third field: ``S`` then commit-changed,
+    tracked-changes and untracked flags. Only tracked or untracked changes
+    count; a new commit inside the submodule moves its gitlink, which commits.
+    A rename or copy entry (type ``2``) has one more field before the path,
+    and ``-z`` puts its source path in a field of its own.
+    """
+    dirty: list[str] = []
+    entries = iter(porcelain_v2_z.split("\0"))
+    for entry in entries:
+        kind = entry[:2]
+        if kind not in ("1 ", "2 "):
+            continue
+        n = 8 if kind == "1 " else 9
+        fields = entry.split(" ", n)
+        if kind == "2 ":
+            next(entries, "")  # the source path, not an entry
+        if len(fields) <= n:
+            continue
+        sub = fields[2]
+        if sub[0] == "S" and (sub[2] == "M" or sub[3] == "U"):
+            dirty.append(fields[n])
+    return dirty
+
+
 @contextmanager
 def _pathspec_file(paths: list[str]) -> Iterator[list[str]]:
     """Hand ``paths`` to git through a pathspec file, not the command line.
@@ -2122,10 +2151,10 @@ def _pathspec_file(paths: list[str]) -> Iterator[list[str]]:
 def _git_commit_all(
     vault_path: Path,
     message: str,
-) -> tuple[str, str, list[str]]:
+) -> tuple[str, str, list[str], list[str]]:
     """Commit every unstaged and untracked change in the vault, in one commit.
 
-    Returns ``(status, detail, left_out)`` where ``status`` is one of:
+    Returns ``(status, detail, left_out, dirty_submodules)`` where ``status`` is one of:
     - ``"committed"`` — a new commit was created; ``detail`` is the SHA.
     - ``"clean"`` — nothing to commit; ``detail`` is an empty string.
     - ``"error"`` — git failed; ``detail`` is the human-readable reason.
@@ -2134,6 +2163,11 @@ def _git_commit_all(
     can be hive's own: a write killed between ``git add`` and ``git commit``
     stays staged, and git cannot tell it from another session's work. Naming
     them keeps that orphan recoverable by hand.
+
+    ``dirty_submodules`` names the submodules holding uncommitted content.
+    The sweep skips them: ``git add`` stages nothing for one, and a commit of
+    nothing else exited 1 with an empty stderr (#543). Their content is
+    committed inside the submodule; the parent then records the new commit.
 
     Used by the ``vault_commit`` MCP tool to flush the working tree
     accumulated by ``commit=False`` writes (HIVE-104 Fase B1). It still
@@ -2144,38 +2178,63 @@ def _git_commit_all(
     """
     safe_msg = message.replace("\n", " ").replace("\r", " ") or "vault: batch update"
     if not _acquire_with_telemetry(_GIT_LOCK, "_GIT_LOCK"):
-        return "error", "thread lock timeout", []
+        return "error", "thread lock timeout", [], []
     left_out: list[str] = []
+    dirty: list[str] = []
     try:
         try:
             with _filelock_with_telemetry(_git_filelock(vault_path), "_git_filelock"):
                 rc, porcelain_out, porcelain_err = _run_git(
-                    ["status", "--porcelain", "-z", "--untracked-files=all"],
+                    [
+                        "status",
+                        "--porcelain",
+                        "-z",
+                        "--untracked-files=all",
+                        "--ignore-submodules=dirty",
+                    ],
                     vault_path,
                     stdout_errors="surrogateescape",
                 )
                 if rc != 0:
-                    return "error", f"git status rc={rc}: {porcelain_err.strip() or '<empty>'}", []
+                    err = porcelain_err.strip() or "<empty>"
+                    return "error", f"git status rc={rc}: {err}", [], []
                 paths, left_out = _unstaged_paths(porcelain_out)
+                # `--untracked-files=no` would also hide a submodule's untracked files.
+                rc, v2_out, v2_err = _run_git(
+                    ["status", "--porcelain=v2", "-z", "--untracked-files=normal"],
+                    vault_path,
+                    stdout_errors="surrogateescape",
+                )
+                dirty = _dirty_submodules(v2_out) if rc == 0 else []
                 if not paths:
-                    return "clean", "", left_out
+                    if rc != 0:
+                        # The sweep's status hides dirty submodules, so "clean"
+                        # here would be a claim nothing checked.
+                        err = v2_err.strip() or "<empty>"
+                        detail = f"submodule state not checked: git status rc={rc}: {err}"
+                        return "error", detail, left_out, []
+                    return "clean", "", left_out, dirty
+                # With files to commit, a failed probe costs only the naming.
                 with _pathspec_file(paths) as from_file:
                     rc, _, err = _run_git(["add", *from_file], vault_path)
                     if rc != 0:
-                        return "error", f"git add rc={rc}: {err.strip() or '<empty>'}", left_out
+                        detail = f"git add rc={rc}: {err.strip() or '<empty>'}"
+                        return "error", detail, left_out, dirty
                     rc, _, err = _run_git(
                         _commit_args(safe_msg) + ["--only", *from_file], vault_path
                     )
                 if rc != 0:
-                    return "error", f"git commit rc={rc}: {err.strip() or '<empty>'}", left_out
+                    detail = f"git commit rc={rc}: {err.strip() or '<empty>'}"
+                    return "error", detail, left_out, dirty
                 rc, rev_out, err = _run_git(["rev-parse", "HEAD"], vault_path)
                 if rc != 0:
-                    return "error", f"git rev-parse rc={rc}: {err.strip() or '<empty>'}", left_out
-                return "committed", rev_out.strip(), left_out
+                    detail = f"git rev-parse rc={rc}: {err.strip() or '<empty>'}"
+                    return "error", detail, left_out, dirty
+                return "committed", rev_out.strip(), left_out, dirty
         except filelock.Timeout:
-            return "error", "inter-process lock timeout", []
+            return "error", "inter-process lock timeout", [], []
         except Exception as exc:
-            return "error", f"unexpected: {type(exc).__name__}: {exc}", left_out
+            return "error", f"unexpected: {type(exc).__name__}: {exc}", left_out, dirty
     finally:
         _GIT_LOCK.release()
 
