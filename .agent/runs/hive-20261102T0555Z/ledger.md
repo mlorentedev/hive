@@ -18,3 +18,7 @@ Wake lock: `caffeinate -i -t 43200`. Re-entry: session cron at :17 and :47.
 - 07:56Z #553: CodeRabbit review-limit notice (not a review); next slot ~08:40Z. Mark remaining PRs ready one at a time so each gets a CodeRabbit slot.
 - GitHub Actions runners heavily queued (shared account); CI not settled on any PR yet.
 - 08:20Z #554, #555 CI green, marked ready. #552 re-running CI after update-branch (ff7d08f). Waiting on review jobs (PR-Agent) and runner queue.
+- 08:58Z #552: PR-Agent found the ticket's "expect only context" bullet unmet; applied in 481a10e (+ context-only fixture). Triage posted.
+- 08:58Z #553: PR-Agent stale-precedence (later date wins) + stale comment applied in 431e41e. Triage posted. CodeRabbit: limit notice only.
+- 08:58Z #554: PR-Agent no issues. Triage posted. CodeRabbit: limit notice only.
+- Pending: #555 review; #556/#557/#558 still draft (CI green), mark ready as CodeRabbit slots reopen.
