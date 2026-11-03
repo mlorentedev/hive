@@ -68,6 +68,9 @@ def _status_payload(ctx: ServerContext) -> dict[str, Any]:
     nothing, because it looks like a working gauge. Volume and latency are what
     an operator can act on now.
     """
+    # Not bounded (#288): /status is a JSON contract whose worker_usage block
+    # has no 'unavailable' shape yet, and zeros on a timeout would be a false
+    # reading. The vault_health and worker_status surfaces are bounded.
     usage = ctx.budget.month_usage()
     uptime_s = max(0, int(time.monotonic() - ctx.started_at_monotonic))
     return {

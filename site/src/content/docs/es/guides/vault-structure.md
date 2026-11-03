@@ -28,12 +28,15 @@ Hive funciona con **cualquier directorio de archivos Markdown**. No necesitas re
 ├── 50_work/                       # scope "work" — clientes, productos, tickets
 │   └── mi-empresa/
 │       └── 00-context.md
-└── 80_agents/                     # scope "agents" — buzones de agentes de IA
-    └── mi-agente/                 # el nombre que quieras; cada dir es un proyecto de primera clase
-        └── 00-context.md
+├── 80_agents/                     # scope "agents" — buzones de agentes de IA
+│   └── mi-agente/                 # el nombre que quieras; cada dir es un proyecto de primera clase
+│       └── 00-context.md
+└── 05_research/                   # scope "research" — investigación y análisis externos
+    └── alguna-herramienta/        # un dir por tema, proyecto de primera clase
+        └── context.md
 ```
 
-Los scopes por defecto son `projects` → `10_projects/`, `meta` → `00_meta/`, `work` → `50_work/` y `agents` → `80_agents/`. El scope `agents` es un buzón para agentes de IA; cada subdirectorio — con el nombre que quieras — es un proyecto de primera clase, así que toda herramienta de vault funciona con `agents:<nombre>` igual que con `10_projects`: `vault_query`, `vault_write`, `vault_patch`, `vault_search`, `vault_list` y `vault_health` lo resuelven.
+Los scopes por defecto son `projects` → `10_projects/`, `meta` → `00_meta/`, `work` → `50_work/`, `agents` → `80_agents/` y `research` → `05_research/`. El scope `research` contiene investigación y análisis externos, un subdirectorio por tema, direccionable como `research:<tema>`. El scope `agents` es un buzón para agentes de IA; cada subdirectorio — con el nombre que quieras — es un proyecto de primera clase, así que toda herramienta de vault funciona con `agents:<nombre>` igual que con `10_projects`: `vault_query`, `vault_write`, `vault_patch`, `vault_search`, `vault_list` y `vault_health` lo resuelven.
 
 ## Usar tu Vault Existente
 

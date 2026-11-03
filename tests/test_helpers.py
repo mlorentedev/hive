@@ -520,6 +520,24 @@ class TestResolveProjectDir:
         assert result is not None
         assert result[1] == "projects"
 
+    def test_research_in_default_scopes(self, tmp_path: Path) -> None:
+        """Production config maps research→05_research (#491): a teardown
+        under 05_research/<topic> resolves by ``research:<topic>``."""
+        assert _default_scopes().get("research") == "05_research"
+        entity = _make_scope_dir(tmp_path, "05_research", "herdr")
+        result = _resolve_project_dir(tmp_path, "research:herdr", _default_scopes())
+        assert result is not None
+        assert result[0] == entity
+        assert result[1] == "research"
+
+    def test_research_does_not_shadow_a_project(self, tmp_path: Path) -> None:
+        """A topic name that is also a project resolves to the project."""
+        _make_scope_dir(tmp_path, _PROJECTS_DIR, "herdr")
+        _make_scope_dir(tmp_path, "05_research", "herdr")
+        result = _resolve_project_dir(tmp_path, "herdr", _default_scopes())
+        assert result is not None
+        assert result[1] == "projects"
+
     def test_agents_name_is_arbitrary(self, tmp_path: Path) -> None:
         """Agent names carry no format constraint — any valid dir name (mixed
         case, digits, hyphens, underscores, dots) resolves like any project."""
