@@ -1180,9 +1180,14 @@ _TRACK_RELEVANCE_TIMEOUT_S = 3.0
 _TRACKER_TIMEOUT_S = 3.0
 
 
-def bounded_tracker_call[T](fn: Callable[[], T], label: str) -> tuple[bool, T | None]:
-    """Run a usage/budget tracker call under ``_TRACKER_TIMEOUT_S`` (#288)."""
-    return _bounded_sync_call(fn, _TRACKER_TIMEOUT_S, label=label)
+def bounded_tracker_call[T](
+    fn: Callable[[], T], label: str, tracker: object
+) -> tuple[bool, T | None]:
+    """Run a usage/budget tracker call under ``_TRACKER_TIMEOUT_S`` (#288).
+
+    *tracker* is the breaker (#559): while one call on it is stuck, the rest skip.
+    """
+    return _bounded_sync_call(fn, _TRACKER_TIMEOUT_S, label=label, breaker=tracker)
 
 
 def tracker_timeout_text() -> str:
@@ -1206,13 +1211,16 @@ def track(
     not depend on either, so a timeout is only logged.
     """
     lines = len(result.splitlines())
-    bounded_tracker_call(lambda: ctx.tracker.log_call(tool, project, lines), "track_log_call")
+    bounded_tracker_call(
+        lambda: ctx.tracker.log_call(tool, project, lines), "track_log_call", ctx.tracker
+    )
     if project and section:
         is_write = tool == "vault_write"
         _bounded_sync_call(
             lambda: ctx.relevance.record_access(project, section, is_write=is_write),
             _TRACK_RELEVANCE_TIMEOUT_S,
             label="track_record_access",
+            breaker=ctx.relevance,
         )
     return result
 
@@ -1465,11 +1473,18 @@ def _filelock_with_telemetry(
         raise
 
 
+# Abandoned threads still running, keyed by ``id(breaker)`` (#559). The entry
+# holds the breaker itself so its id cannot be reused while the entry exists.
+_ABANDONED: dict[int, tuple[object, threading.Thread]] = {}
+_ABANDONED_LOCK = threading.Lock()
+
+
 def _bounded_sync_call[T](
     fn: Callable[[], T],
     timeout_s: float,
     *,
     label: str,
+    breaker: object | None = None,
 ) -> tuple[bool, T | None]:
     """Run a zero-arg sync callable with a wall-clock deadline.
 
@@ -1490,7 +1505,23 @@ def _bounded_sync_call[T](
     ``fn`` raises before the deadline, the exception propagates to the
     caller unchanged (this helper only bounds *hangs*, it does not
     swallow errors — a raise is not a timeout).
+
+    *breaker* (#559) is the object whose lock ``fn`` takes, usually the
+    tracker. While a timed-out call on the same breaker is still running,
+    the call is skipped at once and returns ``(False, None)``. A held lock
+    therefore costs one bound and one abandoned thread, not one of each per
+    call. The breaker closes once that thread exits.
     """
+    key = id(breaker) if breaker is not None else None
+    if key is not None:
+        with _ABANDONED_LOCK:
+            entry = _ABANDONED.get(key)
+            if entry is not None and not entry[1].is_alive():
+                del _ABANDONED[key]
+                entry = None
+        if entry is not None:
+            _log.debug("mcp.bounded_sync_call.skipped label=%s", label)
+            return False, None
     box: list[T] = []
     errors: list[BaseException] = []
 
@@ -1509,6 +1540,9 @@ def _bounded_sync_call[T](
             label,
             timeout_s,
         )
+        if key is not None:
+            with _ABANDONED_LOCK:
+                _ABANDONED[key] = (breaker, thread)
         return False, None
     if errors:
         raise errors[0]

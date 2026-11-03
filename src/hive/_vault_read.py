@@ -740,7 +740,9 @@ def register_vault_read(mcp: FastMCP, ctx: ServerContext) -> None:
             nonlocal relevance_degraded
             if relevance_degraded:
                 return None
-            ok, result = _bounded_sync_call(fn, _RELEVANCE_TIMEOUT_S, label=label)
+            ok, result = _bounded_sync_call(
+                fn, _RELEVANCE_TIMEOUT_S, label=label, breaker=ctx.relevance
+            )
             if not ok:
                 relevance_degraded = True
                 return None

@@ -146,7 +146,7 @@ def runtime_block_text(ctx: ServerContext, mcp: FastMCP) -> str:
     uptime_s = max(0.0, time.monotonic() - ctx.started_at_monotonic)
     tools = _registered_tool_names(mcp)
     period = datetime.now(UTC).strftime("%Y-%m")
-    _, usage = bounded_tracker_call(ctx.budget.month_usage, "budget_month_usage")
+    _, usage = bounded_tracker_call(ctx.budget.month_usage, "budget_month_usage", ctx.budget)
 
     # HIVE-115 telemetry. Each computation is defensive: a psutil error
     # or stat failure must NEVER prevent vault_health from returning.
@@ -604,7 +604,9 @@ def register_vault_health(mcp: FastMCP, ctx: ServerContext) -> None:
                 parts.append("\n".join(validate_lines))
 
         if include_usage:
-            _, stats = bounded_tracker_call(lambda: ctx.tracker.stats(usage_days), "usage_stats")
+            _, stats = bounded_tracker_call(
+                lambda: ctx.tracker.stats(usage_days), "usage_stats", ctx.tracker
+            )
             if stats is None:
                 parts.append(f"\nVault usage unavailable: {tracker_timeout_text()}.")
             elif stats["total_calls"] == 0:
