@@ -1,5 +1,31 @@
 # Changelog
 
+## [4.6.0](https://github.com/mlorentedev/hive/compare/v4.5.0...v4.6.0) (2026-11-03)
+
+
+### Features
+
+* **config:** add the research scope for 05_research ([#554](https://github.com/mlorentedev/hive/issues/554)) ([bd16721](https://github.com/mlorentedev/hive/commit/bd16721defca2edbaeeac66202cc8bd24e4246c6))
+
+
+### Bug Fixes
+
+* **deps:** bump authlib, joserfc and dnspython past open advisories ([#562](https://github.com/mlorentedev/hive/issues/562)) ([500c26a](https://github.com/mlorentedev/hive/commit/500c26a247b600bb2dbd06ddbd19bb449a8ad8a0))
+* **health:** exempt memories/ from the frontmatter check ([#558](https://github.com/mlorentedev/hive/issues/558)) ([598fa53](https://github.com/mlorentedev/hive/commit/598fa53f56866a01e7531e362483c6b71d9e7172))
+* **health:** read last_updated as freshness and resolve unique suffix wikilinks ([#553](https://github.com/mlorentedev/hive/issues/553)) ([8b1233a](https://github.com/mlorentedev/hive/commit/8b1233a566f08c73e1d34e964077304cfd01b7ae))
+* **helpers:** skip bounded calls on a tracker whose previous call is still stuck ([#563](https://github.com/mlorentedev/hive/issues/563)) ([9cae8f6](https://github.com/mlorentedev/hive/commit/9cae8f6803d3d5bc3aac126df3cba575aad2a931))
+* **server:** stop asking for a worker budget and tier that no longer exist ([#547](https://github.com/mlorentedev/hive/issues/547)) ([88f63a5](https://github.com/mlorentedev/hive/commit/88f63a5879477883010adcc6fc40c5ec566be0cb))
+* **usage:** bound UsageTracker and BudgetTracker calls; say unavailable, not zero ([#557](https://github.com/mlorentedev/hive/issues/557)) ([b471609](https://github.com/mlorentedev/hive/commit/b4716092b21f8b2e6d2f0866b2abb8c61fe3a573))
+* **vault:** name a dirty submodule instead of failing vault_commit ([#551](https://github.com/mlorentedev/hive/issues/551)) ([6fa4c11](https://github.com/mlorentedev/hive/commit/6fa4c11cc50337070314036329308f710d487697))
+* **vault:** refuse a doubled project path and keep authored frontmatter on create ([#555](https://github.com/mlorentedev/hive/issues/555)) ([feb8030](https://github.com/mlorentedev/hive/commit/feb8030f612ef81bb4b0ada5ff9c6f5ce09011ef))
+* **vault:** resolve section shortcuts bare-name first in health, list and write ([#552](https://github.com/mlorentedev/hive/issues/552)) ([0429df9](https://github.com/mlorentedev/hive/commit/0429df9bd684058cd547507512664dabce1dfebf))
+
+
+### Documentation
+
+* **adr:** say which handshake failures ADR-022's relay reports as impersonation ([#550](https://github.com/mlorentedev/hive/issues/550)) ([14d3ac9](https://github.com/mlorentedev/hive/commit/14d3ac9f132d421a54f563984ae785a881c5d5f3))
+* **agents:** stop restating the resolved mcp/fastmcp versions ([#546](https://github.com/mlorentedev/hive/issues/546)) ([4ea37f1](https://github.com/mlorentedev/hive/commit/4ea37f187bbb2250dcc77e1805e07bab67619009))
+
 ## [4.5.0](https://github.com/mlorentedev/hive/compare/v4.4.2...v4.5.0) (2026-11-01)
 
 
