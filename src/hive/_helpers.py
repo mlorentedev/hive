@@ -176,6 +176,18 @@ SECTION_SHORTCUTS: dict[str, str] = {
     "lessons": "90-lessons.md",
 }
 
+
+def section_file(project_dir: Path, section: str) -> Path:
+    """The file a section shortcut names: the bare name first, then the legacy one.
+
+    Convention-first: ``context.md`` before ``00-context.md``. Every reader and
+    writer of a section goes through here, so a project on either convention
+    reads, lists, health-checks and writes the same file.
+    """
+    bare = project_dir / f"{section}.md"
+    return bare if bare.is_file() else project_dir / SECTION_SHORTCUTS[section]
+
+
 # The scope KEY (not directory) that holds cross-project content. Several
 # tools special-case it: project auto-scan and health enumeration skip it,
 # and it is reached via the ``_meta`` slug shortcut. Centralised here so the
@@ -940,13 +952,10 @@ def _resolve_file(
         if boundary_error:
             return boundary_error
     else:
-        filename = SECTION_SHORTCUTS.get(section)
-        if filename is None:
+        if section not in SECTION_SHORTCUTS:
             available = ", ".join(SECTION_SHORTCUTS)
             return f"Section '{section}' not found. Available shortcuts: {available}"
-        # Convention-first: try bare name (e.g. context.md) before legacy (00-context.md)
-        bare = project_dir / f"{section}.md"
-        filepath = bare if bare.exists() else project_dir / filename
+        filepath = section_file(project_dir, section)
 
     if not filepath.exists():
         target = path or section

@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 from hive._helpers import (
     _READ_ONLY,
     META_SCOPE,
-    SECTION_SHORTCUTS,
     _resolve_project_dir,
     _safe_read,
     _strip_code,
@@ -25,6 +24,7 @@ from hive._helpers import (
     detect_obsidian_git,
     project_not_found,
     scan_project,
+    section_file,
     stale_reference_date,
     track,
     tracker_timeout_text,
@@ -45,6 +45,12 @@ if TYPE_CHECKING:
 _ALL_CHECKS = frozenset({"frontmatter", "stale", "links"})
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+?)(?:[|#][^\]]*?)?\]\]")
 _POSIX_CLASS_RE = re.compile(r"^:[a-z]+:$")
+
+# The sections a vault project is still expected to have (#468). Since the
+# knowledge-placement model, tasks live on the bitácora board (ADR-018) and
+# lessons in each repo's docs/lessons/, so their absence is correct, not a
+# finding. The shortcuts still resolve all four when they exist.
+_EXPECTED_SECTIONS = ("context",)
 
 # Directories whose files follow a consumer schema, not the vault frontmatter
 # schema, mirroring vault-validate.py (#348).
@@ -295,9 +301,7 @@ def health_report_text(ctx: ServerContext, filter_project: str = "") -> str:
                 frontmatters,
                 stale_threshold,
             )
-            missing = [
-                s for s, fname in SECTION_SHORTCUTS.items() if not (project_dir / fname).exists()
-            ]
+            missing = [s for s in _EXPECTED_SECTIONS if not section_file(project_dir, s).exists()]
 
             lines.append(f"## {scope_name}/{project_dir.name}")
             lines.append(f"- Files: {len(md_files)}")
