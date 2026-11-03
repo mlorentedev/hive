@@ -370,6 +370,7 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
                 task_type="delegate",
             ),
             "budget_record_request",
+            ctx.budget,
         )
 
     async def _try_worker(
@@ -924,7 +925,9 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
         """
         try:
             async with tool_span("worker_status", ctx.tool_timeout):
-                _, usage = bounded_tracker_call(ctx.budget.month_usage, "budget_month_usage")
+                _, usage = bounded_tracker_call(
+                    ctx.budget.month_usage, "budget_month_usage", ctx.budget
+                )
                 configured = ctx.worker is not None
 
                 lines = [
