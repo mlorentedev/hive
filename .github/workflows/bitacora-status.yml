@@ -22,8 +22,9 @@ name: Bitácora status — In Progress on assign
 #
 # The guard and the write both go by id, so renaming the field or an option
 # cannot make the guard read a parked issue as unset (dotfiles#3160 item 4).
-# Every GraphQL call retries a transient failure; one blip used to leave the
-# issue where it was (item 3).
+# A transient failure retries the whole read-then-write, so each attempt
+# re-checks the live state and the Status; one blip used to leave the issue
+# where it was (item 3).
 #
 # Canonical IDs (re-list: gh project field-list 1 --owner mlorentedev --format json):
 #   Project  PVT_kwHOAM7xJs4BZ6GY
@@ -56,94 +57,100 @@ jobs:
             const { number, node_id: contentId } = context.payload.issue;
 
             // A transient failure (5xx, network, rate limit) is retried; anything
-            // else, or the third failure, fails the run. A 403 is a rate limit only
-            // when GitHub says so: otherwise it is a missing permission. A GraphQL
-            // error arrives with HTTP 200, so its type decides.
+            // else, or the third failure, fails the run. octokit reports a network
+            // failure as status 500, so an error with no status is the script's own
+            // and is not retried. A 403 is a rate limit only when GitHub says so:
+            // otherwise it is a missing permission. A GraphQL error arrives with
+            // HTTP 200, so its type decides.
             async function withRetry(call) {
               for (let attempt = 1; ; attempt++) {
                 try {
                   return await call();
                 } catch (err) {
                   const status = err.status ?? err.response?.status;
-                  const headers = err.response?.headers ?? {};
+                  // REST errors carry the headers on err.response; @octokit/graphql
+                  // keeps the parsed body there and the headers on err.headers.
+                  const headers = err.response?.headers ?? err.headers ?? {};
                   const after = Number(headers['retry-after']) || 0;
                   const limited = status === 429
                     || (status === 403 && (after > 0 || /rate limit/i.test(err.message)))
-                    || (err.errors ?? []).some((e) => e.type === 'RATE_LIMITED');
-                  const transient = limited || status >= 500 || (status === undefined && !err.errors);
+                    || (err.errors ?? []).some((e) => /^RATE_LIMIT(ED)?$/.test(e.type));
+                  const transient = limited || status >= 500;
                   if (attempt === 3 || !transient) throw err;
-                  // GitHub asks for retry-after when given, then the primary limit's
-                  // reset time, else at least a minute. A wait past five minutes
-                  // would outlast the job: fail now, and the reconciler heals it.
-                  const reset = Number(headers['x-ratelimit-reset']) || 0;
+                  // GitHub asks for retry-after when given. Without it, a spent
+                  // primary pool (x-ratelimit-remaining 0) waits for its reset; any
+                  // other limit waits a minute. A secondary limit arrives while the
+                  // primary reset is still up to an hour away, so that reset is not
+                  // its wait. A wait past five minutes would outlast the job: fail
+                  // now, and the reconciler heals it.
+                  const spent = String(headers['x-ratelimit-remaining']) === '0';
+                  const reset = spent ? Number(headers['x-ratelimit-reset']) || 0 : 0;
                   const untilReset = reset ? Math.ceil(reset - Date.now() / 1000) : 0;
-                  const wait = limited ? Math.max(after, untilReset, 60) : attempt * 5;
+                  const wait = limited ? after || (untilReset > 0 ? untilReset : 60) : attempt * 5;
                   if (wait > 300) throw err;
                   core.warning(`transient failure (attempt ${attempt}/3, ${status ?? err.message}); retrying in ${wait}s`);
                   await new Promise((r) => setTimeout(r, wait * 1000));
                 }
               }
             }
-            const graphql = (query, vars) => withRetry(() => github.graphql(query, vars));
 
-            // The event carries the state at assignment time; the issue may have
-            // closed while this run sat in the queue (dotfiles#3160 item 8).
-            const { data: live } = await withRetry(() => github.rest.issues.get({ ...context.repo, issue_number: number }));
-            if (live.state !== 'open') {
-              core.info(`Issue #${number} is ${live.state}; left off the board`);
-              return;
-            }
+            // One attempt reads everything it decides on: a retry can wait minutes,
+            // and the issue may close or be parked during the wait. Each attempt
+            // re-reads the live state (the event carries the state at assignment
+            // time, dotfiles#3160 item 8) and the Status before it writes.
+            async function attempt() {
+              const { data: live } = await github.rest.issues.get({ ...context.repo, issue_number: number });
+              if (live.state !== 'open') return `Issue #${number} is ${live.state}; left off the board`;
 
-            // addProjectV2ItemById is idempotent: returns the existing item id
-            // if the issue is already on the board.
-            const added = await graphql(
-              `mutation($projectId: ID!, $contentId: ID!) {
-                addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
-                  item { id }
-                }
-              }`,
-              { projectId, contentId },
-            );
-            const itemId = added.addProjectV2ItemById.item.id;
+              // addProjectV2ItemById is idempotent: returns the existing item id
+              // if the issue is already on the board.
+              const added = await github.graphql(
+                `mutation($projectId: ID!, $contentId: ID!) {
+                  addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                    item { id }
+                  }
+                }`,
+                { projectId, contentId },
+              );
+              const itemId = added.addProjectV2ItemById.item.id;
 
-            const current = await graphql(
-              `query($itemId: ID!) {
-                node(id: $itemId) {
-                  ... on ProjectV2Item {
-                    fieldValues(first: 100) {
-                      pageInfo { hasNextPage }
-                      nodes {
-                        ... on ProjectV2ItemFieldSingleSelectValue {
-                          optionId name
-                          field { ... on ProjectV2SingleSelectField { id } }
+              const current = await github.graphql(
+                `query($itemId: ID!) {
+                  node(id: $itemId) {
+                    ... on ProjectV2Item {
+                      fieldValues(first: 100) {
+                        pageInfo { hasNextPage }
+                        nodes {
+                          ... on ProjectV2ItemFieldSingleSelectValue {
+                            optionId name
+                            field { ... on ProjectV2SingleSelectField { id } }
+                          }
                         }
                       }
                     }
                   }
-                }
-              }`,
-              { itemId },
-            );
-            const values = current.node?.fieldValues;
-            const status = (values?.nodes ?? []).find((v) => v?.field?.id === statusFieldId);
-            // A project holds at most 50 fields, so one page of 100 is all of them.
-            // Should that change, an unseen Status must not read as unset.
-            if (!status && values?.pageInfo?.hasNextPage) {
-              throw new Error(`Issue #${number}: Status not in the first 100 field values; not moving it`);
-            }
-            if (status && status.optionId !== backlogId) {
-              core.info(`Issue #${number} is "${status.name}"; left as is`);
-              return;
+                }`,
+                { itemId },
+              );
+              const values = current.node?.fieldValues;
+              const status = (values?.nodes ?? []).find((v) => v?.field?.id === statusFieldId);
+              // A project holds at most 50 fields, so one page of 100 is all of them.
+              // Should that change, an unseen Status must not read as unset.
+              if (!status && values?.pageInfo?.hasNextPage) {
+                throw new Error(`Issue #${number}: Status not in the first 100 field values; not moving it`);
+              }
+              if (status && status.optionId !== backlogId) return `Issue #${number} is "${status.name}"; left as is`;
+
+              await github.graphql(
+                `mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: $projectId, itemId: $itemId, fieldId: $fieldId,
+                    value: { singleSelectOptionId: $optionId },
+                  }) { projectV2Item { id } }
+                }`,
+                { projectId, itemId, fieldId: statusFieldId, optionId: inProgressId },
+              );
+              return `Moved issue #${number} → In Progress (item ${itemId})`;
             }
 
-            await graphql(
-              `mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
-                updateProjectV2ItemFieldValue(input: {
-                  projectId: $projectId, itemId: $itemId, fieldId: $fieldId,
-                  value: { singleSelectOptionId: $optionId },
-                }) { projectV2Item { id } }
-              }`,
-              { projectId, itemId, fieldId: statusFieldId, optionId: inProgressId },
-            );
-
-            core.info(`Moved issue #${number} → In Progress (item ${itemId})`);
+            core.info(await withRetry(attempt));
