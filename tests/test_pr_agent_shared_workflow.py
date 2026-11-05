@@ -32,8 +32,22 @@ def test_the_pool_comes_from_the_dotf_pin() -> None:
     assert _job()["with"]["pool"] == "embedded"
 
 
-def test_dotf_is_pinned_to_a_release() -> None:
-    assert re.fullmatch(r"\d+\.\d+\.\d+", str(_job()["with"]["dotf_version"]))
+def test_release_pull_requests_are_not_reviewed_again() -> None:
+    assert _job()["with"]["skip_branch_prefixes"].split() == ["release-please--"]
+
+
+def test_the_caller_passes_neither_dotf_nor_a_model_chain() -> None:
+    declared = {"dotf_version", "declared_model", "declared_fallback_models"}
+    assert not declared & set(_job()["with"])
+
+
+def test_the_pin_is_at_least_the_tag_that_defaults_them() -> None:
+    # v0.1.0 requires dotf_version and the chain. The tag is compared, not the
+    # SHA, so a Dependabot bump keeps this green and a revert turns it red.
+    match = PINNED_LINE.search(WORKFLOW.read_text(encoding="utf-8"))
+    assert match
+    tag = match.group(0).rsplit("# v", 1)[1]
+    assert tuple(int(part) for part in tag.split(".")) >= (0, 2, 0)
 
 
 def test_secrets_are_passed_by_name() -> None:
