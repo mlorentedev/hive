@@ -85,7 +85,7 @@ jobs:
           RATE_LIMITED=10
 
           # fd 3 is the step's stdout. gh_graphql's notices go there, so a caller
-          # that captures the function's output gets the response alone (#3160).
+          # that captures the function's output gets the response alone (mlorentedev/dotfiles#3160).
           exec 3>&1
 
           # gh_graphql <args...> — one GraphQL call with the three-way handling
@@ -111,7 +111,7 @@ jobs:
                     return 1
                   fi
                   # GitHub asks for at least a minute before retrying a secondary
-                  # limit; a 5xx or a network blip backs off 5 s, then 10 s (#3160).
+                  # limit; a 5xx or a network blip backs off 5 s, then 10 s (mlorentedev/dotfiles#3160).
                   case "$out" in
                     *"secondary rate limit"*|*"abuse detection"*|*"was submitted too quickly"*) wait=60 ;;
                     *) wait=$(( attempt * 5 )) ;;
@@ -163,14 +163,15 @@ jobs:
               # Green on purpose. The item IS off the board, and that is recorded
               # for the reconciler rather than pretended away — failing the job
               # here would only add a red run nobody reads to a drop nobody sees.
-              printf '%s%s\n' \
+              printf '%s%s%s\n' \
                 '::warning::primary GraphQL pool exhausted (billed per account, not per token) — ' \
-                'this item is NOT on the board; mlorentedev/dotfiles bitacora-reconcile.yml will add it within a day'
+                'this item is NOT on the board; if it is still open, ' \
+                'mlorentedev/dotfiles bitacora-reconcile.yml adds it within a day'
               ;;
             *)
               printf '%s%s\n' \
-                '::error::could not add this item to the bitácora board — ' \
-                'this is not a rate limit, so it will not self-heal'
+                '::error::could not add this item to the bitácora board (not a rate limit). ' \
+                'An outage heals at the daily reconcile if the item is still open; a token or board error does not'
               exit 1
               ;;
           esac
