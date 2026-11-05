@@ -32,8 +32,13 @@ def test_the_pool_comes_from_the_dotf_pin() -> None:
     assert _job()["with"]["pool"] == "embedded"
 
 
-def test_dotf_is_pinned_to_a_release() -> None:
-    assert re.fullmatch(r"\d+\.\d+\.\d+", str(_job()["with"]["dotf_version"]))
+def test_release_pull_requests_are_not_reviewed_again() -> None:
+    assert _job()["with"]["skip_branch_prefixes"].split() == ["release-please--"]
+
+
+def test_dotf_and_the_chain_come_from_the_pinned_tag() -> None:
+    declared = {"dotf_version", "declared_model", "declared_fallback_models"}
+    assert not declared & set(_job()["with"])
 
 
 def test_secrets_are_passed_by_name() -> None:

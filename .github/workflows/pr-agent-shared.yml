@@ -22,12 +22,14 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
-    uses: mlorentedev/ci-workflows/.github/workflows/pr-agent.yml@a7ece3a8f135af5895dd06f06d676da57d0d5dfa # v0.1.0
+    uses: mlorentedev/ci-workflows/.github/workflows/pr-agent.yml@892309ffcdadef66a57654d44383abaec8b1df87 # v0.2.0
+    # dotf_version and the model chain take the tag's defaults: the dotf release it
+    # was tested with, and the chain read from the pool.
     with:
-      dotf_version: 0.78.0
       pool: embedded
-      declared_model: openai/mimo-v2.6-flash
-      declared_fallback_models: '["openai/deepseek-v4-flash", "openai/glm5.3-flash"]'
+      # Release PRs restate commits each reviewed when it landed. Since v0.2.0 the
+      # caller names the prefix; without it they would be reviewed again.
+      skip_branch_prefixes: release-please--
     secrets:
       NAN_API_KEY: ${{ secrets.NAN_API_KEY }}
       PR_AGENT_ANTHROPIC_API_KEY: ${{ secrets.PR_AGENT_ANTHROPIC_API_KEY }}
