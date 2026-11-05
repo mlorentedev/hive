@@ -4,13 +4,29 @@ name: Add to bitácora
 # (GitHub Project #1). Pairs with bitacora-status.yml (which flips an assigned
 # issue to In Progress). Canonical copy for the OPS-002 (#258) multi-repo rollout.
 #
-# Dependabot PRs are deliberately excluded (board hygiene): a version bump is not
-# work to triage — its record lives in CHANGELOG + git history. This also avoids
-# needing a duplicate BITACORA_PAT in the Dependabot secret store: GitHub isolates
-# Dependabot secrets from Actions secrets, so excluding the trigger means only the
-# Actions secret is required (halves the rotation surface across repos).
-
-
+# OPS-023 (#809): this workflow used to drop items silently. Both paths failed
+# hard with no retry and no alert, and nobody watches an Actions run fired by an
+# `issues: opened` event — a missing ticket looks exactly like a ticket that was
+# never filed. Five confirmed instances across three days and two repos.
+#
+# The failure modes are NOT interchangeable, so they are classified rather than
+# lumped into one `continue-on-error`, which would turn a bad token or a deleted
+# board into the same silent drop this exists to stop:
+#
+#   primary rate limit -> soft-fail, NO retry. GitHub bills the 5,000-point
+#                         GraphQL pool to the ACCOUNT (not the token), so an
+#                         interactive session can drain it and the reset is up to
+#                         an hour away. Retrying would burn the job and still
+#                         lose. bitacora-reconcile.yml heals the drop instead.
+#   transient          -> retry with backoff (5xx, network, secondary limit).
+#   anything else      -> red, loudly.
+#
+# Both event types now go through the same GraphQL mutation. The old issues path
+# used actions/add-to-project@v2.0.0, which cannot be wrapped in a retry without
+# either re-running the whole job or adding a third-party retry action (a new
+# supply-chain dependency in a repo that SHA-pins its actions, #692). The content
+# node ID is already in the event payload, so unifying costs nothing and removes
+# the PR path's separate node-ID lookup.
 
 on:
   issues:
@@ -18,47 +34,129 @@ on:
   pull_request:
     types: [opened, reopened]
 
+permissions: {}  # authenticates with BITACORA_PAT, not the default GITHUB_TOKEN
+
 jobs:
   add-to-project:
     # Fork PRs run without repository secrets — BITACORA_PAT would be empty and the
     # job would fail (Codex review on kubelab#237). Skip them; fork PRs reach the
-    # board via the rollout backfill or a manual item-add.
-    # Dependabot PRs are excluded from the board (see header comment for rationale).
-    # The bot exclusion applies to BOTH event types. Previously `issues` short-
-    # circuited the whole condition, so a bot-authored issue would have been
-    # added regardless — latent today (Dependabot opens no issues by default)
-    # but live the moment Dependabot security alerts are configured to file
-    # them, or any other bot starts opening issues here.
-    if: >-
-      github.event.sender.login != 'dependabot[bot]' &&
-      (github.event_name == 'issues' ||
-       (github.event.pull_request.head.repo.fork == false &&
-        github.event.pull_request.user.login != 'dependabot[bot]'))
+    # board via the reconciler or a manual item-add.
+    #
+    # Dependabot is the SAME failure with a different cause, and the fork test does
+    # not catch it: a Dependabot PR is a branch in this repo, not a fork, so
+    # `head.repo.fork` is false and the job ran with an empty token. GitHub serves
+    # Dependabot-triggered runs from a SEPARATE secrets store, and this repo's is
+    # empty — measured 2026-08-24 on #1219/#1220 (HARNESS-080, #1221):
+    #
+    #   gh api repos/OWNER/REPO/actions/secrets    -> BITACORA_PAT, NAN_API_KEY, ...
+    #   gh api repos/OWNER/REPO/dependabot/secrets -> total_count: 0
+    #
+    # so `secrets.BITACORA_PAT` expands to the empty string with no error, the
+    # GraphQL call fails auth, and the script correctly classifies it as "not a
+    # rate limit" and goes red — on every weekly PR, forever.
+    #
+    # Keyed on `github.actor`, deliberately: it is the SAME field GitHub uses to
+    # decide which secrets store to serve, so the skip applies exactly when the
+    # credential is absent and never when it is present. If a human pushes to a
+    # Dependabot branch the actor is that human, the secrets are there, and the
+    # job runs. A branch-name or author-string rule would have neither property.
+    #
+    # Not a silent drop: bitacora-reconcile.yml adds every open issue and PR to
+    # the board daily, which is the healing path this workflow's header already
+    # names for the rate-limited case.
+    if: >
+      (github.event_name == 'issues' || github.event.pull_request.head.repo.fork == false)
+      && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      # Issues: use the official action (works fine for issues)
-      - name: Add issue to project
-        if: github.event_name == 'issues'
-        uses: actions/add-to-project@5afcf98fcd03f1c2f92c3c83f58ae24323cc57fd # v2.0.0
-        with:
-          project-url: https://github.com/users/mlorentedev/projects/1
-          github-token: ${{ secrets.BITACORA_PAT }}
-
-      # PRs: gh project item-add can't resolve owner type for user projects.
-      # Use the GraphQL API directly: resolve projectId → add item by node_id.
-      - name: Add PR to project
-        if: github.event_name == 'pull_request'
-        run: |
-          PROJECT_ID=$(gh api graphql -f query='
-            { user(login: "mlorentedev") { projectV2(number: 1) { id } } }
-          ' --jq '.data.user.projectV2.id')
-          gh api graphql -f query='
-            mutation($pid: ID!, $cid: ID!) {
-              addProjectV2ItemById(input: { projectId: $pid, contentId: $cid }) {
-                item { id }
-              }
-            }
-          ' -f pid="$PROJECT_ID" -f cid="${{ github.event.pull_request.node_id }}"
-          echo "PR added to bitácora project"
+      - name: Add to bitácora board
         env:
           GH_TOKEN: ${{ secrets.BITACORA_PAT }}
+          # Present for exactly one of the two events; `||` picks whichever fired.
+          CONTENT_NODE_ID: ${{ github.event.issue.node_id || github.event.pull_request.node_id }}
+        run: |
+          set -euo pipefail
+
+          # Exit 10 is this script's private "rate-limited, not our problem now"
+          # signal — distinct from 1 (real failure) so the caller can soft-fail
+          # only that case.
+          RATE_LIMITED=10
+
+          # gh_graphql <args...> — one GraphQL call with the three-way handling
+          # described in the header. Prints the response on success.
+          gh_graphql() {
+            local attempt=1 max=3 out
+            while :; do
+              if out=$(gh api graphql "$@" 2>&1); then
+                printf '%s' "$out"
+                return 0
+              fi
+              case "$out" in
+                *"API rate limit exceeded"*|*"API rate limit already exceeded"*)
+                  printf '%s\n' "$out" >&2
+                  return "$RATE_LIMITED"
+                  ;;
+                *"secondary rate limit"*|*"abuse detection"*|*"was submitted too quickly"*|\
+                *"HTTP 50"*|*"timeout"*|*"Connection reset"*|*"EOF"*)
+                  if [ "$attempt" -ge "$max" ]; then
+                    printf '::error::transient failure persisted after %d attempts\n' "$max"
+                    printf '%s\n' "$out" >&2
+                    return 1
+                  fi
+                  printf '::warning::transient failure (attempt %d/%d), retrying\n' "$attempt" "$max"
+                  sleep $(( attempt * 5 ))
+                  attempt=$(( attempt + 1 ))
+                  ;;
+                *)
+                  printf '%s\n' "$out" >&2
+                  return 1
+                  ;;
+              esac
+            done
+          }
+
+          if [ -z "${CONTENT_NODE_ID}" ]; then
+            printf '::error::no content node id in the %s event payload\n' "${GITHUB_EVENT_NAME}"
+            exit 1
+          fi
+
+          rc=0
+          PROJECT_ID=$(gh_graphql -f query='
+            query { user(login: "mlorentedev") { projectV2(number: 1) { id } } }
+          ' --jq '.data.user.projectV2.id') || rc=$?
+
+          if [ "$rc" -eq 0 ] && [ -n "${PROJECT_ID}" ]; then
+            # $project and $contentId are GraphQL variables, not shell ones.
+            # shellcheck disable=SC2016
+            gh_graphql -f query='
+              mutation($project: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: {projectId: $project, contentId: $contentId}) {
+                  item { id }
+                }
+              }
+            ' -f project="$PROJECT_ID" -f contentId="$CONTENT_NODE_ID" >/dev/null || rc=$?
+          elif [ "$rc" -eq 0 ]; then
+            printf '::error::project id resolved empty with no API error\n'
+            rc=1
+          fi
+
+          case "$rc" in
+            0)
+              printf '::notice::added to the bitácora board\n'
+              ;;
+            "$RATE_LIMITED")
+              # Green on purpose. The item IS off the board, and that is recorded
+              # for the reconciler rather than pretended away — failing the job
+              # here would only add a red run nobody reads to a drop nobody sees.
+              printf '%s%s\n' \
+                '::warning::primary GraphQL pool exhausted (billed per account, not per token) — ' \
+                'this item is NOT on the board; bitacora-reconcile.yml will add it within a day'
+              ;;
+            *)
+              printf '%s%s\n' \
+                '::error::could not add this item to the bitácora board — ' \
+                'this is not a rate limit, so it will not self-heal'
+              exit 1
+              ;;
+          esac
