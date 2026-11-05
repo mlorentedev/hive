@@ -9,13 +9,21 @@ name: Bitácora status — In Progress on assign
 # "Backlog" on add and "Done" on close; "Blocked" stays a deliberate manual
 # transition (no reliable machine signal) — see runbook §5.
 #
+# So the move happens only from "Backlog" or from no status. A run that sits in
+# the queue can finish after a deliberate "Blocked" set right after the
+# assignment, and an unconditional write erased that park silently (#2878).
+# The read and the write are still two calls: the Projects API has no
+# conditional mutation, so a status set in the milliseconds between them is
+# overwritten. That residual window is accepted; the queue delay it replaces
+# was minutes long.
+#
 # Uses actions/github-script for the Projects v2 GraphQL (the `gh project` CLI
 # fails with "unknown owner type" under a fine-grained PAT).
 #
 # Canonical IDs (re-list: gh project field-list 1 --owner mlorentedev --format json):
 #   Project  PVT_kwHOAM7xJs4BZ6GY
 #   Status   PVTSSF_lAHOAM7xJs4BZ6GYzhU1dtI   (option "In Progress" = 6c133cc8)
-# Full reference: docs/runbooks/guide-bitacora-setup.md §2 / §5 / §7.
+# Full reference: vault 00_meta/runbooks/bitacora-project-setup.md §2 / §5 / §7.
 
 on:
   issues:
@@ -28,6 +36,7 @@ jobs:
     # Never resurrect a closed issue's status when it is (re)assigned.
     if: github.event.issue.state == 'open'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Move assigned issue to In Progress
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
@@ -50,6 +59,24 @@ jobs:
               { projectId, contentId },
             );
             const itemId = added.addProjectV2ItemById.item.id;
+
+            const current = await github.graphql(
+              `query($itemId: ID!) {
+                node(id: $itemId) {
+                  ... on ProjectV2Item {
+                    fieldValueByName(name: "Status") {
+                      ... on ProjectV2ItemFieldSingleSelectValue { name }
+                    }
+                  }
+                }
+              }`,
+              { itemId },
+            );
+            const status = current.node?.fieldValueByName?.name;
+            if (status && status !== 'Backlog') {
+              core.info(`Issue #${context.payload.issue.number} is "${status}"; left as is`);
+              return;
+            }
 
             await github.graphql(
               `mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
