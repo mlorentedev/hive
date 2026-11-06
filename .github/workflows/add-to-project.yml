@@ -17,8 +17,9 @@ name: Add to bitácora
 #                         GraphQL pool to the ACCOUNT (not the token), so an
 #                         interactive session can drain it and the reset is up to
 #                         an hour away. Retrying would burn the job and still
-#                         lose. bitacora-reconcile.yml heals the drop instead.
-#   transient          -> retry with backoff (5xx, network, secondary limit).
+#                         lose. mlorentedev/dotfiles' bitacora-reconcile.yml heals the drop instead.
+#   transient          -> retry with backoff (5xx, network, secondary limit;
+#                         a secondary limit waits a minute, as GitHub asks).
 #   anything else      -> red, loudly.
 #
 # Both event types now go through the same GraphQL mutation. The old issues path
@@ -61,8 +62,8 @@ jobs:
     # Dependabot branch the actor is that human, the secrets are there, and the
     # job runs. A branch-name or author-string rule would have neither property.
     #
-    # Not a silent drop: bitacora-reconcile.yml adds every open issue and PR to
-    # the board daily, which is the healing path this workflow's header already
+    # Not a silent drop: bitacora-reconcile.yml (in mlorentedev/dotfiles, daily,
+    # every repository) adds every open issue and PR to the board, which is the healing path this workflow's header already
     # names for the rate-limited case.
     if: >
       (github.event_name == 'issues' || github.event.pull_request.head.repo.fork == false)
@@ -83,10 +84,14 @@ jobs:
           # only that case.
           RATE_LIMITED=10
 
+          # fd 3 is the step's stdout. gh_graphql's notices go there, so a caller
+          # that captures the function's output gets the response alone (mlorentedev/dotfiles#3160).
+          exec 3>&1
+
           # gh_graphql <args...> — one GraphQL call with the three-way handling
           # described in the header. Prints the response on success.
           gh_graphql() {
-            local attempt=1 max=3 out
+            local attempt=1 max=3 out wait
             while :; do
               if out=$(gh api graphql "$@" 2>&1); then
                 printf '%s' "$out"
@@ -98,14 +103,21 @@ jobs:
                   return "$RATE_LIMITED"
                   ;;
                 *"secondary rate limit"*|*"abuse detection"*|*"was submitted too quickly"*|\
-                *"HTTP 50"*|*"timeout"*|*"Connection reset"*|*"EOF"*)
+                *"HTTP 50"*|*"timeout"*|*"Connection reset"*|*"EOF"*|\
+                *"connection refused"*|*"no such host"*)
                   if [ "$attempt" -ge "$max" ]; then
-                    printf '::error::transient failure persisted after %d attempts\n' "$max"
+                    printf '::error::transient failure persisted after %d attempts\n' "$max" >&3
                     printf '%s\n' "$out" >&2
                     return 1
                   fi
-                  printf '::warning::transient failure (attempt %d/%d), retrying\n' "$attempt" "$max"
-                  sleep $(( attempt * 5 ))
+                  # GitHub asks for at least a minute before retrying a secondary
+                  # limit; a 5xx or a network blip backs off 5 s, then 10 s (mlorentedev/dotfiles#3160).
+                  case "$out" in
+                    *"secondary rate limit"*|*"abuse detection"*|*"was submitted too quickly"*) wait=60 ;;
+                    *) wait=$(( attempt * 5 )) ;;
+                  esac
+                  printf '::warning::transient failure (attempt %d/%d), retrying in %ds\n' "$attempt" "$max" "$wait" >&3
+                  sleep "$wait"
                   attempt=$(( attempt + 1 ))
                   ;;
                 *)
@@ -126,6 +138,8 @@ jobs:
             query { user(login: "mlorentedev") { projectV2(number: 1) { id } } }
           ' --jq '.data.user.projectV2.id') || rc=$?
 
+          # --jq prints `null` for a missing project: that is no id either.
+          [ "${PROJECT_ID}" = null ] && PROJECT_ID=
           if [ "$rc" -eq 0 ] && [ -n "${PROJECT_ID}" ]; then
             # $project and $contentId are GraphQL variables, not shell ones.
             # shellcheck disable=SC2016
@@ -149,14 +163,15 @@ jobs:
               # Green on purpose. The item IS off the board, and that is recorded
               # for the reconciler rather than pretended away — failing the job
               # here would only add a red run nobody reads to a drop nobody sees.
-              printf '%s%s\n' \
+              printf '%s%s%s\n' \
                 '::warning::primary GraphQL pool exhausted (billed per account, not per token) — ' \
-                'this item is NOT on the board; bitacora-reconcile.yml will add it within a day'
+                'this item is NOT on the board; if it is still open, ' \
+                'mlorentedev/dotfiles bitacora-reconcile.yml adds it within a day'
               ;;
             *)
               printf '%s%s\n' \
-                '::error::could not add this item to the bitácora board — ' \
-                'this is not a rate limit, so it will not self-heal'
+                '::error::could not add this item to the bitácora board (not a rate limit). ' \
+                'An outage heals at the daily reconcile if the item is still open; a token or board error does not'
               exit 1
               ;;
           esac
