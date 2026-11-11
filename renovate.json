@@ -1,0 +1,18 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "github>mlorentedev/ci-workflows//renovate/default#v0.5.0"
+  ],
+  "packageRules": [
+    {
+      "description": "A new mcp major is audited by hand: run tests/test_cancel_race.py and the full suite on it, then move the bounds in pyproject.toml and tests/test_dependency_bounds.py together (#434).",
+      "matchPackageNames": [
+        "mcp"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    }
+  ]
+}
