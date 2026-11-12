@@ -915,9 +915,9 @@ def register_workers(mcp: FastMCP, ctx: ServerContext) -> None:
         "configured" from "answers" is how a dead backend stays invisible.
 
         So reachability is **probed, not inferred**, and reported separately
-        from configuration. The dollar figures are gone: on a flat subscription
-        they would read zero forever, and a gauge that always says the same
-        thing looks like a working gauge.
+        from configuration. The dollar figures are gone: NaN bills in credits and
+        exposes no per-request cost, so they would read zero forever, and a
+        gauge that always says the same thing looks like a working gauge.
 
         Args:
             include_models: Probe the provider for its model list. Default True.

@@ -67,8 +67,9 @@ answer is unusable), because a caller may retry the first elsewhere and must not
 
 Ollama and OpenRouter were removed in **4.0.0**; their model aliases (`auto`, `ollama`,
 `openrouter-free`, `openrouter`) are rejected with a message naming the replacement rather than
-silently ignored. There is no spend cap: the provider is a flat subscription, so the binding
-constraint is concurrency, not cost.
+silently ignored. There is no spend cap: the caller picks the model per invocation, so spend is
+decided there, and NaN's `402` (credit pool empty) is a pool refusal that advances the caller's
+chain (ADR-021, amended 2026-11-12).
 
 ## MCP tool schema rules (load-bearing)
 
