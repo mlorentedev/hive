@@ -215,7 +215,7 @@ jobs:
       # already forbids it — the top tier "queues or escalates, NEVER degrades
       # silently" — so this makes the degrade loud and does nothing else.
       #
-      # `fallback_models` names mimo-v2.5 for CONCURRENCY (per-model limit,
+      # `fallback_models` names deepseek-v4-flash for CONCURRENCY (per-model limit,
       # measured), never to soften the quality bar. The marker comes from the
       # registry, over the API since this job has no checkout, at the BASE ref
       # since a PR supplying it could redefine it. Two more bindings, both
