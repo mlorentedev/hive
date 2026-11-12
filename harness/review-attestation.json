@@ -81,7 +81,8 @@
       "login": "github-actions",
       "declined_markers": [],
       "review_markers": [
-        "## PR Reviewer Guide"
+        "## PR Reviewer Guide",
+        "## Incremental PR Reviewer Guide"
       ],
       "why": "PR-Agent (see .github/workflows/pr-agent.yml) runs under GITHUB_TOKEN and publishes through the COMMENTS api, so its reviews never enter reviews[] and a classifier that looked only at reviews would read every PR-Agent-reviewed PR as unattested. The marker is the `review` command's own heading. `## PR Code Suggestions` is deliberately NOT here: suggestions are not a review, which is also why auto_improve is off on the automatic path. MARKER PROVENANCE: verified in the sibling ports before being declared here (kubelab has 215 PR comments carrying '## PR Reviewer Guide' posted by github-actions[bot], dotfiles has 172, per the ts-bridge registry). It has NEVER been observed in hive, because this workflow has not run here: the first green run of pr-agent on a hive PR is the verification, and until then this entry is a declaration of intent, not of an actor. The workflow's own guard step fails when no comment carrying this marker appears, so an absent NAN_API_KEY reads as a red job with a diagnosis rather than a green job with no review."
     }
@@ -89,5 +90,17 @@
   "triage": {
     "marker": "## Review triage",
     "why": "A heading, matched at the start of a line, so that quoting it inside prose does not read as a disposition. Recording the disposition on the PR is what makes the Definition of Done's Review item checkable by someone other than its author — including when there was nothing to dispose of, because 'CI green, no findings' is a disposition and leaving it unwritten is indistinguishable from nobody having looked."
+  },
+  "classification": {
+    "prefix": "Class: ",
+    "classes": [
+      "REAL",
+      "THEORETICAL",
+      "SPECULATIVE"
+    ],
+    "reviewers": [
+      "github-actions"
+    ],
+    "why": "A finding's class is read from a whole line equal to prefix + class, never parsed out of prose; a finding with no such line, or two that disagree, is unclassified and goes to a human. .pr_agent.toml asks the reviewer for exactly these lines in extra_instructions, with the paragraph shared by every repository that calls the ci-workflows pr-agent workflow. reviewers names PR-Agent (github-actions) only, because CodeRabbit writes its own severity format. Shape copied from dotfiles (TOOL-017)."
   }
 }
