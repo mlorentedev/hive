@@ -129,3 +129,9 @@ markers = [
     "crossuser: needs a second local account named by HIVE_CROSSUSER_ACCOUNT and passwordless sudo -u (excluded from default run; CI selects it)",
 ]
 addopts = "-m 'not smoke and not cross_worker and not diagnostic and not crossuser'"
+
+[tool.uv]
+# A Renovate lock refresh runs CI with this repository's secrets. Releases younger
+# than three days are left out of every resolution, here and on the developer's
+# machine alike (mlorentedev/ci-workflows#81).
+exclude-newer = "3 days"
