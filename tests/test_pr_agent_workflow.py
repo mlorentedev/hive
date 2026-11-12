@@ -4,12 +4,14 @@ A tag or a branch here would let a change in ci-workflows reach this repository
 without a commit in it, so the pin is held to a full SHA with its tag beside it.
 
 The review lane this file used to pin (#503, CI-001) moved into the shared job:
-the repository-wide `concurrency` group with `queue: max`, the bounded PR-Agent
-step below the job limit, and the publish guard on `!cancelled()` are declared in
-mlorentedev/ci-workflows' `.github/workflows/pr-agent.yml` and tested there. A
-`uses:` job cannot declare steps or job-level concurrency, so they cannot be
-asserted here. What the caller still owns is the workflow-level group that lets a
-push supersede the older review of its own pull request, and that stays pinned.
+the repository-wide `concurrency` group with `queue: max` and the bounded PR-Agent
+step below the job limit are declared in mlorentedev/ci-workflows'
+`.github/workflows/pr-agent.yml`. A `uses:` job cannot declare steps or job-level
+concurrency, so they cannot be asserted here. The shared publish guard runs on
+`always()`, not the `!cancelled()` this file pinned, so a run superseded by a push
+can again end red; that gap is stated in the adoption PR and belongs upstream.
+What the caller still owns is the workflow-level group that lets a push supersede
+the older review of its own pull request, and that stays pinned.
 """
 
 from __future__ import annotations
