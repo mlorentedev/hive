@@ -1,7 +1,8 @@
 ---
-id: lesson-012-per-repo-agent-systems-vs-cross-project-vault
+id: "lesson-012-per-repo-agent-systems-vs-cross-project-vault"
 type: lesson
 status: active
+title: "Per-repo agent systems vs cross-project vault — competitive analysis"
 created: "2026-03-05"
 owner: manu
 tags: [hive, lesson, competitive-analysis, architecture, ci-cd, self-improvement]

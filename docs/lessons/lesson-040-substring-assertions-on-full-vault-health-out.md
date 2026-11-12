@@ -1,7 +1,8 @@
 ---
-id: lesson-040-substring-assertions-on-full-vault-health-out
+id: "lesson-040-substring-assertions-on-full-vault-health-out"
 type: lesson
 status: active
+title: "Substring assertions on full vault_health output break when vault_path is included"
 created: "2026-05-21"
 owner: manu
 tags: [hive, lesson, testing, regression, vault-health]

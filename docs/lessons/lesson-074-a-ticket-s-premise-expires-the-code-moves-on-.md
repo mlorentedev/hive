@@ -1,7 +1,8 @@
 ---
-id: lesson-074-a-ticket-s-premise-expires-the-code-moves-on-
+id: "lesson-074-a-ticket-s-premise-expires-the-code-moves-on-"
 type: lesson
 status: active
+title: "A ticket's premise expires; the code moves on and the instruction does not"
 created: "2026-08-07"
 owner: manu
 tags: [hive, lesson, diagnosis, tickets, documentation-drift, logging, mcp, HIVE-127, HIVE-329]

@@ -1,7 +1,8 @@
 ---
-id: lesson-042-three-timeouts-in-a-chain-aren-t-a-deadline
+id: "lesson-042-three-timeouts-in-a-chain-aren-t-a-deadline"
 type: lesson
 status: active
+title: "Three timeouts in a chain aren't a deadline"
 created: "2026-05-21"
 owner: manu
 tags: [hive, lesson, python, asyncio, deadline, timeout, subprocess, concurrency, HIVE-115, ADR-008]

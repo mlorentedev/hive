@@ -1,7 +1,8 @@
 ---
-id: lesson-069-mypy-narrows-platform-on-a-literal-sys-platfo
+id: "lesson-069-mypy-narrows-platform-on-a-literal-sys-platfo"
 type: lesson
 status: active
+title: "mypy narrows platform on a literal `sys.platform`, not on a boolean constant"
 created: "2026-07-09"
 owner: manu
 tags: [hive, lesson, mypy, typing, cross-platform, windows, dev-workflow, HIVE-293]

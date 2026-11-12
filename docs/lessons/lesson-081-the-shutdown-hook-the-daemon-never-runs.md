@@ -1,7 +1,8 @@
 ---
-id: lesson-081-the-shutdown-hook-the-daemon-never-runs
+id: "lesson-081-the-shutdown-hook-the-daemon-never-runs"
 type: lesson
 status: active
+title: "The shutdown hook the daemon never runs"
 created: "2026-08-07"
 owner: manu
 tags: [hive, lesson, shutdown, daemon, uvicorn, asgi, lifespan, signals, HIVE-322]

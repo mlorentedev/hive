@@ -1,7 +1,8 @@
 ---
-id: lesson-118-a-registry-keyed-by-id-must-hold-the-object
+id: "lesson-118-a-registry-keyed-by-id-must-hold-the-object"
 type: lesson
 status: active
+title: "A registry keyed by `id()` must hold the object it keys"
 created: "2026-11-03"
 owner: manu
 tags: [hive, lesson, python, threading, bounded-call]

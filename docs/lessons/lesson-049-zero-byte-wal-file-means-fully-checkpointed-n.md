@@ -1,7 +1,8 @@
 ---
-id: lesson-049-zero-byte-wal-file-means-fully-checkpointed-n
+id: "lesson-049-zero-byte-wal-file-means-fully-checkpointed-n"
 type: lesson
 status: active
+title: "Zero-byte WAL file means fully checkpointed, not broken"
 created: "2026-05-27"
 owner: manu
 tags: [hive, lesson, sqlite, wal, debt]

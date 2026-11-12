@@ -1,7 +1,8 @@
 ---
-id: lesson-018-ci-publish-failures-on-duplicate-versions-mak
+id: "lesson-018-ci-publish-failures-on-duplicate-versions-mak"
 type: lesson
 status: active
+title: "CI publish failures on duplicate versions — make idempotent"
 created: "2026-03-07"
 owner: manu
 tags: [hive, lesson, ci, release, idempotency]

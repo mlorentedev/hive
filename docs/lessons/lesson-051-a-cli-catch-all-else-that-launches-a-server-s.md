@@ -1,7 +1,8 @@
 ---
-id: lesson-051-a-cli-catch-all-else-that-launches-a-server-s
+id: "lesson-051-a-cli-catch-all-else-that-launches-a-server-s"
 type: lesson
 status: active
+title: "A CLI catch-all `else` that launches a server swallows `--version`/`--help`"
 created: "2026-06-04"
 owner: manu
 tags: [hive, lesson, cli, footgun, argv, version, PR-203]

@@ -1,7 +1,8 @@
 ---
-id: lesson-094-a-verification-command-that-selects-zero-tests
+id: "lesson-094-a-verification-command-that-selects-zero-tests"
 type: lesson
 status: active
+title: "A verification command that selects zero tests marks the criterion complete"
 created: "2026-08-23"
 owner: manu
 tags: [hive, lesson, sdd, verification, testing, pytest, false-positive, definition-of-done, HIVE-384]

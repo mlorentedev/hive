@@ -1,7 +1,8 @@
 ---
-id: lesson-010-2026-03-04-the-free-suffix-bug-test-your-actu
+id: "lesson-010-2026-03-04-the-free-suffix-bug-test-your-actu"
 type: lesson
 status: active
+title: "2026-03-04: The `:free` suffix bug — test your actual infrastructure"
 created: "2026-05-01"
 owner: manu
 tags: [hive, lesson]

@@ -1,7 +1,8 @@
 ---
-id: lesson-089-a-release-that-fails-on-a-rate-limit-reports-
+id: "lesson-089-a-release-that-fails-on-a-rate-limit-reports-"
 type: lesson
 status: active
+title: "A release that fails on a rate limit reports its publish jobs as `skipped`, and the quota is shared with your own CLI"
 created: "2026-08-09"
 owner: manu
 tags: [hive, lesson, ci, release, github-actions, rate-limit, observability, skipped-is-not-passed, release-please]

@@ -1,7 +1,8 @@
 ---
-id: lesson-078-a-test-that-counts-records-on-a-global-log-st
+id: "lesson-078-a-test-that-counts-records-on-a-global-log-st"
 type: lesson
 status: active
+title: "A test that counts records on a global log stream is order-dependent by construction"
 created: "2026-08-08"
 owner: manu
 tags: [hive, lesson, testing, pytest, caplog, flaky-tests, concurrency, logging, HIVE-322]

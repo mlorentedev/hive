@@ -1,7 +1,8 @@
 ---
-id: lesson-110-refuse-the-source-build-instead-of-pinning
+id: "lesson-110-refuse-the-source-build-instead-of-pinning"
 type: lesson
 status: active
+title: "Refuse the source build instead of pinning"
 created: "2026-10-22"
 owner: manu
 tags: [hive, lesson, packaging, uv, windows, arm64, BUG-012]

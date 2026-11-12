@@ -1,7 +1,8 @@
 ---
-id: lesson-111-two-threads-in-communicate-on-one-popen
+id: "lesson-111-two-threads-in-communicate-on-one-popen"
 type: lesson
 status: active
+title: "Two threads in communicate() on one Popen"
 created: "2026-10-22"
 owner: manu
 tags: [hive, lesson, subprocess, concurrency, macos, deadline, HIVE-517]

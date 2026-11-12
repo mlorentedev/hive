@@ -1,7 +1,8 @@
 ---
-id: lesson-055-cross-os-spikes-catch-bugs-linux-only-testing
+id: "lesson-055-cross-os-spikes-catch-bugs-linux-only-testing"
 type: lesson
 status: active
+title: "Cross-OS spikes catch bugs Linux-only testing misses"
 created: "2026-05-31"
 owner: manu
 tags: [hive, lesson, testing, cross-platform, windows, spikes, dependencies, mcp, asyncio]

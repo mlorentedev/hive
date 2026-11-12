@@ -1,7 +1,8 @@
 ---
-id: lesson-031-release-please-extra-files-does-not-retroacti
+id: "lesson-031-release-please-extra-files-does-not-retroacti"
 type: lesson
 status: active
+title: "release-please `extra-files` does not retroactively patch drifted files"
 created: "2026-05-15"
 owner: manu
 tags: [hive, lesson, release-please, ci, error-handling, mcp-registry]

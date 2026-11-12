@@ -1,7 +1,8 @@
 ---
-id: lesson-058-sequence-the-at-most-once-write-primitive-bef
+id: "lesson-058-sequence-the-at-most-once-write-primitive-bef"
 type: lesson
 status: active
+title: "Sequence the at-most-once write primitive before transparent retry/reconnect"
 created: "2026-05-31"
 owner: manu
 tags: [hive, lesson, architecture, resilience, idempotency, crash-only, sequencing, daemon]

@@ -1,7 +1,8 @@
 ---
-id: lesson-115-a-major-version-pin-takes-the-cached-patch
+id: "lesson-115-a-major-version-pin-takes-the-cached-patch"
 type: lesson
 status: active
+title: "A major-version pin takes the cached patch"
 created: "2026-10-31"
 owner: manu
 tags: [hive, lesson, github-actions, node, astro, pages, dependabot]

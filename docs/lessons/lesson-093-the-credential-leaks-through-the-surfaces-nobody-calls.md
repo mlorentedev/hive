@@ -1,7 +1,8 @@
 ---
-id: lesson-093-the-credential-leaks-through-the-surfaces-nobody-calls
+id: "lesson-093-the-credential-leaks-through-the-surfaces-nobody-calls"
 type: lesson
 status: active
+title: "The credential leaks through the surfaces nobody calls"
 created: "2026-08-23"
 owner: manu
 tags: [hive, lesson, security, secrets, pydantic, logging, redaction, transcript, HIVE-384]

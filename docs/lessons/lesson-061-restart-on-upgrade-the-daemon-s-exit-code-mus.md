@@ -1,7 +1,8 @@
 ---
-id: lesson-061-restart-on-upgrade-the-daemon-s-exit-code-mus
+id: "lesson-061-restart-on-upgrade-the-daemon-s-exit-code-mus"
 type: lesson
 status: active
+title: "Restart-on-upgrade: the daemon's exit code must match the supervisor's restart policy"
 created: "2026-06-02"
 owner: manu
 tags: [hive, lesson, daemon, systemd, uvicorn, process-supervision, fastmcp, exit-codes]

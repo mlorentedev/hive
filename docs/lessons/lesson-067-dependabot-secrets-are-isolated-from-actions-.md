@@ -1,7 +1,8 @@
 ---
-id: lesson-067-dependabot-secrets-are-isolated-from-actions-
+id: "lesson-067-dependabot-secrets-are-isolated-from-actions-"
 type: lesson
 status: active
+title: "Dependabot secrets are isolated from Actions secrets — exclude the trigger, don't duplicate the PAT"
 created: "2026-07-07"
 owner: manu
 tags: [hive, lesson, ci, github-actions, secrets, dependabot, bitacora, OPS-002, projects-v2]

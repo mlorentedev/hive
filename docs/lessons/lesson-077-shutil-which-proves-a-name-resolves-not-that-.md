@@ -1,7 +1,8 @@
 ---
-id: lesson-077-shutil-which-proves-a-name-resolves-not-that-
+id: "lesson-077-shutil-which-proves-a-name-resolves-not-that-"
 type: lesson
 status: active
+title: "`shutil.which` proves a name resolves, not that the thing behind it runs"
 created: "2026-08-07"
 owner: manu
 tags: [hive, lesson, cli, packaging, windows, uv, service, preconditions, verification, HIVE-328]

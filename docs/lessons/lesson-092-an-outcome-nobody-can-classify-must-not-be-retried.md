@@ -1,7 +1,8 @@
 ---
-id: lesson-092-an-outcome-nobody-can-classify-must-not-be-retried
+id: "lesson-092-an-outcome-nobody-can-classify-must-not-be-retried"
 type: lesson
 status: active
+title: "An outcome nobody can classify must not be retried"
 created: "2026-08-23"
 owner: manu
 tags: [hive, lesson, retry, idempotency, fallback, cost, daemon, adr-011, HIVE-384]

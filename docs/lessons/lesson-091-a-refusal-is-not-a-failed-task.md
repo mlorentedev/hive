@@ -1,7 +1,8 @@
 ---
-id: lesson-091-a-refusal-is-not-a-failed-task
+id: "lesson-091-a-refusal-is-not-a-failed-task"
 type: lesson
 status: active
+title: "A refusal is not a failed task, and the caller acts on the difference"
 created: "2026-08-23"
 owner: manu
 tags: [hive, lesson, error-handling, api-design, classification, dispatcher, exit-codes, HIVE-384]

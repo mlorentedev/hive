@@ -1,7 +1,8 @@
 ---
-id: lesson-013-anyof-in-json-schema-makes-mcp-tools-invisibl
+id: "lesson-013-anyof-in-json-schema-makes-mcp-tools-invisibl"
 type: lesson
 status: active
+title: "anyOf in JSON Schema makes MCP tools invisible to Claude Code"
 created: "2026-03-06"
 owner: manu
 tags: [hive, lesson, mcp, claude-code, fastmcp, schema, interop]

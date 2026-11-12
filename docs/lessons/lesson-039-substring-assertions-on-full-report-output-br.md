@@ -1,7 +1,8 @@
 ---
-id: lesson-039-substring-assertions-on-full-report-output-br
+id: "lesson-039-substring-assertions-on-full-report-output-br"
 type: lesson
 status: active
+title: "Substring assertions on full report output break when vault_path is included"
 created: "2026-05-21"
 owner: manu
 tags: [hive, lesson, testing, regression, vault-health]

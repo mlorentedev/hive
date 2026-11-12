@@ -1,7 +1,8 @@
 ---
-id: lesson-098-a-migration-must-reach-the-writers-not-only-the-readers
+id: "lesson-098-a-migration-must-reach-the-writers-not-only-the-readers"
 type: lesson
 status: active
+title: "A migration must reach the writers, not only the readers"
 created: "2026-09-22"
 owner: manu
 tags: [hive, lesson, migration, knowledge-placement, silent-failure, capture-lesson, HIVE-431]

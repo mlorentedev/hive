@@ -1,7 +1,8 @@
 ---
-id: lesson-066-ci-lint-runs-ruff-format-check-too-a-clean-ru
+id: "lesson-066-ci-lint-runs-ruff-format-check-too-a-clean-ru"
 type: lesson
 status: active
+title: "CI lint runs `ruff format --check` too — a clean `ruff check` is not enough"
 created: "2026-06-24"
 owner: manu
 tags: [hive, lesson, ci, ruff, dev-workflow, fail-fast]

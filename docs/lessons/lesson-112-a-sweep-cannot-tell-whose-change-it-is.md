@@ -1,7 +1,8 @@
 ---
-id: lesson-112-a-sweep-cannot-tell-whose-change-it-is
+id: "lesson-112-a-sweep-cannot-tell-whose-change-it-is"
 type: lesson
 status: active
+title: "A sweep cannot tell whose change it is"
 created: "2026-10-22"
 owner: manu
 tags: [hive, lesson, git, concurrency, HIVE-510]

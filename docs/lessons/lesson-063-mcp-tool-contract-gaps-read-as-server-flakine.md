@@ -1,7 +1,8 @@
 ---
-id: lesson-063-mcp-tool-contract-gaps-read-as-server-flakine
+id: "lesson-063-mcp-tool-contract-gaps-read-as-server-flakine"
 type: lesson
 status: active
+title: "MCP tool-contract gaps read as server \"flakiness\" — mine the rejection logs to find them"
 created: "2026-06-04"
 owner: manu
 tags: [hive, lesson, mcp, dx, tool-contract, observability, llm-ergonomics, HIVE-202]

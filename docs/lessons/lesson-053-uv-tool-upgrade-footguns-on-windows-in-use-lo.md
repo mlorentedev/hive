@@ -1,7 +1,8 @@
 ---
-id: lesson-053-uv-tool-upgrade-footguns-on-windows-in-use-lo
+id: "lesson-053-uv-tool-upgrade-footguns-on-windows-in-use-lo"
 type: lesson
 status: active
+title: "`uv tool upgrade` footguns on Windows: in-use lock, exact pins, orphaned children"
 created: "2026-06-04"
 owner: manu
 tags: [hive, lesson, windows, uv, upgrade, footgun, ADR-015]

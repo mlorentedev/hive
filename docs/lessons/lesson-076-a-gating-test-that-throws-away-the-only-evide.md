@@ -1,7 +1,8 @@
 ---
-id: lesson-076-a-gating-test-that-throws-away-the-only-evide
+id: "lesson-076-a-gating-test-that-throws-away-the-only-evide"
 type: lesson
 status: active
+title: "A gating test that throws away the only evidence that could triage it"
 created: "2026-08-07"
 owner: manu
 tags: [hive, lesson, testing, ci, flakiness, diagnosis, subprocess, observability, compat-shim, HIVE-344]

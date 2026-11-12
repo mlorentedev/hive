@@ -1,7 +1,8 @@
 ---
-id: lesson-036-mypy-1-2-fastmcp-3-1-3-3-were-no-ops-because-
+id: "lesson-036-mypy-1-2-fastmcp-3-1-3-3-were-no-ops-because-"
 type: lesson
 status: active
+title: "mypy 1→2 + fastmcp 3.1→3.3 were no-ops because --strict already covered the surface"
 created: "2026-05-19"
 owner: manu
 tags: [hive, lesson, deps, tooling, process]

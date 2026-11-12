@@ -1,7 +1,8 @@
 ---
-id: lesson-009-2026-03-04-benchmark-driven-defaults-over-gut
+id: "lesson-009-2026-03-04-benchmark-driven-defaults-over-gut"
 type: lesson
 status: active
+title: "2026-03-04: Benchmark-driven defaults over gut feeling"
 created: "2026-05-01"
 owner: manu
 tags: [hive, lesson]

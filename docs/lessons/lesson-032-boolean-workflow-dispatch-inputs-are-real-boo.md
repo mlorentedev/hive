@@ -1,7 +1,8 @@
 ---
-id: lesson-032-boolean-workflow-dispatch-inputs-are-real-boo
+id: "lesson-032-boolean-workflow-dispatch-inputs-are-real-boo"
 type: lesson
 status: active
+title: "Boolean `workflow_dispatch` inputs are real booleans in `if:` expressions"
 created: "2026-05-15"
 owner: manu
 tags: [hive, lesson, github-actions, workflow-dispatch, ci, boolean-coercion]

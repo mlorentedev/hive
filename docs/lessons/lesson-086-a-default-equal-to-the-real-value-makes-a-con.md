@@ -1,7 +1,8 @@
 ---
-id: lesson-086-a-default-equal-to-the-real-value-makes-a-con
+id: "lesson-086-a-default-equal-to-the-real-value-makes-a-con"
 type: lesson
 status: active
+title: "A default equal to the real value makes a config test prove nothing"
 created: "2026-08-09"
 owner: manu
 tags: [hive, lesson, testing, configuration, pydantic-settings, debugging, false-positive]

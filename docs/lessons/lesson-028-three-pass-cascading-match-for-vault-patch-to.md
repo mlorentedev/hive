@@ -1,7 +1,8 @@
 ---
-id: lesson-028-three-pass-cascading-match-for-vault-patch-to
+id: "lesson-028-three-pass-cascading-match-for-vault-patch-to"
 type: lesson
 status: active
+title: "Three-pass cascading match for vault_patch tolerant text replacement"
 created: "2026-03-11"
 owner: manu
 tags: [hive, lesson, vault-patch, tolerant-matching, llm-ergonomics, mcp]

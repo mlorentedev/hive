@@ -1,7 +1,8 @@
 ---
-id: lesson-056-uvicorn-sigterm-bypasses-finally-atexit-rc-15
+id: "lesson-056-uvicorn-sigterm-bypasses-finally-atexit-rc-15"
 type: lesson
 status: active
+title: "uvicorn SIGTERM bypasses finally/atexit (rc -15)"
 created: "2026-05-31"
 owner: manu
 tags: [hive, lesson, python, uvicorn, signals, daemon, fastmcp]

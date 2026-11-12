@@ -1,7 +1,8 @@
 ---
-id: lesson-044-cooperative-external-committer-needs-explicit
+id: "lesson-044-cooperative-external-committer-needs-explicit"
 type: lesson
 status: active
+title: "Cooperative external committer needs explicit coordination, not best-effort"
 created: "2026-05-21"
 owner: manu
 tags: [hive, lesson, git, obsidian-git, coordination, filelock, multiprocess, HIVE-115, ADR-010]

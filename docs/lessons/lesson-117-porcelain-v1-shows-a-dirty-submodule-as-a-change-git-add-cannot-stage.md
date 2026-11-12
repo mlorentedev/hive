@@ -1,7 +1,8 @@
 ---
-id: lesson-117-porcelain-v1-shows-a-dirty-submodule-as-a-change-git-add-cannot-stage
+id: "lesson-117-porcelain-v1-shows-a-dirty-submodule-as-a-change-git-add-cannot-stage"
 type: lesson
 status: active
+title: "Porcelain v1 shows a dirty submodule as a change `git add` cannot stage"
 created: "2026-11-01"
 owner: manu
 tags: [hive, lesson, git, submodule, vault_commit]

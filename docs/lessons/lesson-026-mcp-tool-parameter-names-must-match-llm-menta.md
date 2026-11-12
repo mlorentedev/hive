@@ -1,7 +1,8 @@
 ---
-id: lesson-026-mcp-tool-parameter-names-must-match-llm-menta
+id: "lesson-026-mcp-tool-parameter-names-must-match-llm-menta"
 type: lesson
 status: active
+title: "MCP tool parameter names must match LLM mental models"
 created: "2026-03-15"
 owner: manu
 tags: [hive, lesson, mcp, naming, llm-ergonomics, dx]

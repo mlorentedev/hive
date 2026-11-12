@@ -1,7 +1,8 @@
 ---
-id: lesson-023-sqlite-sqlite-misuse-from-concurrent-mcp-tool
+id: "lesson-023-sqlite-sqlite-misuse-from-concurrent-mcp-tool"
 type: lesson
 status: active
+title: "SQLite SQLITE_MISUSE from concurrent MCP tool calls"
 created: "2026-03-12"
 owner: manu
 tags: [hive, lesson, concurrency, sqlite, threading, mcp]

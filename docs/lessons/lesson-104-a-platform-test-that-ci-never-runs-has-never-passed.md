@@ -1,7 +1,8 @@
 ---
-id: lesson-104-a-platform-test-that-ci-never-runs-has-never-passed
+id: "lesson-104-a-platform-test-that-ci-never-runs-has-never-passed"
 type: lesson
 status: active
+title: "A platform test that CI never runs has never passed"
 created: "2026-10-10"
 owner: manu
 tags: [hive, lesson, windows, acl, ci, HIVE-484]

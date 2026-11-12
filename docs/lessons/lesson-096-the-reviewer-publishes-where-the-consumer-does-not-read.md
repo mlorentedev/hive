@@ -1,7 +1,8 @@
 ---
-id: lesson-096-the-reviewer-publishes-where-the-consumer-does-not-read
+id: "lesson-096-the-reviewer-publishes-where-the-consumer-does-not-read"
 type: lesson
 status: active
+title: "The reviewer publishes where the consumer does not read"
 created: "2026-08-25"
 owner: manu
 tags: [hive, lesson, code-review, ci, github-api, false-negative, definition-of-done, HIVE-403]

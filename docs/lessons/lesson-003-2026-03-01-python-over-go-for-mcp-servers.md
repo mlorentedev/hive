@@ -1,7 +1,8 @@
 ---
-id: lesson-003-2026-03-01-python-over-go-for-mcp-servers
+id: "lesson-003-2026-03-01-python-over-go-for-mcp-servers"
 type: lesson
 status: active
+title: "2026-03-01: Python over Go for MCP servers"
 created: "2026-05-01"
 owner: manu
 tags: [hive, lesson]

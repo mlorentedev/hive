@@ -1,7 +1,8 @@
 ---
-id: lesson-102-a-refusal-test-must-leave-one-reason-to-refuse
+id: "lesson-102-a-refusal-test-must-leave-one-reason-to-refuse"
 type: lesson
 status: active
+title: "A refusal test must leave one reason to refuse"
 created: "2026-09-30"
 owner: manu
 tags: [hive, lesson, testing, tls, mutation, security, HIVE-456]

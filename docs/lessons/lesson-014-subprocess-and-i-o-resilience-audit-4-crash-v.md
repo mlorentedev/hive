@@ -1,7 +1,8 @@
 ---
-id: lesson-014-subprocess-and-i-o-resilience-audit-4-crash-v
+id: "lesson-014-subprocess-and-i-o-resilience-audit-4-crash-v"
 type: lesson
 status: active
+title: "Subprocess and I/O resilience audit — 4 crash vectors found"
 created: "2026-03-06"
 owner: manu
 tags: [hive, lesson, resilience, subprocess, httpx, mcp-stability]

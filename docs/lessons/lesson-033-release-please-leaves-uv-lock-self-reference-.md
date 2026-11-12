@@ -1,7 +1,8 @@
 ---
-id: lesson-033-release-please-leaves-uv-lock-self-reference-
+id: "lesson-033-release-please-leaves-uv-lock-self-reference-"
 type: lesson
 status: active
+title: "release-please leaves uv.lock self-reference stale on every release"
 created: "2026-05-17"
 owner: manu
 tags: [hive, lesson, release-please, uv, ci, cross-project, lock-files]

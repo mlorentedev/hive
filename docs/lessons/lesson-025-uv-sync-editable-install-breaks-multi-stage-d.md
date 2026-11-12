@@ -1,7 +1,8 @@
 ---
-id: lesson-025-uv-sync-editable-install-breaks-multi-stage-d
+id: "lesson-025-uv-sync-editable-install-breaks-multi-stage-d"
 type: lesson
 status: active
+title: "uv sync editable install breaks multi-stage Docker builds"
 created: "2026-03-10"
 owner: manu
 tags: [hive, lesson, docker, uv, multi-stage, python-packaging]

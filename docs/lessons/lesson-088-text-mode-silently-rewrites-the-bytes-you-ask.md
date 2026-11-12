@@ -1,7 +1,8 @@
 ---
-id: lesson-088-text-mode-silently-rewrites-the-bytes-you-ask
+id: "lesson-088-text-mode-silently-rewrites-the-bytes-you-ask"
 type: lesson
 status: active
+title: "Text mode silently rewrites the bytes you asked for, in both directions"
 created: "2026-08-09"
 owner: manu
 tags: [hive, lesson, python, encoding, newlines, windows, cross-platform, idempotency, testing, HIVE-328]

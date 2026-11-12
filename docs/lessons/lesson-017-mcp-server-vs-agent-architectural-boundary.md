@@ -1,7 +1,8 @@
 ---
-id: lesson-017-mcp-server-vs-agent-architectural-boundary
+id: "lesson-017-mcp-server-vs-agent-architectural-boundary"
 type: lesson
 status: active
+title: "MCP server vs agent — architectural boundary"
 created: "2026-03-07"
 owner: manu
 tags: [hive, lesson, architecture, mcp, design-principle]

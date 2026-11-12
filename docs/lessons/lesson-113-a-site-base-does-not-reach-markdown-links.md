@@ -1,7 +1,8 @@
 ---
-id: lesson-113-a-site-base-does-not-reach-markdown-links
+id: "lesson-113-a-site-base-does-not-reach-markdown-links"
 type: lesson
 status: active
+title: "A site base does not reach Markdown links"
 created: "2026-10-22"
 owner: manu
 tags: [hive, lesson, astro, starlight, pages, docs, HIVE-519]

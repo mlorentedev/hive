@@ -1,7 +1,8 @@
 ---
-id: lesson-101-a-stable-endpoint-must-prove-who-answers
+id: "lesson-101-a-stable-endpoint-must-prove-who-answers"
 type: lesson
 status: active
+title: "A stable endpoint must prove who answers"
 created: "2026-09-30"
 owner: manu
 tags: [hive, lesson, security, transport, tls, threat-model, HIVE-456]
