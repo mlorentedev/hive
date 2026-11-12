@@ -4,11 +4,11 @@ HIVE-384 trimmed this module rather than deleting it, and the split is worth
 stating because the two halves look alike and only one was retired.
 
 **Retired: the spend cap.** ``can_spend`` / ``month_spent`` / ``month_remaining``
-existed to keep a pay-per-token provider inside a monthly dollar budget. The
-worker now runs on a flat subscription, where marginal cost is zero and the
-binding constraint is *concurrency*, not spend. A dollar cap there is not a
-weakened guard — it is a guard measuring the wrong quantity, and one that would
-have to be reintroduced by any future paid provider rather than inherited.
+existed to keep a pay-per-token provider inside a monthly dollar budget. NaN
+bills from a credit pool, but hive serves the one model its caller picks, so
+spend is decided by the caller, and NaN's own ``402`` is the bound when the
+pool is empty (ADR-021, amended 2026-11-12). A cap here would estimate a
+balance NaN does not expose, for a pool other consumers also draw from.
 
 **Kept: usage telemetry.** ``record_request`` and the per-month aggregate remain,
 because tokens and latency are what ``worker_status``, ``/status`` and
@@ -61,8 +61,8 @@ CREATE TABLE IF NOT EXISTS requests (
         """Insert a completed request into the tracking table.
 
         ``cost_usd`` keeps its column so an existing ``worker.db`` opens
-        unchanged, but it defaults to zero and no longer has a caller: on a flat
-        subscription there is no per-request cost to record.
+        unchanged, but it defaults to zero and no longer has a caller: NaN bills
+        in credits, not dollars, and exposes no per-request cost to record.
         """
         with self._lock:
             self._conn.execute(

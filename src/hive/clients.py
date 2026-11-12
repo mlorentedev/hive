@@ -36,6 +36,9 @@ class PoolUnavailableError(ConnectionError):
 # have to look the number up, and "rate limited" and "credential rejected" call
 # for completely different actions.
 _POOL_REFUSAL_STATUSES = {
+    # 402 is a provider's answer when the account's prepaid credits are spent
+    # (hive#573): the pool did not serve this request, and another one still can.
+    402: "credits exhausted",
     401: "credential rejected",
     403: "forbidden",
     429: "rate limited",
@@ -161,7 +164,7 @@ class OpenAICompatibleClient:
         except httpx.TimeoutException as exc:
             raise PoolUnavailableError(f"{self._provider_name} request timed out: {exc}") from exc
 
-        # A refusal is not a failed task. 429 and 401/403 mean the pool did not
+        # A refusal is not a failed task. 429, 402 and 401/403 mean the pool did not
         # serve this request at all, so a dispatcher should try the next entry
         # in its chain; a 4xx about the request itself, or any 5xx, means the
         # pool took it and the answer is unusable, which must not be retried

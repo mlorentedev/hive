@@ -22,6 +22,10 @@ two claims this decision makes false: that *Ollama stays remote*, and that *chan
 surface* is out of scope. ADR-011 is left as written, the same convention
 [ADR-015](adr-015-windows-daemon-supervision-upgrade.md) used when it amended §4.
 
+**Amended 2026-11-12 (#573):** NaN is no longer a flat subscription; it bills from one credit pool.
+The spend cap stays removed on a new rationale, and a `402` is a pool refusal. See
+*Amendment 2026-11-12 (NaN credit pool, #573)*.
+
 ## Date
 
 2026-08-23
@@ -82,7 +86,7 @@ Concretely:
    answer can no longer be attributed to a model.
 3. **Failures are classified as data, not as exception types.** `_try_worker` returns
    `(response, status, detail)` with `status` in `ok | pool_unavailable | task_failed`. *The
-   provider did not serve the request* (unreachable, timeout, 429, 401, 403) and *the provider
+   provider did not serve the request* (unreachable, timeout, 429, 402, 401, 403) and *the provider
    served it and the answer is unusable* are different instructions to the caller: retry the first
    elsewhere, never retry the second. Unknown failures classify as `task_failed`, because the
    fail-closed direction is the one that does not spend another pool's quota on an outcome nobody
@@ -92,7 +96,9 @@ Concretely:
    `record_request` and `month_usage` remain because tokens and latency are what `worker_status`,
    `/status` and `usage.db` read. `can_spend`, `month_spent` and `month_remaining` are removed: on
    a flat subscription a dollar cap measures the wrong quantity, and the binding constraint is
-   concurrency, which the dispatcher that launches the verb enforces, not hive.
+   concurrency, which the dispatcher that launches the verb enforces, not hive. *(Amended
+   2026-11-12, #573: NaN now bills by credits; the cap stays removed for the reason given in that
+   amendment.)*
 5. **The MCP tool surface changes, and this is the amendment.** `delegate_task` loses
    `max_cost_per_request`, and its `model` parameter no longer accepts `auto`, `ollama`,
    `openrouter-free` or `openrouter`. The retired aliases are rejected before dispatch with a
@@ -141,7 +147,8 @@ record could not say which model answered. The consumer's contract (one model pe
 
 Rejected because NaN is a flat subscription: there is no marginal cost to cap, and a gauge that
 always reads zero looks like a working gauge. Recorded so that a future paid provider knows it must
-bring its own cap rather than inherit one that was removed on purpose.
+bring its own cap rather than inherit one that was removed on purpose. *(Amended 2026-11-12, #573:
+the premise no longer holds; the rejection stands on the reasons in that amendment.)*
 
 ### Carry the failure class as an exception type
 
@@ -195,6 +202,39 @@ in the result, and the verb maps it to an exit code client-side.
   two-tier ladder collapses to the same single shot.
 - ADR-011 §5's other boundaries (no team edition, no reconciliation of other sessions' vault
   branches) stand. Only the two claims named in the Status section are amended.
+
+## Amendment 2026-11-12 (NaN credit pool, #573)
+
+In 2026-11 NaN replaced per-model monthly quotas with one credit pool per account: 7,000 credits a
+billing period on the inference plan, 20,000 on premium, then purchased packs, and `402` when the
+pool is empty. Each chat model spends credits at its own per-token rate; `qwen3.6` and `gemma4`
+spend none (rates: mlorentedev/dotfiles `ai/nan/README.md`). The pool is shared by every consumer
+of the key, hive among them. The "flat subscription" premise in §4 and in *A dollar budget on the
+new provider* no longer holds.
+
+**Decision.**
+
+1. **No spend cap in hive, on a new rationale.** hive serves exactly one model per invocation, and
+   the caller picks it: the dispatcher from its routing map (dotfiles ADR-032, whose low tier on
+   NaN is bound to a model that spends no credits), or the operator through `HIVE_WORKER_MODEL`.
+   Spend is therefore decided where the model is decided. A cap in hive would also be an estimate:
+   NaN exposes no balance API, so hive would count tokens against a rate table it does not own,
+   for a pool other consumers drain without telling it. Configuring a credit-spending
+   `HIVE_WORKER_MODEL` is the operator's explicit choice.
+2. **`402` is a pool refusal.** `clients.py` adds it to the refusal statuses beside 429, 401 and
+   403, so it surfaces as `pool_unavailable` (exit `3`) and the caller's chain advances to another
+   provider. Before this it fell through to `RuntimeError`, read as `task_failed` (exit `1`) and
+   stopped the chain on a request that was never served. Where every entry in a chain is NaN, the
+   advance ends in the caller's `chain_exhausted`, which is the loud stop.
+
+**Rejected.** A credit budget kept by hive (option B of #573): an estimate of a number only NaN's
+dashboard knows, with a rate table to keep in sync. Treating `402` as a loud stop in hive (option C
+as first written): it is a refusal of one pool, which is exactly what the refusal class exists for;
+the loud stop belongs to the caller, once no pool is left. A startup warning when `HIVE_WORKER_MODEL` spends credits (the
+other half of option A): hive would have to carry a list of one provider's no-credit models, which
+the provider-neutrality guard keeps out of the provider-facing modules, and the list would drift
+whenever NaN changes its catalog. The no-credit binding is enforced where the model is chosen, in
+the caller's routing map.
 
 ## References
 

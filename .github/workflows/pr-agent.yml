@@ -159,7 +159,7 @@ jobs:
             exit 1
           fi
       - name: PR-Agent
-        uses: The-PR-Agent/pr-agent@efdde4afe14aa401a3889012c7f3e9ef3081a430  # v0.49.0
+        uses: The-PR-Agent/pr-agent@e673a02076ce09a4726c3d0c3cc85780e59ca52b  # v0.50.0
         # Bounded attempt, below the job's own 15-minute limit. Once reviews are
         # serialized, a hung attempt is not just a failed review: it is the whole lane,
         # and four hangs at the job bound would hold every other PR for an hour. 12
@@ -215,7 +215,7 @@ jobs:
       # already forbids it — the top tier "queues or escalates, NEVER degrades
       # silently" — so this makes the degrade loud and does nothing else.
       #
-      # `fallback_models` names mimo-v2.5 for CONCURRENCY (per-model limit,
+      # `fallback_models` names deepseek-v4-flash for CONCURRENCY (per-model limit,
       # measured), never to soften the quality bar. The marker comes from the
       # registry, over the API since this job has no checkout, at the BASE ref
       # since a PR supplying it could redefine it. Two more bindings, both
