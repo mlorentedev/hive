@@ -22,7 +22,7 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
-    uses: mlorentedev/ci-workflows/.github/workflows/pr-agent.yml@892309ffcdadef66a57654d44383abaec8b1df87 # v0.2.0
+    uses: mlorentedev/ci-workflows/.github/workflows/pr-agent.yml@d601782ceac77ad4dc52833cd94106245ee20f44 # v0.4.0
     # dotf_version and the model chain take the tag's defaults: the dotf release it
     # was tested with, and the chain read from the pool.
     with:
