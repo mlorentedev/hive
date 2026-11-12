@@ -62,7 +62,7 @@ reading a variable that means something in exactly one deployment (#391).
 There is deliberately **no internal fallback chain**. Choosing among pools belongs to the caller
 that owns a routing map; a backend that falls back on its own is a second routing authority, and its
 answer can no longer be attributed to a model. Failures are classified rather than collapsed — *pool
-unavailable* (unreachable, 429, auth) is distinct from *task failed* (the provider answered and the
+unavailable* (unreachable, 429, 402, auth) is distinct from *task failed* (the provider answered and the
 answer is unusable), because a caller may retry the first elsewhere and must not retry the second.
 
 Ollama and OpenRouter were removed in **4.0.0**; their model aliases (`auto`, `ollama`,

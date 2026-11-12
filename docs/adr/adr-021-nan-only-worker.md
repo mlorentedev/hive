@@ -86,7 +86,7 @@ Concretely:
    answer can no longer be attributed to a model.
 3. **Failures are classified as data, not as exception types.** `_try_worker` returns
    `(response, status, detail)` with `status` in `ok | pool_unavailable | task_failed`. *The
-   provider did not serve the request* (unreachable, timeout, 429, 401, 403) and *the provider
+   provider did not serve the request* (unreachable, timeout, 429, 402, 401, 403) and *the provider
    served it and the answer is unusable* are different instructions to the caller: retry the first
    elsewhere, never retry the second. Unknown failures classify as `task_failed`, because the
    fail-closed direction is the one that does not spend another pool's quota on an outcome nobody
