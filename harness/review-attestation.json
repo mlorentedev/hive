@@ -81,7 +81,8 @@
       "login": "github-actions",
       "declined_markers": [],
       "review_markers": [
-        "## PR Reviewer Guide"
+        "## PR Reviewer Guide",
+        "## Incremental PR Reviewer Guide"
       ],
       "why": "PR-Agent (see .github/workflows/pr-agent.yml) runs under GITHUB_TOKEN and publishes through the COMMENTS api, so its reviews never enter reviews[] and a classifier that looked only at reviews would read every PR-Agent-reviewed PR as unattested. The marker is the `review` command's own heading. `## PR Code Suggestions` is deliberately NOT here: suggestions are not a review, which is also why auto_improve is off on the automatic path. MARKER PROVENANCE: verified in the sibling ports before being declared here (kubelab has 215 PR comments carrying '## PR Reviewer Guide' posted by github-actions[bot], dotfiles has 172, per the ts-bridge registry). It has NEVER been observed in hive, because this workflow has not run here: the first green run of pr-agent on a hive PR is the verification, and until then this entry is a declaration of intent, not of an actor. The workflow's own guard step fails when no comment carrying this marker appears, so an absent NAN_API_KEY reads as a red job with a diagnosis rather than a green job with no review."
     }
