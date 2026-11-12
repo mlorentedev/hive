@@ -62,13 +62,14 @@ reading a variable that means something in exactly one deployment (#391).
 There is deliberately **no internal fallback chain**. Choosing among pools belongs to the caller
 that owns a routing map; a backend that falls back on its own is a second routing authority, and its
 answer can no longer be attributed to a model. Failures are classified rather than collapsed — *pool
-unavailable* (unreachable, 429, auth) is distinct from *task failed* (the provider answered and the
+unavailable* (unreachable, 429, 402, auth) is distinct from *task failed* (the provider answered and the
 answer is unusable), because a caller may retry the first elsewhere and must not retry the second.
 
 Ollama and OpenRouter were removed in **4.0.0**; their model aliases (`auto`, `ollama`,
 `openrouter-free`, `openrouter`) are rejected with a message naming the replacement rather than
-silently ignored. There is no spend cap: the provider is a flat subscription, so the binding
-constraint is concurrency, not cost.
+silently ignored. There is no spend cap: the caller picks the model per invocation, so spend is
+decided there, and NaN's `402` (credit pool empty) is a pool refusal that advances the caller's
+chain (ADR-021, amended 2026-11-12).
 
 ## MCP tool schema rules (load-bearing)
 

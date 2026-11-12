@@ -2710,8 +2710,8 @@ class TestWorkerStatus:
         result = _text(await worker.call_tool("worker_status", {}))
         assert "Usage this month" in result
         assert "Tokens: 100" in result
-        # A dollar figure on a flat subscription would always read zero, and a
-        # gauge that never moves looks like a working gauge.
+        # NaN exposes no per-request cost, so a dollar figure would always read
+        # zero, and a gauge that never moves looks like a working gauge.
         assert "$" not in result
 
 

@@ -43,13 +43,18 @@ def _client() -> OpenAICompatibleClient:
 
 
 class TestPoolRefusalIsNotATaskFailure:
-    """The three ways a pool declines to serve, all of which are retryable elsewhere."""
+    """The ways a pool declines to serve, all of which are retryable elsewhere.
+
+    402 is NaN's answer when the account's credit pool is empty (hive#573): the
+    request was never served, so another provider in the chain can still take it.
+    """
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("status_code", "what"),
         [
             (429, "rate limited"),
+            (402, "credits exhausted"),
             (401, "credential rejected"),
             (403, "forbidden"),
         ],
@@ -60,7 +65,7 @@ class TestPoolRefusalIsNotATaskFailure:
             patch.object(
                 client._http, "post", new_callable=AsyncMock, return_value=_response(status_code)
             ),
-            pytest.raises(PoolUnavailableError),
+            pytest.raises(PoolUnavailableError, match=what),
         ):
             await client.generate("hi")
 

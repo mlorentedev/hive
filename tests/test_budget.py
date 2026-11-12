@@ -4,7 +4,8 @@ HIVE-384 retired the spend cap and kept the telemetry, so this file was trimmed
 rather than deleted. What went: ``TestBudgetGuards`` in full, and the cost
 assertions inside the record/aggregate tests — they covered ``can_spend`` /
 ``month_remaining`` / ``month_spent``, which exist to keep a pay-per-token
-provider inside a dollar budget and have no subject on a flat subscription.
+provider inside a dollar budget and have no subject when the caller picks the
+model and NaN bills in credits (ADR-021, amended 2026-11-12).
 
 What deliberately stayed: recording, the month-scoped aggregate, WAL mode, file
 DB creation and thread safety. None of those belong to the cap, and deleting the
