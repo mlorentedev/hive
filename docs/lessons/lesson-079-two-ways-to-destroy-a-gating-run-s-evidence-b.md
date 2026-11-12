@@ -1,7 +1,8 @@
 ---
-id: lesson-079-two-ways-to-destroy-a-gating-run-s-evidence-b
+id: "lesson-079-two-ways-to-destroy-a-gating-run-s-evidence-b"
 type: lesson
 status: active
+title: "Two ways to destroy a gating run's evidence, both self-inflicted"
 created: "2026-08-08"
 owner: manu
 tags: [hive, lesson, ci, testing, debugging, evidence, git, editable-install, verification]

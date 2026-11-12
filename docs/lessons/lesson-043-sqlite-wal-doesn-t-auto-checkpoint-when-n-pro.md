@@ -1,7 +1,8 @@
 ---
-id: lesson-043-sqlite-wal-doesn-t-auto-checkpoint-when-n-pro
+id: "lesson-043-sqlite-wal-doesn-t-auto-checkpoint-when-n-pro"
 type: lesson
 status: active
+title: "SQLite WAL doesn't auto-checkpoint when N processes hold readers (baseline N=3-5)"
 created: "2026-05-21"
 owner: manu
 tags: [hive, lesson, sqlite, wal, multiprocess, checkpoint, concurrency, HIVE-115, ADR-009]

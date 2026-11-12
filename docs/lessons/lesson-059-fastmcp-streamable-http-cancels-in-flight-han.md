@@ -1,7 +1,8 @@
 ---
-id: lesson-059-fastmcp-streamable-http-cancels-in-flight-han
+id: "lesson-059-fastmcp-streamable-http-cancels-in-flight-han"
 type: lesson
 status: active
+title: "FastMCP streamable-http cancels in-flight handlers on shutdown — no true drain"
 created: "2026-06-01"
 owner: manu
 tags: [hive, lesson, daemon, fastmcp, uvicorn, restart-on-upgrade, idempotency, spikes, crash-only]

@@ -1,7 +1,8 @@
 ---
-id: lesson-004-2026-03-01-separate-project-from-dotfiles
+id: "lesson-004-2026-03-01-separate-project-from-dotfiles"
 type: lesson
 status: active
+title: "2026-03-01: Separate project from dotfiles"
 created: "2026-05-01"
 owner: manu
 tags: [hive, lesson]

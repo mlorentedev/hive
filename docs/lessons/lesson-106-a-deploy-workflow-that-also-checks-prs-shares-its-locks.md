@@ -1,7 +1,8 @@
 ---
-id: lesson-106-a-deploy-workflow-that-also-checks-prs-shares-its-locks
+id: "lesson-106-a-deploy-workflow-that-also-checks-prs-shares-its-locks"
 type: lesson
 status: active
+title: "A deploy workflow that also checks PRs shares its locks"
 created: "2026-10-19"
 owner: manu
 tags: [hive, lesson, github-actions, ci, pages, BUG-009]

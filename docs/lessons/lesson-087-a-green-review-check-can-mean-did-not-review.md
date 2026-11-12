@@ -1,7 +1,8 @@
 ---
-id: lesson-087-a-green-review-check-can-mean-did-not-review
+id: "lesson-087-a-green-review-check-can-mean-did-not-review"
 type: lesson
 status: active
+title: "A green review check can mean \"did not review\""
 created: "2026-08-09"
 owner: manu
 tags: [hive, lesson, code-review, ci, verification, coderabbit, definition-of-done]

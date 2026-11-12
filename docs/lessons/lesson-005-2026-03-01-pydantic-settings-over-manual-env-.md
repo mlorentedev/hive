@@ -1,7 +1,8 @@
 ---
-id: lesson-005-2026-03-01-pydantic-settings-over-manual-env-
+id: "lesson-005-2026-03-01-pydantic-settings-over-manual-env-"
 type: lesson
 status: active
+title: "2026-03-01: pydantic-settings over manual env var resolution"
 created: "2026-05-01"
 owner: manu
 tags: [hive, lesson]

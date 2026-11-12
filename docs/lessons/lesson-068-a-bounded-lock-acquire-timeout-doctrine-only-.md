@@ -1,7 +1,8 @@
 ---
-id: lesson-068-a-bounded-lock-acquire-timeout-doctrine-only-
+id: "lesson-068-a-bounded-lock-acquire-timeout-doctrine-only-"
 type: lesson
 status: active
+title: "A bounded `Lock.acquire(timeout=)` doctrine only holds if every caller follows it (#282)"
 created: "2026-07-08"
 owner: manu
 tags: [hive, lesson, concurrency, sqlite, threading, mcp, session_briefing, HIVE-282]

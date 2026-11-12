@@ -1,7 +1,8 @@
 ---
-id: lesson-075-a-config-filter-that-reads-like-batch-these-a
+id: "lesson-075-a-config-filter-that-reads-like-batch-these-a"
 type: lesson
 status: active
+title: "A config filter that reads like \"batch these\" actually means \"exclude the rest\""
 created: "2026-08-07"
 owner: manu
 tags: [hive, lesson, dependabot, dependencies, security, configuration, diagnosis, HIVE-334]

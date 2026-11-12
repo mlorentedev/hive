@@ -1,7 +1,8 @@
 ---
-id: lesson-085-a-lock-file-under-git-creates-the-directory-t
+id: "lesson-085-a-lock-file-under-git-creates-the-directory-t"
 type: lesson
 status: active
+title: "A lock file under `.git/` creates the directory that proves a repo exists"
 created: "2026-08-09"
 owner: manu
 tags: [hive, lesson, git, locking, filelock, vault, HIVE-353]

@@ -1,7 +1,8 @@
 ---
-id: lesson-035-github-actions-floating-major-tags-are-publis
+id: "lesson-035-github-actions-floating-major-tags-are-publis"
 type: lesson
 status: active
+title: "GitHub Actions floating major tags are publisher-dependent — verify before bumping"
 created: "2026-05-19"
 owner: manu
 tags: [hive, lesson, ci, github-actions, deps]

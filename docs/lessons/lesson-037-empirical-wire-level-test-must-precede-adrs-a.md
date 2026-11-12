@@ -1,7 +1,8 @@
 ---
-id: lesson-037-empirical-wire-level-test-must-precede-adrs-a
+id: "lesson-037-empirical-wire-level-test-must-precede-adrs-a"
 type: lesson
 status: active
+title: "Empirical wire-level test must precede ADRs about MCP cancellation/race behavior"
 created: "2026-05-20"
 owner: manu
 tags: [hive, lesson, adr, testing, mcp, cancellation, design-process]

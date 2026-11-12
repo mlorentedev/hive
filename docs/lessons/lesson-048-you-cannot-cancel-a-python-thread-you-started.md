@@ -1,7 +1,8 @@
 ---
-id: lesson-048-you-cannot-cancel-a-python-thread-you-started
+id: "lesson-048-you-cannot-cancel-a-python-thread-you-started"
 type: lesson
 status: active
+title: "You cannot cancel a Python thread you started"
 created: "2026-05-28"
 owner: manu
 tags: [hive, lesson]

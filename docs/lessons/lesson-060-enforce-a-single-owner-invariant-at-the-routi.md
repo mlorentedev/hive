@@ -1,7 +1,8 @@
 ---
-id: lesson-060-enforce-a-single-owner-invariant-at-the-routi
+id: "lesson-060-enforce-a-single-owner-invariant-at-the-routi"
 type: lesson
 status: active
+title: "Enforce a single-owner invariant at the routing layer, not by making the fallback contend for the owner's lock"
 created: "2026-06-01"
 owner: manu
 tags: [hive, lesson, architecture, resilience, single-owner, daemon, failover, concurrency]

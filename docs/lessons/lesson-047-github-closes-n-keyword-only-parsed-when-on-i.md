@@ -1,7 +1,8 @@
 ---
-id: lesson-047-github-closes-n-keyword-only-parsed-when-on-i
+id: "lesson-047-github-closes-n-keyword-only-parsed-when-on-i"
 type: lesson
 status: active
+title: "GitHub `Closes #N` keyword only parsed when on its own line at PR body footer"
 created: "2026-05-22"
 owner: manu
 tags: [hive, lesson, github, workflow, pull-request, automation]

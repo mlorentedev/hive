@@ -1,7 +1,8 @@
 ---
-id: lesson-103-an-install-that-only-registers-leaves-the-service-down
+id: "lesson-103-an-install-that-only-registers-leaves-the-service-down"
 type: lesson
 status: active
+title: "An install that only registers leaves the service down"
 created: "2026-10-10"
 owner: manu
 tags: [hive, lesson, windows, service, parity, HIVE-479]

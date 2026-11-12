@@ -1,7 +1,8 @@
 ---
-id: lesson-011-2026-03-04-vault-search-has-best-signal-to-no
+id: "lesson-011-2026-03-04-vault-search-has-best-signal-to-no"
 type: lesson
 status: active
+title: "2026-03-04: vault_search has best signal-to-noise ratio"
 created: "2026-05-01"
 owner: manu
 tags: [hive, lesson]

@@ -1,7 +1,8 @@
 ---
-id: lesson-099-a-patch-tested-against-a-stand-in-cannot-report-its-own-absence
+id: "lesson-099-a-patch-tested-against-a-stand-in-cannot-report-its-own-absence"
 type: lesson
 status: active
+title: "A patch tested against a stand-in cannot report its own absence"
 created: "2026-09-24"
 owner: manu
 tags: [hive, lesson, testing, monkey-patch, dependencies, silent-failure, mcp, ci, uv, HIVE-434]

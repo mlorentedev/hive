@@ -1,7 +1,8 @@
 ---
-id: lesson-002-2026-03-01-claude-code-as-orchestrator-not-a-
+id: "lesson-002-2026-03-01-claude-code-as-orchestrator-not-a-"
 type: lesson
 status: active
+title: "2026-03-01: Claude Code as orchestrator, not a custom framework"
 created: "2026-05-01"
 owner: manu
 tags: [hive, lesson]

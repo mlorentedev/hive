@@ -1,7 +1,8 @@
 ---
-id: lesson-100-replay-the-reported-version-against-the-reported-data
+id: "lesson-100-replay-the-reported-version-against-the-reported-data"
 type: lesson
 status: active
+title: "Replay the reported version against the reported data"
 created: "2026-09-25"
 owner: manu
 tags: [hive, lesson, debugging, reproduction, vault-health, git-archive, HIVE-346]

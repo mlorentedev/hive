@@ -1,7 +1,8 @@
 ---
-id: lesson-034-multi-process-mcp-server-contention-surfaces-
+id: "lesson-034-multi-process-mcp-server-contention-surfaces-"
 type: lesson
 status: active
+title: "Multi-process MCP server contention surfaces — checklist + patterns"
 created: "2026-05-18"
 owner: manu
 tags: [hive, lesson, mcp, concurrency, multi-process, sqlite, filelock, scalability]

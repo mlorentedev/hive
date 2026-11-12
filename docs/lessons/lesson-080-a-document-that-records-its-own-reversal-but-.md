@@ -1,7 +1,8 @@
 ---
-id: lesson-080-a-document-that-records-its-own-reversal-but-
+id: "lesson-080-a-document-that-records-its-own-reversal-but-"
 type: lesson
 status: active
+title: "A document that records its own reversal, but leaves the reversed text reading as current"
 created: "2026-08-07"
 owner: manu
 tags: [hive, lesson, specs, documentation-drift, sdd, review, HIVE-322]

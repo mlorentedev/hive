@@ -1,7 +1,8 @@
 ---
-id: lesson-072-a-lock-that-excludes-processes-does-not-exclu
+id: "lesson-072-a-lock-that-excludes-processes-does-not-exclu"
 type: lesson
 status: active
+title: "A lock that excludes processes does not exclude people"
 created: "2026-08-07"
 owner: manu
 tags: [hive, lesson, architecture, concurrency, git, recovery, adr-018, HIVE-322]

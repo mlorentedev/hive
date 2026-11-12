@@ -1,7 +1,8 @@
 ---
-id: lesson-107-a-commit-without-a-pathspec-commits-the-whole-index
+id: "lesson-107-a-commit-without-a-pathspec-commits-the-whole-index"
 type: lesson
 status: active
+title: "A commit without a pathspec commits the whole index"
 created: "2026-10-20"
 owner: manu
 tags: [hive, lesson, git, concurrency, BUG-008]

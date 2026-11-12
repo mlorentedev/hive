@@ -1,7 +1,8 @@
 ---
-id: lesson-016-list-models-missing-status-check
+id: "lesson-016-list-models-missing-status-check"
 type: lesson
 status: active
+title: "list_models() missing status check"
 created: "2026-03-06"
 owner: manu
 tags: [hive, lesson]

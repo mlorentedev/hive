@@ -1,7 +1,8 @@
 ---
-id: lesson-090-a-configurable-endpoint-with-a-hardcoded-label
+id: "lesson-090-a-configurable-endpoint-with-a-hardcoded-label"
 type: lesson
 status: active
+title: "A configurable endpoint with a hardcoded label states a fact it does not know"
 created: "2026-08-23"
 owner: manu
 tags: [hive, lesson, configuration, open-source, api-design, provider-neutrality, published-package, HIVE-391]

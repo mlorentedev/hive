@@ -1,7 +1,8 @@
 ---
-id: lesson-105-launchd-never-splits-a-command-line
+id: "lesson-105-launchd-never-splits-a-command-line"
 type: lesson
 status: active
+title: "launchd never splits a command line"
 created: "2026-10-13"
 owner: manu
 tags: [hive, lesson, macos, launchd, service, HIVE-488]

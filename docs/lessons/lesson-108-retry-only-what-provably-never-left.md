@@ -1,7 +1,8 @@
 ---
-id: lesson-108-retry-only-what-provably-never-left
+id: "lesson-108-retry-only-what-provably-never-left"
 type: lesson
 status: active
+title: "Retry only what provably never left"
 created: "2026-10-21"
 owner: manu
 tags: [hive, lesson, client, retry, idempotency, testing, HIVE-487]

@@ -1,7 +1,8 @@
 ---
-id: lesson-050-makefile-dx-improvements-cross-platform-clean
+id: "lesson-050-makefile-dx-improvements-cross-platform-clean"
 type: lesson
 status: active
+title: "Makefile DX improvements: cross-platform clean, test-one, logs target"
 created: "2026-05-27"
 owner: manu
 tags: [hive, lesson, dx, makefile, cross-platform]

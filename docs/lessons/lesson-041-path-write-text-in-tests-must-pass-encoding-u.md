@@ -1,7 +1,8 @@
 ---
-id: lesson-041-path-write-text-in-tests-must-pass-encoding-u
+id: "lesson-041-path-write-text-in-tests-must-pass-encoding-u"
 type: lesson
 status: active
+title: "Path.write_text in tests must pass encoding=utf-8 on Windows"
 created: "2026-05-21"
 owner: manu
 tags: [hive, lesson, testing, windows, encoding]

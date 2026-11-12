@@ -1,7 +1,8 @@
 ---
-id: lesson-019-evaluating-external-tools-separation-of-conce
+id: "lesson-019-evaluating-external-tools-separation-of-conce"
 type: lesson
 status: active
+title: "Evaluating external tools — separation of concerns over feature envy"
 created: "2026-03-07"
 owner: manu
 tags: [hive, lesson, architecture, yagni, competitive-analysis]

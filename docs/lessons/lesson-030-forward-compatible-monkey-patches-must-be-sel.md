@@ -1,7 +1,8 @@
 ---
-id: lesson-030-forward-compatible-monkey-patches-must-be-sel
+id: "lesson-030-forward-compatible-monkey-patches-must-be-sel"
 type: lesson
 status: active
+title: "Forward-compatible monkey-patches must be self-gated on the failure mode"
 created: "2026-05-15"
 owner: manu
 tags: [hive, lesson, monkey-patch, mcp, forward-compat, issue-75]

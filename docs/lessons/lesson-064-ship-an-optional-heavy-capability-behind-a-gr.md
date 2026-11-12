@@ -1,7 +1,8 @@
 ---
-id: lesson-064-ship-an-optional-heavy-capability-behind-a-gr
+id: "lesson-064-ship-an-optional-heavy-capability-behind-a-gr"
 type: lesson
 status: active
+title: "Ship an optional heavy capability behind a graceful-degradation gate, never a hard dependency"
 created: "2026-06-05"
 owner: manu
 tags: [hive, lesson, mcp, optional-dependency, graceful-degradation, semantic-search, config, HIVE-211]

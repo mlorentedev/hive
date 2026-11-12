@@ -1,7 +1,8 @@
 ---
-id: lesson-071-benchmarking-a-function-that-swallows-its-own
+id: "lesson-071-benchmarking-a-function-that-swallows-its-own"
 type: lesson
 status: active
+title: "Benchmarking a function that swallows its own failures, and reading one run as a trend"
 created: "2026-08-07"
 owner: manu
 tags: [hive, lesson, benchmarking, measurement, concurrency, git, methodology, HIVE-322]

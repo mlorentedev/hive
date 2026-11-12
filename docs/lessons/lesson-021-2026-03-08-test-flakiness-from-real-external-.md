@@ -1,7 +1,8 @@
 ---
-id: lesson-021-2026-03-08-test-flakiness-from-real-external-
+id: "lesson-021-2026-03-08-test-flakiness-from-real-external-"
 type: lesson
 status: active
+title: "2026-03-08: Test flakiness from real external services in unit tests"
 created: "2026-05-01"
 owner: manu
 tags: [hive, lesson]

@@ -1,7 +1,8 @@
 ---
-id: lesson-008-2026-03-04-max-lines-100-was-dangerously-aggr
+id: "lesson-008-2026-03-04-max-lines-100-was-dangerously-aggr"
 type: lesson
 status: active
+title: "2026-03-04: max_lines=100 was dangerously aggressive"
 created: "2026-05-01"
 owner: manu
 tags: [hive, lesson]

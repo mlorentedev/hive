@@ -1,7 +1,8 @@
 ---
-id: lesson-052-the-daemon-s-restart-on-upgrade-is-posix-only
+id: "lesson-052-the-daemon-s-restart-on-upgrade-is-posix-only"
 type: lesson
 status: active
+title: "The daemon's restart-on-upgrade is POSIX-only — Windows breaks it three ways"
 created: "2026-06-04"
 owner: manu
 tags: [hive, lesson, windows, daemon, cross-os, task-scheduler, s4u, ADR-015, hive-176]

@@ -1,7 +1,8 @@
 ---
-id: lesson-073-an-index-larger-than-its-own-read-limit-silen
+id: "lesson-073-an-index-larger-than-its-own-read-limit-silen"
 type: lesson
 status: active
+title: "An index larger than its own read limit silently drops the part that matters"
 created: "2026-08-07"
 owner: manu
 tags: [hive, lesson, memory, context, truncation, silent-failure, tooling]

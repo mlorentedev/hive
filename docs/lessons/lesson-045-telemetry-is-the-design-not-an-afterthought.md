@@ -1,7 +1,8 @@
 ---
-id: lesson-045-telemetry-is-the-design-not-an-afterthought
+id: "lesson-045-telemetry-is-the-design-not-an-afterthought"
 type: lesson
 status: active
+title: "Telemetry IS the design, not an afterthought"
 created: "2026-05-21"
 owner: manu
 tags: [hive, lesson, observability, telemetry, design, instrumentation, HIVE-115, phase-a]

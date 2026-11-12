@@ -1,7 +1,8 @@
 ---
-id: lesson-084-a-benchmark-assertion-that-cannot-flake-bound
+id: "lesson-084-a-benchmark-assertion-that-cannot-flake-bound"
 type: lesson
 status: active
+title: "A benchmark assertion that cannot flake: bound a count, derive the bound from measured time"
 created: "2026-08-08"
 owner: manu
 tags: [hive, lesson, testing, benchmarks, flaky-tests, ci, performance, HIVE-322]

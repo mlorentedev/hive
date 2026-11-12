@@ -1,7 +1,8 @@
 ---
-id: lesson-083-the-read-only-git-command-that-takes-a-write-
+id: "lesson-083-the-read-only-git-command-that-takes-a-write-"
 type: lesson
 status: active
+title: "The read-only git command that takes a write lock"
 created: "2026-08-08"
 owner: manu
 tags: [hive, lesson, git, locking, telemetry, observability, daemon, HIVE-322]

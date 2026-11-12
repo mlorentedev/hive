@@ -1,7 +1,8 @@
 ---
-id: lesson-027-bfs-hierarchical-scope-resolution-for-nested-
+id: "lesson-027-bfs-hierarchical-scope-resolution-for-nested-"
 type: lesson
 status: active
+title: "BFS hierarchical scope resolution for nested vault directories"
 created: "2026-03-26"
 owner: manu
 tags: [hive, lesson, vault, scope-resolution, bfs, mcp]

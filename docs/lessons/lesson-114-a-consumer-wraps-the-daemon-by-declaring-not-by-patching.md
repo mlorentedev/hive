@@ -1,7 +1,8 @@
 ---
-id: lesson-114-a-consumer-wraps-the-daemon-by-declaring-not-by-patching
+id: "lesson-114-a-consumer-wraps-the-daemon-by-declaring-not-by-patching"
 type: lesson
 status: active
+title: "A consumer wraps the daemon by declaring, not by patching"
 created: "2026-10-31"
 owner: manu
 tags: [hive, lesson, service, daemon, cross-os, secrets, HIVE-540]

@@ -1,7 +1,8 @@
 ---
-id: lesson-038-pattern-sweep-vault-before-opening-any-non-tr
+id: "lesson-038-pattern-sweep-vault-before-opening-any-non-tr"
 type: lesson
 status: active
+title: "Pattern-sweep vault before opening any non-trivial branch"
 created: "2026-05-20"
 owner: manu
 tags: [hive, lesson, workflow, git, rules-discipline]

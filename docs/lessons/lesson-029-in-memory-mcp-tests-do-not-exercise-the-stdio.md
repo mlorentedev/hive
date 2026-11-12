@@ -1,7 +1,8 @@
 ---
-id: lesson-029-in-memory-mcp-tests-do-not-exercise-the-stdio
+id: "lesson-029-in-memory-mcp-tests-do-not-exercise-the-stdio"
 type: lesson
 status: active
+title: "In-memory MCP tests do not exercise the stdio transport race"
 created: "2026-05-15"
 owner: manu
 tags: [hive, lesson, mcp, testing, stdio, cancellation, issue-75]

@@ -1,7 +1,8 @@
 ---
-id: lesson-022-glama-mcp-directory-listing-requirements
+id: "lesson-022-glama-mcp-directory-listing-requirements"
 type: lesson
 status: active
+title: "Glama MCP Directory Listing Requirements"
 created: "2026-03-10"
 owner: manu
 tags: [hive, lesson, distribution, mcp, glama]

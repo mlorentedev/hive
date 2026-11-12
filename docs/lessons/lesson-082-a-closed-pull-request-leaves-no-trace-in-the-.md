@@ -1,7 +1,8 @@
 ---
-id: lesson-082-a-closed-pull-request-leaves-no-trace-in-the-
+id: "lesson-082-a-closed-pull-request-leaves-no-trace-in-the-"
 type: lesson
 status: active
+title: "A closed pull request leaves no trace in the issue it would have fixed"
 created: "2026-08-07"
 owner: manu
 tags: [hive, lesson, github, upstream, research, verification, mcp, HIVE-127]

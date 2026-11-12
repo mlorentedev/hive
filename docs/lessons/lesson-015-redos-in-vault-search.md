@@ -1,7 +1,8 @@
 ---
-id: lesson-015-redos-in-vault-search
+id: "lesson-015-redos-in-vault-search"
 type: lesson
 status: active
+title: "ReDoS in vault_search"
 created: "2026-03-06"
 owner: manu
 tags: [hive, lesson]

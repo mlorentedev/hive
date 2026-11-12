@@ -1,7 +1,8 @@
 ---
-id: lesson-109-a-relay-owes-the-host-one-answer-per-request
+id: "lesson-109-a-relay-owes-the-host-one-answer-per-request"
 type: lesson
 status: active
+title: "A relay owes the host one answer per request"
 created: "2026-10-21"
 owner: manu
 tags: [hive, lesson, client, sse, streaming, json-rpc, HIVE-499]

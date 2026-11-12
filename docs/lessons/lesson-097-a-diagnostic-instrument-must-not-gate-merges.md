@@ -1,7 +1,8 @@
 ---
-id: lesson-097-a-diagnostic-instrument-must-not-gate-merges
+id: "lesson-097-a-diagnostic-instrument-must-not-gate-merges"
 type: lesson
 status: active
+title: "A diagnostic instrument must not gate merges"
 created: "2026-08-22"
 owner: manu
 tags: [hive, lesson, testing, ci, flaky-tests, markers, gating, HIVE-388]

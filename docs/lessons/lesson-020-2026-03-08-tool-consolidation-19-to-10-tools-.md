@@ -1,7 +1,8 @@
 ---
-id: lesson-020-2026-03-08-tool-consolidation-19-to-10-tools-
+id: "lesson-020-2026-03-08-tool-consolidation-19-to-10-tools-"
 type: lesson
 status: active
+title: "2026-03-08: Tool consolidation — 19 to 10 tools for Claude Code compatibility"
 created: "2026-05-01"
 owner: manu
 tags: [hive, lesson]

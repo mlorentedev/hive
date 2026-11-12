@@ -1,7 +1,8 @@
 ---
-id: lesson-070-a-removed-module-error-from-a-metadata-only-m
+id: "lesson-070-a-removed-module-error-from-a-metadata-only-m"
 type: lesson
 status: active
+title: "A \"removed module\" error from a metadata-only meta-package, and a floor no install could satisfy"
 created: "2026-08-07"
 owner: manu
 tags: [hive, lesson, dependencies, packaging, fastmcp, windows, diagnosis, HIVE-319]

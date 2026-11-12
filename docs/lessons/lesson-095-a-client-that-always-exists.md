@@ -1,7 +1,8 @@
 ---
-id: lesson-095-a-client-that-always-exists
+id: "lesson-095-a-client-that-always-exists"
 type: lesson
 status: active
+title: "A client that always exists reports a pool that never answers"
 created: "2026-08-23"
 owner: manu
 tags: [hive, lesson, health-checks, observability, optional-dependency, api-design, silent-failure, HIVE-384]

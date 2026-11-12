@@ -1,7 +1,8 @@
 ---
-id: lesson-054-httpx-base-url-join-silently-drops-the-base-p
+id: "lesson-054-httpx-base-url-join-silently-drops-the-base-p"
 type: lesson
 status: active
+title: "httpx `base_url` join silently drops the base path on absolute request paths"
 created: "2026-06-05"
 owner: manu
 tags: [hive, lesson, httpx, footgun, base-url, openai-compatible, HIVE-211]

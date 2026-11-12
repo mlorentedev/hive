@@ -1,7 +1,8 @@
 ---
-id: lesson-024-asyncio-timeout-cannot-interrupt-threads-use-
+id: "lesson-024-asyncio-timeout-cannot-interrupt-threads-use-"
 type: lesson
 status: active
+title: "asyncio.timeout cannot interrupt threads — use lock timeouts for sync code"
 created: "2026-03-13"
 owner: manu
 tags: [hive, lesson, python, asyncio, concurrency, mcp]

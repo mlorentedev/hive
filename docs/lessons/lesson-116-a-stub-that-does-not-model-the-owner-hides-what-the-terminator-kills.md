@@ -1,7 +1,8 @@
 ---
-id: lesson-116-a-stub-that-does-not-model-the-owner-hides-what-the-terminator-kills
+id: "lesson-116-a-stub-that-does-not-model-the-owner-hides-what-the-terminator-kills"
 type: lesson
 status: active
+title: "A stub that does not model the owner hides what the terminator kills"
 created: "2026-10-30"
 owner: manu
 tags: [hive, lesson, testing, subprocess, deadline, process-group, HIVE-524]

@@ -1,7 +1,8 @@
 ---
-id: lesson-006-2026-03-01-squash-merge-for-feature-branches
+id: "lesson-006-2026-03-01-squash-merge-for-feature-branches"
 type: lesson
 status: active
+title: "2026-03-01: Squash merge for feature branches"
 created: "2026-05-01"
 owner: manu
 tags: [hive, lesson]

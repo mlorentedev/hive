@@ -1,7 +1,8 @@
 ---
-id: lesson-046-contextvar-propagates-across-asyncio-to-threa
+id: "lesson-046-contextvar-propagates-across-asyncio-to-threa"
 type: lesson
 status: active
+title: "ContextVar propagates across asyncio.to_thread — use over explicit parameter passing for per-call state"
 created: "2026-05-22"
 owner: manu
 tags: [hive, lesson, python, concurrency, async, contextvars, design]

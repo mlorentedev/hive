@@ -1,7 +1,8 @@
 ---
-id: lesson-057-load-test-confirms-planned-defenses-idempoten
+id: "lesson-057-load-test-confirms-planned-defenses-idempoten"
 type: lesson
 status: active
+title: "Load test confirms planned defenses (idempotency, init_timeout) hit real cases"
 created: "2026-05-31"
 owner: manu
 tags: [hive, lesson, load-testing, daemon, idempotency, crash-safety, fastmcp]
