@@ -230,7 +230,11 @@ new provider* no longer holds.
 **Rejected.** A credit budget kept by hive (option B of #573): an estimate of a number only NaN's
 dashboard knows, with a rate table to keep in sync. Treating `402` as a loud stop in hive (option C
 as first written): it is a refusal of one pool, which is exactly what the refusal class exists for;
-the loud stop belongs to the caller, once no pool is left.
+the loud stop belongs to the caller, once no pool is left. A startup warning when `HIVE_WORKER_MODEL` spends credits (the
+other half of option A): hive would have to carry a list of one provider's no-credit models, which
+the provider-neutrality guard keeps out of the provider-facing modules, and the list would drift
+whenever NaN changes its catalog. The no-credit binding is enforced where the model is chosen, in
+the caller's routing map.
 
 ## References
 
