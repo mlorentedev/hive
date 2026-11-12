@@ -19,45 +19,12 @@
 # at source.
 
 [config]
-# `openai/` selects LiteLLM's OpenAI-compatible transport; the endpoint is NaN's, set
-# as OPENAI__API_BASE in the workflow. Nothing here talks to OpenAI.
-#
-# mimo-v2.6-flash leads and deepseek-v4-flash follows because the order is the only one that
-# can fail loudly. deepseek's characteristic failure is a 200 with an empty body — it
-# spends the output budget on the reasoning chain and never writes an answer — which
-# raises no exception, so LiteLLM never consults a fallback behind it. kubelab measured
-# that shape on run 32440498259 (#1205): step `success` after 4m15s, no RateLimitError,
-# the second model never attempted. mimo fails by saturation (429), which DOES raise.
-# That 429 shape was measured on mimo-v2.5, retired by NaN on 2026-09-30. Its successor
-# has also been seen to hang under load rather than answer 429, which raises nothing
-# (mlorentedev/dotfiles#1923), so this ordering is the best available, not a guarantee.
-#
-# This is not a quality ranking. dotfiles' harness/reviewer-pool.json says of mimo, in
-# its own words, that no ranking against deepseek was established; both are
-# reasoning-class by profile (1M context, mandatory chain) and both are admitted there,
-# which is the line this file draws. The excluded models stay excluded by name:
-# qwen3.6/gemma4 are the latency tier, and a reviewer that PASSes cheaply converts a
-# gate into a green checkmark. tests/pr-agent-config.bats holds that at dotfiles.
-model = "openai/mimo-v2.6-flash"
+# The model, its fallback and custom_model_max_tokens are set by the shared workflow
+# (mlorentedev/ci-workflows pr-agent.yml) through environment variables, which sit
+# above this file, so they are not repeated here.
 
-# ONE fallback, and lane separation is why it is deepseek rather than a sibling of the
-# primary. NaN's limit is PER MODEL (kubelab #1107/#1203: 8 concurrent to deepseek
-# gives 5x200 + 3x429 while mimo answers 200 during the same saturation), so the second
-# bucket is a real fallback and not a re-name of the same wall. It does share a bucket
-# with the sibling repos' adversarial-review pools and with whatever model hive's own
-# delegate worker (HIVE-384) is pointed at — the trade was made at dotfiles #1149 in
-# the same direction (CI yields to the gate, because the gate blocks and CI review
-# advises), and it is recorded here rather than rediscovered.
-fallback_models = ["openai/deepseek-v4-flash"]
-
-# `model_weak` deliberately absent. Upstream defaults it to a flash tier for
-# descriptions and commit summaries; `auto_describe` is off below so it would do
-# nothing, and the model it names is the one the pool rejects here. Importing a
-# documented tension for zero behaviour is the worst of both.
-
-# NaN ids are not in LiteLLM's registry, so the budget must be stated or LiteLLM
-# assumes a small default and truncates the diff silently.
-custom_model_max_tokens = 200000
+# The shared workflow's NaN step sets custom_model_max_tokens but not this cap,
+# whose upstream default (32000) would clip the diff, so it stays here.
 max_model_tokens = 200000
 
 response_language = "en-US"
@@ -79,6 +46,11 @@ final_update_message = false
 # sixteen at dotfiles (#1072, recommendation was deletion). An instruction ignored 94 %
 # of the time is a comment, not a control.
 extra_instructions = """
+Classify each finding as REAL, THEORETICAL or SPECULATIVE. State the class as
+the first line of its issue_content, alone on that line and spelled exactly
+"Class: REAL", "Class: THEORETICAL" or "Class: SPECULATIVE". The triage reads
+only that line; a finding without it goes to a human unclassified.
+
 This repository already runs ruff check, ruff format --check, mypy on src/, pytest with
 coverage on Python 3.12 and 3.13, the cross-worker lock suite on Linux and Windows, and
 a Docker build with a smoke run. Do not restate what those report; repeating it is noise
@@ -111,7 +83,7 @@ Spend the budget on what static analysis cannot see:
   artifact or the process table, including in documentation examples. `worker_status`
   and `vault_health` are asserted to carry none (#390 AC7).
 
-Grade each finding REAL, THEORETICAL or SPECULATIVE and say which. REAL needs a concrete
+A REAL finding needs a concrete
 trace: file and line, failing input, or a command and its output. Do not flag an import
 or dependency as missing when CI compiles and tests pass; trust the manifests. Write in
 English. Conventional Commits and no AI attribution are enforced here, so do not propose
