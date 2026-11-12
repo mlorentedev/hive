@@ -1,37 +1,32 @@
-"""Invariants for the reviewer workflow's concurrency and guards (#503, CI-001).
+"""The caller of the shared reviewer (TOOL-031 dotfiles#2893, CI-007 ci-workflows#33).
 
-These pin the DECLARATION, not the scheduler: no unit test can observe GitHub
-Actions queueing. The behaviour they describe was measured on a throwaway probe
-(four simultaneous runs: one running, three pending, none discarded) and again in
-production on this pull request, where the superseded run's publish guard is
-`skipped` instead of `failed`. The tests exist because the failure mode of losing
-these keys is silent and looks exactly like the bug they fix.
+A tag or a branch here would let a change in ci-workflows reach this repository
+without a commit in it, so the pin is held to a full SHA with its tag beside it.
 
-
-Why these are tests and not prose: the arrangement below exists to stop this
-repository from colliding with itself in a model pool it does not own (five
-concurrent requests per model, shared with pi, qq, the sibling repositories'
-review pools and hive's own delegate worker). Every symptom of getting it wrong
-is silent. `review` is not a required check, there is no actionlint in CI, and a
-run that never gets a runner publishes nothing — so a flattened group, or a
-`queue:` key dropped from a job block, produces cancelled reviews that look
-exactly like the saturation bug these lines fix.
-
-Measured, not assumed: the two-scope arrangement with `queue: max` held four
-simultaneous runs as one running plus three pending, none discarded, and a push
-still cancelled the older run of its own ref (#503, probe runs 39174829690 and
-its successors).
+The review lane this file used to pin (#503, CI-001) moved into the shared job:
+the repository-wide `concurrency` group with `queue: max`, the bounded PR-Agent
+step below the job limit, and the publish guard on `!cancelled()` are declared in
+mlorentedev/ci-workflows' `.github/workflows/pr-agent.yml` and tested there. A
+`uses:` job cannot declare steps or job-level concurrency, so they cannot be
+asserted here. What the caller still owns is the workflow-level group that lets a
+push supersede the older review of its own pull request, and that stays pinned.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "pr-agent.yml"
-
+PINNED_LINE = re.compile(
+    r"uses: mlorentedev/ci-workflows/\.github/workflows/pr-agent\.yml"
+    r"@[0-9a-f]{40} # v\d+\.\d+\.\d+$",
+    re.MULTILINE,
+)
+# The shared job's lane group; the caller's group must never collapse into it.
 LANE_GROUP = "pr-agent-review-${{ github.repository }}"
 
 
@@ -41,31 +36,40 @@ def _load() -> dict[str, Any]:
     return loaded
 
 
-def _review_job() -> dict[str, Any]:
+def _job() -> dict[str, Any]:
     job = _load()["jobs"]["review"]
     assert isinstance(job, dict)
     return job
 
 
-def _step(name: str) -> dict[str, Any]:
-    for step in _review_job()["steps"]:
-        if step.get("name") == name:
-            return step  # type: ignore[no-any-return]
-    raise AssertionError(f"no step named {name!r} in the review job")
+def test_the_shared_workflow_is_pinned_by_full_sha_and_tag() -> None:
+    assert PINNED_LINE.search(WORKFLOW.read_text(encoding="utf-8"))
 
 
-def test_the_reviewer_job_declares_a_queuing_lane() -> None:
-    """One review at a time per repository, and nothing discarded while waiting."""
-    lane = _review_job()["concurrency"]
-    assert lane["group"] == LANE_GROUP, (
-        "the lane group must be keyed by repository: keying it per pull request "
-        "is what lets four PRs spend the model pool's five slots at once"
-    )
-    assert lane["cancel-in-progress"] is False, "never cancel the review that is running"
-    assert lane.get("queue") == "max", (
-        "without `queue: max` a group keeps one running and one pending run, and a "
-        "third request cancels the second before it ever gets a runner"
-    )
+def test_the_pool_comes_from_the_dotf_pin() -> None:
+    assert _job()["with"]["pool"] == "embedded"
+
+
+def test_release_pull_requests_are_not_reviewed_again() -> None:
+    assert _job()["with"]["skip_branch_prefixes"].split() == ["release-please--"]
+
+
+def test_the_caller_passes_neither_dotf_nor_a_model_chain() -> None:
+    declared = {"dotf_version", "declared_model", "declared_fallback_models"}
+    assert not declared & set(_job()["with"])
+
+
+def test_the_pin_is_at_least_the_tag_that_defaults_them() -> None:
+    # v0.1.0 requires dotf_version and the chain. The tag is compared, not the
+    # SHA, so a Dependabot bump keeps this green and a revert turns it red.
+    match = PINNED_LINE.search(WORKFLOW.read_text(encoding="utf-8"))
+    assert match
+    tag = match.group(0).rsplit("# v", 1)[1]
+    assert tuple(int(part) for part in tag.split(".")) >= (0, 2, 0)
+
+
+def test_secrets_are_passed_by_name() -> None:
+    assert set(_job()["secrets"]) == {"NAN_API_KEY", "PR_AGENT_ANTHROPIC_API_KEY"}
 
 
 def test_supersession_stays_at_the_workflow_level() -> None:
@@ -84,30 +88,6 @@ def test_supersession_stays_at_the_workflow_level() -> None:
 
 def test_the_queue_is_not_beside_a_cancelling_group() -> None:
     """GitHub refuses `queue: max` in a group that cancels in progress."""
-    workflow = _load()
-    assert "queue" not in workflow["concurrency"], (
+    assert "queue" not in _load()["concurrency"], (
         "`queue: max` beside `cancel-in-progress: true` is a validation error, not a no-op"
     )
-    assert _review_job()["concurrency"]["cancel-in-progress"] is False
-
-
-def test_a_hung_attempt_releases_the_lane() -> None:
-    """The measured failure mode is a hang, so the attempt needs a bound of its own."""
-    job_bound = _review_job()["timeout-minutes"]
-    step_bound = _step("PR-Agent").get("timeout-minutes")
-    assert step_bound is not None, "the PR-Agent step has no bound of its own"
-    assert step_bound < job_bound, (
-        "a step bound at or above the job bound never fires: the job limit cancels the "
-        "step in flight, which is how four reds each spent fifteen minutes"
-    )
-
-
-def test_a_superseded_run_attests_nothing() -> None:
-    """A cancelled run must not report a missing review; its successor owns the verdict."""
-    guard = _step("Fail if no review was published")
-    condition = " ".join(str(guard["if"]).split())
-    assert "!cancelled()" in condition, (
-        "the guard runs on `always()`, so a push-superseded run fails it and leaves a red "
-        "`review` that is indistinguishable from infrastructure failure (#503)"
-    )
-    assert "always()" not in condition, "`!cancelled()` already covers failed steps; keep one gate"
