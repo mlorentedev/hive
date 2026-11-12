@@ -11,4 +11,4 @@ tags: [hive, lessons, pointer]
 
 > **Notice:** Lessons have been modularized to optimize token consumption and prevent monolithic growth.
 >
-> 👉 **Canonical Index:** [Lessons Index](lessons/_index.md)
+> 👉 **Lessons:** [docs/lessons/](lessons/). [dotf](https://github.com/mlorentedev/dotfiles) renders an index of them with `dotf lessons index`.
