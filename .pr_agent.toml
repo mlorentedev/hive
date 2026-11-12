@@ -19,9 +19,13 @@
 # at source.
 
 [config]
-# The model, its fallback and the token budgets are set by the shared workflow
+# The model, its fallback and custom_model_max_tokens are set by the shared workflow
 # (mlorentedev/ci-workflows pr-agent.yml) through environment variables, which sit
 # above this file, so they are not repeated here.
+
+# The shared workflow's NaN step sets custom_model_max_tokens but not this cap,
+# whose upstream default (32000) would clip the diff, so it stays here.
+max_model_tokens = 200000
 
 response_language = "en-US"
 
