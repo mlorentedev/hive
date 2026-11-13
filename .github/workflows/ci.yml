@@ -128,8 +128,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # The shared composite (ci-workflows CI-010) builds with buildx and a gha
+      # layer cache scoped to this image, so the dependency layers come from cache
+      # when only the source changed. It writes the cache on every run, pull
+      # requests included: the image is small, and hive's other Actions caches
+      # held under 1 GB of the 10 GB budget when this was adopted.
       - name: Build Docker image
-        run: docker build -t hive-vault:ci .
+        uses: mlorentedev/ci-workflows/.github/actions/docker-build@c05dd6f3fd1691b3b2ee4e0f78305f0cf150e402 # v0.7.0
+        with:
+          image: hive-vault
+          tags: hive-vault:ci
+          load: "true"
 
       - name: Smoke test
         run: |
