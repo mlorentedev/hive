@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.1](https://github.com/mlorentedev/hive/compare/v4.6.0...v4.6.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **worker:** read a 402 as a pool refusal, and restate the no-cap rationale ([#576](https://github.com/mlorentedev/hive/issues/576)) ([90ae4db](https://github.com/mlorentedev/hive/commit/90ae4db4a4bafe5526739e43f2843425ea85d16b))
+
 ## [4.6.0](https://github.com/mlorentedev/hive/compare/v4.5.0...v4.6.0) (2026-11-03)
 
 
