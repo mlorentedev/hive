@@ -12,9 +12,11 @@ on:
 concurrency:
   # The event name is part of the key: a PR comment is an issue_comment whose
   # issue.number is the PR number, and without it a comment cancels the review.
-  # Only a comment the shared job runs (a slash command from an association it
-  # trusts) shares the /review group, so a newer /review supersedes an older one;
-  # any other comment gets its own group and cancels nothing (dotfiles #2855).
+  # Only a /review command (the word alone, or followed by a space) from an
+  # association the shared job trusts shares the comment group, so a newer /review
+  # supersedes an older one. Any other comment, including /improve, /reviewed or a
+  # line that starts with a path, gets its own group and cancels nothing
+  # (dotfiles #2855, #91).
   # The association list must equal the shared job's.
   # A bot's push gets its own group too: the shared job ignores bot commits, so a
   # bot run that cancelled a human run would leave the PR with no review.
@@ -22,7 +24,8 @@ concurrency:
     ${{ format('{0}-{1}-{2}{3}{4}', github.workflow,
       github.event.pull_request.number || github.event.issue.number, github.event_name,
       (github.event_name == 'issue_comment'
-        && !(startsWith(github.event.comment.body, '/')
+        && !((github.event.comment.body == '/review'
+             || startsWith(github.event.comment.body, '/review '))
           && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)))
       && format('-{0}', github.event.comment.id) || '',
       (github.event_name == 'pull_request' && endsWith(github.actor, '[bot]'))
@@ -37,7 +40,7 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
-    uses: mlorentedev/ci-workflows/.github/workflows/pr-agent.yml@2355330358344bb08c0b7a305be4ed6488f23d0c # v0.6.0
+    uses: mlorentedev/ci-workflows/.github/workflows/pr-agent.yml@c05dd6f3fd1691b3b2ee4e0f78305f0cf150e402 # v0.7.0
     # dotf_version and the model chain take the tag's defaults: the dotf release it
     # was tested with, and the chain read from the pool.
     with:
