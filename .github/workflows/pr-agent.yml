@@ -12,11 +12,13 @@ on:
 concurrency:
   # The event name is part of the key: a PR comment is an issue_comment whose
   # issue.number is the PR number, and without it a comment cancels the review.
-  # Only a /review command (the word alone, or followed by a space) from an
-  # association the shared job trusts shares the comment group, so a newer /review
-  # supersedes an older one. Any other comment, including /improve, /reviewed or a
-  # line that starts with a path, gets its own group and cancels nothing
-  # (dotfiles #2855, #91).
+  # Only a comment PR-Agent runs as a review, from an association the shared job
+  # trusts, shares the comment group, so a newer review supersedes an older one.
+  # That is a first word of /review, /review_pr, /auto_review or /answer, ended by
+  # a space, a tab, a newline, a carriage return or the end of the body; the shared
+  # job's own check uses the same four. Any other comment, including /improve,
+  # /reviewed or a line that starts with a path, gets its own group and cancels
+  # nothing (dotfiles #2855, #91, #113).
   # The association list must equal the shared job's.
   # A bot's push gets its own group too: the shared job ignores bot commits, so a
   # bot run that cancelled a human run would leave the PR with no review.
@@ -24,8 +26,22 @@ concurrency:
     ${{ format('{0}-{1}-{2}{3}{4}', github.workflow,
       github.event.pull_request.number || github.event.issue.number, github.event_name,
       (github.event_name == 'issue_comment'
-        && !((github.event.comment.body == '/review'
-             || startsWith(github.event.comment.body, '/review '))
+        && !((startsWith(format('{0} ', github.event.comment.body), '/review ')
+             || startsWith(github.event.comment.body, format('/review{0}', fromJSON('"\t"')))
+             || startsWith(github.event.comment.body, format('/review{0}', fromJSON('"\n"')))
+             || startsWith(github.event.comment.body, format('/review{0}', fromJSON('"\r"')))
+             || startsWith(format('{0} ', github.event.comment.body), '/review_pr ')
+             || startsWith(github.event.comment.body, format('/review_pr{0}', fromJSON('"\t"')))
+             || startsWith(github.event.comment.body, format('/review_pr{0}', fromJSON('"\n"')))
+             || startsWith(github.event.comment.body, format('/review_pr{0}', fromJSON('"\r"')))
+             || startsWith(format('{0} ', github.event.comment.body), '/auto_review ')
+             || startsWith(github.event.comment.body, format('/auto_review{0}', fromJSON('"\t"')))
+             || startsWith(github.event.comment.body, format('/auto_review{0}', fromJSON('"\n"')))
+             || startsWith(github.event.comment.body, format('/auto_review{0}', fromJSON('"\r"')))
+             || startsWith(format('{0} ', github.event.comment.body), '/answer ')
+             || startsWith(github.event.comment.body, format('/answer{0}', fromJSON('"\t"')))
+             || startsWith(github.event.comment.body, format('/answer{0}', fromJSON('"\n"')))
+             || startsWith(github.event.comment.body, format('/answer{0}', fromJSON('"\r"'))))
           && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)))
       && format('-{0}', github.event.comment.id) || '',
       (github.event_name == 'pull_request' && endsWith(github.actor, '[bot]'))
@@ -40,7 +56,7 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
-    uses: mlorentedev/ci-workflows/.github/workflows/pr-agent.yml@c05dd6f3fd1691b3b2ee4e0f78305f0cf150e402 # v0.7.0
+    uses: mlorentedev/ci-workflows/.github/workflows/pr-agent.yml@9b34f5b2815a3090d77d7589ef8bcc5087045544 # v0.8.0
     # dotf_version and the model chain take the tag's defaults: the dotf release it
     # was tested with, and the chain read from the pool.
     with:
